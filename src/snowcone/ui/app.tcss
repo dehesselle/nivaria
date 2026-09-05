@@ -98,3 +98,19 @@ ConnectScreen {
 #recent-empty {
     margin-top: 1;
 }
+
+/* ---- picker modal ----------------------------------------------------- */
+
+PickerScreen > #dialog {
+    width: 70;
+    max-height: 80%;
+}
+
+#picker-query {
+    margin: 1 0;
+}
+
+#picker-results {
+    height: auto;
+    max-height: 20;
+}

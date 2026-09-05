@@ -12,7 +12,7 @@ from snowcone.gateway.pool import ConnectionPool, Connector
 from snowcone.service.fetch import FetchService
 from snowcone.settings import PAGE_SIZE, POOL_SIZE, config
 from snowcone.ui.screens.connect import ConnectScreen
-from snowcone.ui.screens.main import MainScreen
+from snowcone.ui.screens.main import CacheUpdated, MainScreen
 
 
 class SnowconeApp(App[None]):
@@ -58,12 +58,35 @@ class SnowconeApp(App[None]):
             self.repo,
             workers=pool.size,
             page_size=config.get(PAGE_SIZE),
+            notify=self._cache_updated,
+            on_error=self._fetch_failed,
         )
         self.fetch.start()
         # push, not switch: push_screen_wait has already popped the connect
         # screen, so the stack top here is the default screen and switching
         # would try to pop a result callback it never had.
-        await self.push_screen(MainScreen())
+        await self.push_screen(MainScreen(self.repo, self.fetch))
+
+    def _cache_updated(self, scope, complete: bool) -> None:
+        """Called on a fetch worker thread; hop to the event loop.
+
+        The message goes to the screen, which routes it to the one widget
+        showing that scope. Nothing here touches a widget directly.
+        """
+        self.call_from_thread(self._post_cache_updated, scope, complete)
+
+    def _post_cache_updated(self, scope, complete: bool) -> None:
+        screen = self.screen
+        if isinstance(screen, MainScreen):
+            screen.post_message(CacheUpdated(scope, complete))
+
+    def _fetch_failed(self, scope, message: str) -> None:
+        self.call_from_thread(
+            self.notify,
+            f"Could not load {scope}: {message}",
+            severity="error",
+            timeout=8,
+        )
 
     def on_unmount(self) -> None:
         if self.fetch is not None:

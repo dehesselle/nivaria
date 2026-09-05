@@ -72,7 +72,7 @@ async def test_the_cache_is_prepared_before_anything_is_fetched(
 async def test_the_main_screen_has_its_three_panes() -> None:
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.app.push_screen(MainScreen())
+        await pilot.app.push_screen(MainScreen(app.repo))
         await pilot.pause()
         screen = pilot.app.screen
         assert screen.query_one("#left")
@@ -86,7 +86,7 @@ async def test_the_command_palette_binding_is_hidden_from_the_footer() -> None:
     indicators, so Textual's ctrl+p key must not claim it."""
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.app.push_screen(MainScreen())
+        await pilot.app.push_screen(MainScreen(app.repo))
         await pilot.pause()
         footer = pilot.app.screen.query_one(Footer)
         assert footer.show_command_palette is False
