@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 from textual.app import App
-from textual.widgets import Input
+from textual.widgets import Input, OptionList
 
 import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
-from snowcone.models import ObjectKind, ObjectRef, objects_scope
+from snowcone.models import ObjectKind, ObjectRef, columns_scope, objects_scope
 from snowcone.ui.screens.search import SearchScreen
 
 
@@ -62,6 +62,32 @@ def put(repo: Repository, kind: ObjectKind, schema: str, *names: str, database="
     )
 
 
+def put_columns(
+    repo: Repository, schema: str, table: str, *names: str, database="MYDB"
+) -> None:
+    load(
+        repo,
+        columns_scope(database, schema, table),
+        [
+            {
+                "TABLE_CATALOG": database,
+                "TABLE_SCHEMA": schema,
+                "TABLE_NAME": table,
+                "COLUMN_NAME": name,
+                "ORDINAL_POSITION": index + 1,
+                "DATA_TYPE": "TEXT",
+                "IS_NULLABLE": "YES",
+                "COLUMN_DEFAULT": None,
+                "CHARACTER_MAXIMUM_LENGTH": None,
+                "NUMERIC_PRECISION": None,
+                "NUMERIC_SCALE": None,
+                "COMMENT": "",
+            }
+            for index, name in enumerate(names)
+        ],
+    )
+
+
 async def type_query(pilot, app: Harness, text: str) -> None:
     app.screen.query_one("#search-query", Input).value = text
     for _ in range(4):
@@ -72,6 +98,11 @@ async def type_query(pilot, app: Harness, text: str) -> None:
 
 def shown(app: Harness) -> list[str]:
     return [f"{ref.schema}.{ref.name}" for ref in app.screen._shown]
+
+
+def option_text(app: Harness, index: int) -> str:
+    results = app.screen.query_one("#search-results", OptionList)
+    return results.get_option_at_index(index).prompt.plain
 
 
 # ----------------------------------------------------------------- corpus
@@ -104,6 +135,48 @@ def test_the_corpus_is_scoped_to_one_database(repo) -> None:
 
 def test_an_unknown_database_has_an_empty_corpus(repo) -> None:
     assert repo.search_corpus("NOPE") == []
+
+
+# ------------------------------------------------------------ column corpus
+
+
+def test_the_column_corpus_pairs_a_column_with_its_owning_object(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    put_columns(repo, "SALES", "ORDERS", "ID", "CUSTOMER_ID")
+    corpus = repo.search_column_corpus("MYDB")
+    assert sorted(column for _, column in corpus) == ["CUSTOMER_ID", "ID"]
+    ((ref, _),) = [pair for pair in corpus if pair[1] == "ID"]
+    assert ref == ObjectRef(
+        kind=ObjectKind.TABLE, database="MYDB", schema="SALES", name="ORDERS"
+    )
+
+
+def test_a_view_can_own_columns_too(repo) -> None:
+    put(repo, ObjectKind.VIEW, "SALES", "ORDERS_V")
+    put_columns(repo, "SALES", "ORDERS_V", "ID")
+    ((ref, column),) = repo.search_column_corpus("MYDB")
+    assert ref.kind is ObjectKind.VIEW
+    assert column == "ID"
+
+
+def test_a_column_with_no_known_owning_object_is_excluded(repo) -> None:
+    """A stale leftover column row from a since-dropped table must not
+    surface, so the corpus is joined back to search_object rather than read
+    off information_schema_columns alone."""
+    put_columns(repo, "SALES", "GHOST", "ID")
+    assert repo.search_column_corpus("MYDB") == []
+
+
+def test_the_column_corpus_is_scoped_to_one_database(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    put_columns(repo, "SALES", "ORDERS", "ID")
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS", database="OTHERDB")
+    put_columns(repo, "SALES", "ORDERS", "OTHER_ID", database="OTHERDB")
+    assert [column for _, column in repo.search_column_corpus("MYDB")] == ["ID"]
+
+
+def test_an_unknown_database_has_an_empty_column_corpus(repo) -> None:
+    assert repo.search_column_corpus("NOPE") == []
 
 
 # ---------------------------------------------------------------- opening
@@ -177,6 +250,51 @@ async def test_the_schema_prefix_does_not_outrank_the_object_name(repo) -> None:
         await pilot.pause()
         await type_query(pilot, app, "stgord")
         assert shown(app)[0] == "STAGING.STG_CUSTOMER_ORDERS"
+
+
+async def test_a_column_name_surfaces_its_owning_table(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "custid")
+        assert shown(app) == ["SALES.ORDERS"]
+
+
+async def test_a_column_hit_is_annotated_with_the_matched_column_name(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "custid")
+        assert "CUSTOMER_ID" in option_text(app, 0)
+
+
+async def test_a_hit_on_the_objects_own_name_is_not_annotated(repo) -> None:
+    """The annotation exists to explain a surprising hit; a table found by
+    its own name needs no such explanation."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders")
+        assert "CUSTOMER_ID" not in option_text(app, 0)
+
+
+async def test_a_name_match_outranks_a_column_match_when_both_hit(repo) -> None:
+    """An object matched by its own name is the more direct hit, so it must
+    not be displaced by a same-object column match on the same query."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORD")
+    put_columns(repo, "SALES", "ORD", "ORD_STATUS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "ord")
+        assert shown(app) == ["SALES.ORD"]
+        assert "ORD_STATUS" not in option_text(app, 0)
 
 
 async def test_searching_without_a_database_is_empty_not_an_error(repo) -> None:

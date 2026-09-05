@@ -221,6 +221,61 @@ class FakeGateway:
         ]
         return queries.map_show_columns(raw)
 
+    def _raw_columns(
+        self, database: str, schema: str, table: str
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "table_name": table,
+                "schema_name": schema,
+                "database_name": database,
+                "column_name": name,
+                "data_type": '{"type":"TEXT","length":16777216,"nullable":true}',
+                "null?": "Y",
+                "default": None,
+                "kind": "COLUMN",
+                "expression": None,
+                "comment": "",
+                "autoincrement": "",
+            }
+            for name in self.columns.get((database, schema, table), [])
+        ]
+
+    def show_columns_in_database(
+        self,
+        database: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        """Every column of every table in `database`, raw-shaped like the fake
+        `show_columns` above, so `map_show_columns` is exercised for real."""
+        self.calls.append(("show_columns_in_database", (database, after, limit)))
+        raw: list[dict[str, Any]] = []
+        for db, schema, table in sorted(self.columns):
+            if db != database:
+                continue
+            raw.extend(self._raw_columns(db, schema, table))
+        return queries.map_show_columns(raw[:limit])
+
+    def show_columns_in_schema(
+        self,
+        database: str,
+        schema: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        self.calls.append(("show_columns_in_schema", (database, schema, after, limit)))
+        raw: list[dict[str, Any]] = []
+        for db, sch, table in sorted(self.columns):
+            if db != database or sch != schema:
+                continue
+            raw.extend(self._raw_columns(db, sch, table))
+        return queries.map_show_columns(raw[:limit])
+
     def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]:
         self.calls.append(("show_warehouses", ()))
         return [{"name": name, "comment": ""} for name in sorted(self.warehouses)]

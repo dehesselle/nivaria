@@ -256,6 +256,9 @@ def spec_for(scope: Scope) -> TableSpec:
             # A prime is a fetch strategy, not a set of rows: it fills other
             # scopes' tables and owns none of its own.
             raise ValueError(f"{scope.kind} has no mirror table")
+        case ScopeKind.COLUMNS_PRIME:
+            # Same as DATABASE_PRIME: fills other tables' COLUMNS scopes.
+            raise ValueError(f"{scope.kind} has no mirror table")
 
 
 @dataclass(frozen=True)
@@ -469,6 +472,49 @@ class Repository:
                         schema=row["schema_name"],
                         name=row["name"],
                     ),
+                )
+            )
+        return corpus
+
+    def search_column_corpus(self, database: str) -> list[tuple[ObjectRef, str]]:
+        """Every cached column in a database, paired with its owning object.
+
+        Joined back to `search_object` rather than read off
+        `information_schema_columns` alone, so a column only surfaces if its
+        owning table/view is itself still known there -- a stale leftover
+        column row from a since-dropped table cannot spuriously appear. Only
+        TABLE/VIEW ever have columns, but the join excludes other kinds
+        regardless of whether that ever actually matters.
+        """
+        with self._db.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT o.schema_name, o.name, o.kind, c.COLUMN_NAME
+                FROM information_schema_columns c
+                JOIN search_object o
+                  ON o.database_name = c.TABLE_CATALOG
+                 AND o.schema_name  = c.TABLE_SCHEMA
+                 AND o.name         = c.TABLE_NAME
+                WHERE c.TABLE_CATALOG = ? AND o.kind IN ('TABLE', 'VIEW')
+                ORDER BY o.schema_name, o.name, c.ORDINAL_POSITION
+                """,
+                (database,),
+            ).fetchall()
+        corpus: list[tuple[ObjectRef, str]] = []
+        for row in rows:
+            try:
+                kind = ObjectKind(row["kind"])
+            except ValueError:
+                continue
+            corpus.append(
+                (
+                    ObjectRef(
+                        kind=kind,
+                        database=database,
+                        schema=row["schema_name"],
+                        name=row["name"],
+                    ),
+                    row["COLUMN_NAME"],
                 )
             )
         return corpus

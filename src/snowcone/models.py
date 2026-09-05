@@ -46,6 +46,10 @@ class ScopeKind(StrEnum):
     #: scope in one database from a single statement. It exists as a scope so
     #: the scheduler can deduplicate and cancel it like any other work.
     DATABASE_PRIME = "prime"
+    #: Not a set of rows of its own, same as DATABASE_PRIME: a request to fill
+    #: many tables' COLUMNS scopes from one statement, either for a whole
+    #: database (schema is None) or for one schema's fallback chunk.
+    COLUMNS_PRIME = "columns_prime"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
 
@@ -94,6 +98,10 @@ class Scope:
             case ScopeKind.DATABASE_PRIME:
                 assert self.object_kind is not None
                 return f"{self.object_kind.plural}@{self.database}"
+            case ScopeKind.COLUMNS_PRIME:
+                if self.schema is None:
+                    return f"columns_prime:{self.database}"
+                return f"columns_prime:{self.database}.{self.schema}"
             case ScopeKind.WAREHOUSES:
                 return "warehouses"
             case ScopeKind.ROLES:
@@ -121,6 +129,10 @@ def columns_scope(database: str, schema: str, table: str) -> Scope:
 
 def prime_scope(kind: ObjectKind, database: str) -> Scope:
     return Scope(ScopeKind.DATABASE_PRIME, database=database, object_kind=kind)
+
+
+def columns_prime_scope(database: str, schema: str | None = None) -> Scope:
+    return Scope(ScopeKind.COLUMNS_PRIME, database=database, schema=schema)
 
 
 def warehouses_scope() -> Scope:

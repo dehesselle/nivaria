@@ -20,8 +20,10 @@ from textual.screen import Screen
 from snowcone.cache.repository import Repository
 from snowcone.gateway.pool import ConnectionPool
 from snowcone.models import (
+    ObjectKind,
     ObjectRef,
     Scope,
+    columns_prime_scope,
     databases_scope,
     prime_scope,
     roles_scope,
@@ -406,6 +408,27 @@ class MainScreen(Screen):
         )
         if chosen is not None and chosen != current:
             self._switch_role(chosen)
+
+    async def prewarm_cache(self) -> None:
+        """Warm columns for the current database from the Connect menu.
+
+        Fires the table/view object primes alongside the columns prime,
+        rather than the columns prime alone: the columns-prime fallback tiers
+        need schema and table/view names to fan out into, and there is no
+        automatic trigger for this yet, so a database nobody has browsed this
+        session may have none of that cached. Background priority throughout,
+        the same tier as the staleness sweep: this can run for a while with
+        nobody watching, so it must never jump ahead of interactive/visible
+        work or trigger an unattended reconnect.
+        """
+        if self.pool is None or self.database is None:
+            self.notify("Select a database first", severity="warning")
+            return
+        database = self.database
+        self._request(prime_scope(ObjectKind.TABLE, database), Priority.BACKGROUND)
+        self._request(prime_scope(ObjectKind.VIEW, database), Priority.BACKGROUND)
+        self._request(columns_prime_scope(database), Priority.BACKGROUND)
+        self.notify(f"Pre-warming cache for {database}...", timeout=3)
 
     @work(thread=True)
     def _switch_warehouse(self, warehouse: str) -> None:

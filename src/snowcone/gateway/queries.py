@@ -136,6 +136,34 @@ def show_columns(database: str, schema: str, table: str) -> str:
     return f"SHOW COLUMNS IN TABLE {target}"
 
 
+def show_columns_in_database(
+    database: str, *, after: str | None = None, limit: int = 1000
+) -> str:
+    """Every column of every table/view in a database, in one statement.
+
+    Mirrors `show_objects_in_database`'s rationale: SHOW is metadata-layer, so
+    this needs no warehouse either, and round trips dominate over payload, so
+    one call beats one per table whenever the result fits under Snowflake's
+    10k SHOW cap. Unlike `show_objects_in_database`, this is unverified against
+    a live account -- SHOW COLUMNS IN DATABASE was not available to check
+    against the reference account this codebase was otherwise verified on.
+    """
+    scope = quote_identifier(database)
+    return f"SHOW COLUMNS IN DATABASE {scope}{_paging(after, limit)}"
+
+
+def show_columns_in_schema(
+    database: str, schema: str, *, after: str | None = None, limit: int = 1000
+) -> str:
+    """Every column of every table/view in one schema, in one statement.
+
+    The fallback when `show_columns_in_database` is truncated -- see there.
+    Also unverified against a live account, same caveat.
+    """
+    target = f"{quote_identifier(database)}.{quote_identifier(schema)}"
+    return f"SHOW COLUMNS IN SCHEMA {target}{_paging(after, limit)}"
+
+
 def _data_type_fields(raw: object) -> dict[str, object]:
     """Unpack SHOW COLUMNS' data_type, which is a JSON string.
 

@@ -21,4 +21,5 @@ def connect_menu_items(app: SnowconeApp, screen: MainScreen) -> list[MenuItem]:
         MenuItem("open", "Open...", app.open_connect, mnemonic="o"),
         MenuItem("warehouse", "Warehouse ...", screen.pick_warehouse, mnemonic="w"),
         MenuItem("role", "Role ...", screen.pick_role, mnemonic="r"),
+        MenuItem("prewarm", "Pre-warm cache", screen.prewarm_cache),
     ]

@@ -138,6 +138,11 @@ def fetch_page(
             raise ValueError(
                 "a prime scope is fetched by fetch_database, not fetch_page"
             )
+        case ScopeKind.COLUMNS_PRIME:
+            raise ValueError(
+                "a columns-prime scope is fetched by fetch_columns_database/"
+                "fetch_columns_schema, not fetch_page"
+            )
 
     if len(rows) < limit or not rows:
         return rows, None
@@ -177,6 +182,50 @@ def fetch_database(
     rows = gateway.show_objects_in_database(
         scope.object_kind,
         scope.database,
+        after=None,
+        limit=cap,
+        allow_reconnect=allow_reconnect,
+    )
+    return rows, len(rows) < cap
+
+
+def fetch_columns_database(
+    gateway: SnowflakeGateway,
+    scope: Scope,
+    cap: int = MAX_PAGE_SIZE,
+    *,
+    allow_reconnect: bool = True,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Every column of every table/view in a database. Returns (rows, usable).
+
+    Same shape and same truncation caveat as `fetch_database`: a single
+    unpaged statement, `usable=False` when it came back at Snowflake's 10k
+    SHOW cap, and the caller falls back to fetching schema by schema.
+    """
+    assert scope.database is not None
+    rows = gateway.show_columns_in_database(
+        scope.database, after=None, limit=cap, allow_reconnect=allow_reconnect
+    )
+    return rows, len(rows) < cap
+
+
+def fetch_columns_schema(
+    gateway: SnowflakeGateway,
+    scope: Scope,
+    cap: int = MAX_PAGE_SIZE,
+    *,
+    allow_reconnect: bool = True,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Every column of every table/view in one schema. Returns (rows, usable).
+
+    The fallback chunk when `fetch_columns_database` was truncated -- see
+    there. `usable=False` here falls back further, to one job per table.
+    """
+    assert scope.database is not None
+    assert scope.schema is not None
+    rows = gateway.show_columns_in_schema(
+        scope.database,
+        scope.schema,
         after=None,
         limit=cap,
         allow_reconnect=allow_reconnect,

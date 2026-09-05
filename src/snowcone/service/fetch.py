@@ -24,11 +24,21 @@ from typing import Any
 
 from snowcone.cache.repository import Repository
 from snowcone.gateway.gateway import SnowflakeGateway
-from snowcone.models import ObjectKind, Scope, ScopeKind, objects_scope, schemas_scope
+from snowcone.models import (
+    ObjectKind,
+    Scope,
+    ScopeKind,
+    columns_prime_scope,
+    columns_scope,
+    objects_scope,
+    schemas_scope,
+)
 from snowcone.service.jobs import (
     SHUTDOWN,
     FetchJob,
     Priority,
+    fetch_columns_database,
+    fetch_columns_schema,
     fetch_database,
     fetch_page,
 )
@@ -170,6 +180,9 @@ class FetchService:
         if job.scope.kind is ScopeKind.DATABASE_PRIME:
             self._execute_prime(job)
             return
+        if job.scope.kind is ScopeKind.COLUMNS_PRIME:
+            self._execute_columns_prime(job)
+            return
         scope = job.scope
         generation = job.generation
         # Never let an unattended sweep open a new authenticated session --
@@ -268,6 +281,105 @@ class FetchService:
         """Queue one job per known schema, the correct-but-slower path."""
         for schema in self._repo.schemas(schemas_scope(database)).rows:
             self.request(objects_scope(kind, database, schema.name), priority)
+
+    def _execute_columns_prime(self, job: FetchJob) -> None:
+        """Fill many tables' COLUMNS scopes from one statement.
+
+        `schema is None` tries the whole database in one call; `schema` set is
+        the fallback chunk for one schema after the whole-database call came
+        back truncated. Either way, a usable result is grouped by table and
+        written with `replace_grouped` -- unlike `_execute_prime`, there is no
+        pre-seeding of empty scopes needed, since a real table always has at
+        least one column.
+        """
+        scope = job.scope
+        assert scope.database is not None
+        database = scope.database
+        allow_reconnect = job.priority is not Priority.BACKGROUND
+        try:
+            if scope.schema is None:
+                rows, usable = fetch_columns_database(
+                    self._gateway, scope, allow_reconnect=allow_reconnect
+                )
+            else:
+                rows, usable = fetch_columns_schema(
+                    self._gateway, scope, allow_reconnect=allow_reconnect
+                )
+        # See _execute: a worker thread boundary.
+        except Exception as error:  # noqa: BLE001
+            message = str(error) or error.__class__.__name__
+            self._report(scope, message)
+            self._announce(scope, complete=True)
+            return
+
+        if not usable:
+            if scope.schema is None:
+                self._fan_out_columns_by_schema(
+                    database, job.priority, allow_reconnect=allow_reconnect
+                )
+            else:
+                self._fan_out_columns_by_table(database, scope.schema, job.priority)
+            self._announce(scope, complete=True)
+            return
+
+        grouped: dict[Scope, list[dict[str, Any]]] = {}
+        for row in rows:
+            table_schema = row.get("TABLE_SCHEMA")
+            table_name = row.get("TABLE_NAME")
+            if not table_schema or not table_name:
+                continue
+            grouped.setdefault(
+                columns_scope(database, str(table_schema), str(table_name)), []
+            ).append(row)
+
+        self._repo.replace_grouped(grouped)
+        for filled in grouped:
+            self._announce(filled, complete=True)
+        self._announce(scope, complete=True)
+
+    def _fan_out_columns_by_schema(
+        self, database: str, priority: Priority, *, allow_reconnect: bool
+    ) -> None:
+        """Queue one columns-prime job per schema, the fallback chunk size.
+
+        Pre-warming may be the first request ever made against a database
+        nobody has browsed yet, so the SCHEMAS scope this would normally read
+        can still be empty -- there is no dependency graph to lean on here
+        (see DESIGN.md), so a cold cache is repaired by asking Snowflake for
+        the schema names directly rather than waiting on another scope to
+        finish first. The SCHEMAS scope is also requested so the tree
+        benefits from this too, not just the fallback fan-out.
+        """
+        cached = self._repo.schemas(schemas_scope(database)).rows
+        if cached:
+            names = [schema.name for schema in cached]
+        else:
+            try:
+                rows = self._gateway.show_schemas(
+                    database, allow_reconnect=allow_reconnect
+                )
+            except Exception:  # noqa: BLE001 -- see _execute
+                rows = []
+            names = [str(row["name"]) for row in rows if row.get("name")]
+            self.request(schemas_scope(database), priority)
+        for name in names:
+            self.request(columns_prime_scope(database, name), priority)
+
+    def _fan_out_columns_by_table(
+        self, database: str, schema: str, priority: Priority
+    ) -> None:
+        """Queue one ordinary per-table COLUMNS job, the last-resort chunk.
+
+        Only reached when a single schema's columns still overflow the SHOW
+        cap by itself. Relies on that schema's TABLE/VIEW object lists
+        already being cached -- an accepted gap for this rare, deep fallback
+        rather than another live round trip: the menu action that starts a
+        columns prime always also starts a table/view prime for the whole
+        database alongside it.
+        """
+        for kind in (ObjectKind.TABLE, ObjectKind.VIEW):
+            for obj in self._repo.objects(objects_scope(kind, database, schema)).rows:
+                self.request(columns_scope(database, schema, obj.name), priority)
 
     def _announce(self, scope: Scope, *, complete: bool) -> None:
         if self._notify is None:
