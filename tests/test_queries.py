@@ -59,30 +59,3 @@ def test_page_limits_are_clamped_to_what_snowflake_accepts(limit, expected) -> N
     """SHOW caps its result at 10k rows regardless of LIMIT; asking for more
     would quietly truncate a page and make the keyset cursor skip rows."""
     assert f"LIMIT {expected}" in queries.show_databases(limit=limit)
-
-
-def test_information_schema_columns_binds_its_predicates() -> None:
-    """Schema and table are user data reaching a SELECT, so they are bound,
-    not interpolated -- only the database, which cannot be bound, is quoted."""
-    statement, params = queries.information_schema_columns("MYDB", "PUBLIC", "ORDERS")
-    assert '"MYDB".INFORMATION_SCHEMA.COLUMNS' in statement
-    assert "TABLE_SCHEMA = %s" in statement
-    assert "TABLE_NAME = %s" in statement
-    assert params == ("PUBLIC", "ORDERS")
-
-
-def test_information_schema_columns_can_cover_a_whole_schema() -> None:
-    statement, params = queries.information_schema_columns("MYDB", "PUBLIC")
-    assert "TABLE_NAME = %s" not in statement
-    assert params == ("PUBLIC",)
-
-
-def test_information_schema_columns_is_ordered_for_stable_paging() -> None:
-    statement, _ = queries.information_schema_columns("MYDB", "PUBLIC")
-    assert statement.endswith("ORDER BY TABLE_NAME, ORDINAL_POSITION")
-
-
-def test_every_mirrored_column_is_selected() -> None:
-    statement, _ = queries.information_schema_columns("MYDB", "PUBLIC")
-    for field in queries.COLUMN_FIELDS:
-        assert field in statement

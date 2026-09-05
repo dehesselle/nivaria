@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,7 +46,17 @@ class TableSpec:
 
 _DATABASES = TableSpec(
     name="show_databases",
-    columns=("name", "created_on", "kind", "owner", "comment", "retention_time"),
+    columns=(
+        "name",
+        "created_on",
+        "kind",
+        "owner",
+        "owner_role_type",
+        "comment",
+        "options",
+        "origin",
+        "retention_time",
+    ),
     key=("name",),
     order_by=("name",),
 )
@@ -58,7 +68,9 @@ _SCHEMAS = TableSpec(
         "name",
         "created_on",
         "owner",
+        "owner_role_type",
         "comment",
+        "options",
         "retention_time",
     ),
     key=("database_name", "name"),
@@ -79,7 +91,16 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
             "rows",
             "bytes",
             "owner",
+            "owner_role_type",
             "retention_time",
+            "automatic_clustering",
+            "change_tracking",
+            "search_optimization",
+            "is_external",
+            "is_event",
+            "is_hybrid",
+            "is_iceberg",
+            "is_dynamic",
         ),
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
@@ -93,8 +114,11 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
             "created_on",
             "comment",
             "owner",
+            "owner_role_type",
             "text",
             "is_secure",
+            "is_materialized",
+            "change_tracking",
         ),
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
@@ -108,10 +132,15 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
             "created_on",
             "definition",
             "owner",
+            "owner_role_type",
             "notification_channel",
             "comment",
             "pattern",
             "integration",
+            "error_integration",
+            "invalid_reason",
+            "kind",
+            "is_snowflake_managed",
         ),
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
@@ -126,7 +155,14 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
             "url",
             "type",
             "owner",
+            "owner_role_type",
             "comment",
+            "region",
+            "cloud",
+            "storage_integration",
+            "endpoint",
+            "has_credentials",
+            "directory_enabled",
         ),
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
@@ -140,10 +176,16 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
             "created_on",
             "definition",
             "owner",
+            "owner_role_type",
             "comment",
             "warehouse",
             "schedule",
             "state",
+            "predecessors",
+            "condition",
+            "error_integration",
+            "last_committed_on",
+            "last_suspended_on",
         ),
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
@@ -182,6 +224,10 @@ def spec_for(scope: Scope) -> TableSpec:
             return _OBJECT_TABLES[scope.object_kind]
         case ScopeKind.COLUMNS:
             return _COLUMNS
+        case ScopeKind.DATABASE_PRIME:
+            # A prime is a fetch strategy, not a set of rows: it fills other
+            # scopes' tables and owns none of its own.
+            raise ValueError(f"{scope.kind} has no mirror table")
 
 
 @dataclass(frozen=True)
@@ -484,6 +530,25 @@ class Repository:
                 (CacheState.COMPLETE.value, now, count, scope.key),
             )
         return True
+
+    def replace_grouped(
+        self, grouped: Mapping[Scope, Sequence[dict[str, Any]]]
+    ) -> None:
+        """Run a complete pass for each scope from one already-fetched result.
+
+        Used by the database-wide prime: one SHOW returns every schema's
+        objects, so each schema's scope is begun, written and swept here
+        rather than each costing its own round trip.
+
+        Scopes mapped to an empty list still get a full pass. That is the
+        point of passing them: a schema with no tables has to read as
+        "fetched, none" rather than "never fetched", or the tree would keep
+        asking for it and the node would never settle.
+        """
+        for scope, rows in grouped.items():
+            generation = self.begin_pass(scope)
+            self.write_page(scope, generation, rows, None)
+            self.finish_pass(scope, generation)
 
     def fail_pass(self, scope: Scope, generation: int, error: str) -> bool:
         """Record a failure without sweeping.

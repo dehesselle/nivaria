@@ -69,11 +69,40 @@ def test_show_objects_sends_the_statement_the_builder_produced() -> None:
     assert params is None
 
 
-def test_information_schema_columns_passes_its_bind_parameters() -> None:
+def test_show_columns_targets_the_fully_qualified_table() -> None:
     gateway, connection, _ = make_gateway()
-    gateway.information_schema_columns("MYDB", "PUBLIC", "ORDERS")
-    _, params = connection.executed[-1]
-    assert params == ("PUBLIC", "ORDERS")
+    connection.columns = [
+        "table_name",
+        "schema_name",
+        "database_name",
+        "column_name",
+        "data_type",
+    ]
+    connection.rows = [("ORDERS", "PUBLIC", "MYDB", "ID", '{"type":"NUMBER"}')]
+    gateway.show_columns("MYDB", "PUBLIC", "ORDERS")
+    statement, params = connection.executed[-1]
+    assert statement == 'SHOW COLUMNS IN TABLE "MYDB"."PUBLIC"."ORDERS"'
+    assert params is None
+
+
+def test_show_columns_is_mapped_before_it_leaves_the_gateway() -> None:
+    """The cache only ever sees the INFORMATION_SCHEMA shape, whichever
+    statement produced the rows."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "table_name",
+        "schema_name",
+        "database_name",
+        "column_name",
+        "data_type",
+    ]
+    connection.rows = [
+        ("ORDERS", "PUBLIC", "MYDB", "ID", '{"type":"NUMBER","precision":38}')
+    ]
+    rows = gateway.show_columns("MYDB", "PUBLIC", "ORDERS")
+    assert rows[0]["COLUMN_NAME"] == "ID"
+    assert rows[0]["DATA_TYPE"] == "NUMBER"
+    assert rows[0]["ORDINAL_POSITION"] == 1
 
 
 def test_the_cursor_is_closed_even_though_the_connection_is_reused() -> None:

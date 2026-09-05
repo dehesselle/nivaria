@@ -387,3 +387,226 @@ def test_the_shutdown_sentinel_sorts_ahead_of_real_work() -> None:
 
     urgent = FetchJob(priority=Priority.INTERACTIVE, scope=databases_scope())
     assert SHUTDOWN < urgent
+
+
+# ------------------------------------------------------ database-wide prime
+
+
+def prime_gateway() -> FakeGateway:
+    return FakeGateway(
+        schemas={"MYDB": ["AAA", "BBB", "EMPTY"]},
+        objects={
+            ("MYDB", "AAA", ObjectKind.TABLE): ["A1", "A2", "A3"],
+            ("MYDB", "BBB", ObjectKind.TABLE): ["B1", "B2"],
+        },
+    )
+
+
+def load_schemas_named(repo, gateway, database: str) -> None:
+    scope = schemas_scope(database)
+    generation = repo.begin_pass(scope)
+    repo.write_page(scope, generation, gateway.show_schemas(database), None)
+    repo.finish_pass(scope, generation)
+
+
+def load_schemas(repo, gateway) -> None:
+    load_schemas_named(repo, gateway, "MYDB")
+
+
+def test_one_prime_fills_every_schemas_scope(repo) -> None:
+    """The measured win: one statement instead of a round trip per schema."""
+    from snowcone.models import prime_scope
+
+    gateway = prime_gateway()
+    load_schemas(repo, gateway)
+    service = make_service(gateway, repo)
+    scope = prime_scope(ObjectKind.TABLE, "MYDB")
+    try:
+        service.request(scope)
+        assert wait_until(
+            lambda: (
+                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", "BBB")).state
+                is CacheState.COMPLETE
+            )
+        )
+    finally:
+        service.stop()
+
+    aaa = objects_scope(ObjectKind.TABLE, "MYDB", "AAA")
+    bbb = objects_scope(ObjectKind.TABLE, "MYDB", "BBB")
+    assert [o.name for o in repo.objects(aaa).rows] == ["A1", "A2", "A3"]
+    assert [o.name for o in repo.objects(bbb).rows] == ["B1", "B2"]
+
+
+def test_a_prime_costs_one_round_trip_not_one_per_schema(repo) -> None:
+    from snowcone.models import prime_scope
+
+    gateway = prime_gateway()
+    load_schemas(repo, gateway)
+    gateway.calls.clear()
+    service = make_service(gateway, repo)
+    try:
+        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        assert wait_until(
+            lambda: (
+                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", "AAA")).state
+                is CacheState.COMPLETE
+            )
+        )
+    finally:
+        service.stop()
+    per_schema = [c for c in gateway.calls if c[0] == "show_objects"]
+    assert per_schema == []
+    assert len([c for c in gateway.calls if c[0] == "show_objects_in_database"]) == 1
+
+
+def test_a_schema_with_no_objects_still_completes_a_pass(repo) -> None:
+    """Otherwise the node would read as 'never fetched' and the tree would
+    keep asking for it, so it would never settle."""
+    from snowcone.models import prime_scope
+
+    gateway = prime_gateway()
+    load_schemas(repo, gateway)
+    service = make_service(gateway, repo)
+    empty = objects_scope(ObjectKind.TABLE, "MYDB", "EMPTY")
+    try:
+        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        assert wait_until(lambda: repo.entry(empty).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert repo.objects(empty).rows == []
+    assert repo.objects(empty).age() is not None
+
+
+def test_a_prime_announces_each_schema_it_filled(repo) -> None:
+    """The tree routes updates by scope, so a prime has to name the scopes it
+    touched rather than only itself."""
+    from snowcone.models import prime_scope
+
+    gateway = prime_gateway()
+    load_schemas(repo, gateway)
+    seen: list[str] = []
+    service = make_service(
+        gateway, repo, notify=lambda scope, complete: seen.append(scope.key)
+    )
+    try:
+        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        assert wait_until(lambda: "tables@MYDB" in seen)
+    finally:
+        service.stop()
+    assert "tables:MYDB.AAA" in seen
+    assert "tables:MYDB.BBB" in seen
+    assert "tables:MYDB.EMPTY" in seen
+
+
+def test_duplicate_names_across_schemas_are_all_kept(repo) -> None:
+    """Regression: object names repeat across schemas, so keyset paging by
+    name across a whole database silently drops every duplicate after the
+    first. The prime therefore fetches unpaged."""
+    from snowcone.models import prime_scope
+
+    schemas = [f"S{i}" for i in range(5)]
+    gateway = FakeGateway(
+        schemas={"MYDB": schemas},
+        # The same three names in every schema -- the case that lost rows.
+        objects={
+            ("MYDB", schema, ObjectKind.TABLE): ["ORDERS", "CUSTOMERS", "ITEMS"]
+            for schema in schemas
+        },
+    )
+    load_schemas_named(repo, gateway, "MYDB")
+    service = make_service(gateway, repo)
+    try:
+        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        assert wait_until(
+            lambda: all(
+                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", s)).state
+                is CacheState.COMPLETE
+                for s in schemas
+            )
+        )
+    finally:
+        service.stop()
+    total = sum(
+        repo.child_count(objects_scope(ObjectKind.TABLE, "MYDB", s)) for s in schemas
+    )
+    assert total == 15
+
+
+def test_a_result_at_the_show_cap_falls_back_to_per_schema(repo) -> None:
+    """At the cap the result is truncated and cannot be safely resumed, so
+    correctness wins over the round-trip saving."""
+    from snowcone.models import prime_scope
+
+    schemas = ["AAA", "BBB"]
+    gateway = FakeGateway(
+        schemas={"MYDB": schemas},
+        objects={
+            ("MYDB", "AAA", ObjectKind.TABLE): [f"T{i:05d}" for i in range(6000)],
+            ("MYDB", "BBB", ObjectKind.TABLE): [f"U{i:05d}" for i in range(6000)],
+        },
+    )
+    load_schemas_named(repo, gateway, "MYDB")
+    service = make_service(gateway, repo, workers=2)
+    try:
+        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        assert wait_until(
+            lambda: all(
+                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", s)).state
+                is CacheState.COMPLETE
+                for s in schemas
+            ),
+            timeout=10,
+        )
+    finally:
+        service.stop()
+    assert repo.child_count(objects_scope(ObjectKind.TABLE, "MYDB", "AAA")) == 6000
+    assert repo.child_count(objects_scope(ObjectKind.TABLE, "MYDB", "BBB")) == 6000
+    assert any(call[0] == "show_objects" for call in gateway.calls)
+
+
+def test_a_prime_scope_has_no_mirror_table_of_its_own(repo) -> None:
+    """It is a fetch strategy, not a set of rows."""
+    import pytest as _pytest
+
+    from snowcone.cache.repository import spec_for
+    from snowcone.models import prime_scope
+
+    with _pytest.raises(ValueError):
+        spec_for(prime_scope(ObjectKind.TABLE, "MYDB"))
+
+
+def test_a_failing_prime_is_reported(repo) -> None:
+    from snowcone.models import prime_scope
+
+    class Boom(FakeGateway):
+        def show_objects_in_database(self, *args, **kwargs):
+            raise RuntimeError("no access")
+
+    errors: list[str] = []
+    service = make_service(
+        Boom(), repo, on_error=lambda scope, message: errors.append(message)
+    )
+    try:
+        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        assert wait_until(lambda: bool(errors))
+    finally:
+        service.stop()
+    assert errors == ["no access"]
+
+
+def test_columns_are_fetched_without_a_warehouse(repo) -> None:
+    """SHOW COLUMNS, not INFORMATION_SCHEMA: the verified account has no
+    warehouse, and a SELECT would fail there."""
+    from snowcone.models import columns_scope
+
+    gateway = FakeGateway(columns={("MYDB", "PUBLIC", "ORDERS"): ["ID", "TOTAL"]})
+    scope = columns_scope("MYDB", "PUBLIC", "ORDERS")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [c.column_name for c in repo.columns(scope).rows] == ["ID", "TOTAL"]
+    assert [c[0] for c in gateway.calls] == ["show_columns"]

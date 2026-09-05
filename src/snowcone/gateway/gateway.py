@@ -40,9 +40,16 @@ class SnowflakeGateway(Protocol):
         limit: int = 1000,
     ) -> list[Row]: ...
 
-    def information_schema_columns(
-        self, database: str, schema: str, table: str | None = None
+    def show_objects_in_database(
+        self,
+        kind: ObjectKind,
+        database: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
     ) -> list[Row]: ...
+
+    def show_columns(self, database: str, schema: str, table: str) -> list[Row]: ...
 
 
 class PoolGateway:
@@ -95,8 +102,20 @@ class PoolGateway:
             queries.show_objects(kind, database, schema, after=after, limit=limit)
         )
 
-    def information_schema_columns(
-        self, database: str, schema: str, table: str | None = None
+    def show_objects_in_database(
+        self,
+        kind: ObjectKind,
+        database: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
     ) -> list[Row]:
-        statement, params = queries.information_schema_columns(database, schema, table)
-        return self._fetch(statement, params)
+        return self._fetch(
+            queries.show_objects_in_database(kind, database, after=after, limit=limit)
+        )
+
+    def show_columns(self, database: str, schema: str, table: str) -> list[Row]:
+        rows = self._fetch(queries.show_columns(database, schema, table))
+        # Mapped here rather than in the cache, so the mirror only ever sees
+        # the INFORMATION_SCHEMA shape no matter which statement produced it.
+        return queries.map_show_columns(rows)

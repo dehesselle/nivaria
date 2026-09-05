@@ -42,6 +42,10 @@ class ScopeKind(StrEnum):
     SCHEMAS = "schemas"
     OBJECTS = "objects"
     COLUMNS = "columns"
+    #: Not a set of rows of its own: a request to fill every schema's OBJECTS
+    #: scope in one database from a single statement. It exists as a scope so
+    #: the scheduler can deduplicate and cancel it like any other work.
+    DATABASE_PRIME = "prime"
 
 
 class CacheState(StrEnum):
@@ -85,6 +89,9 @@ class Scope:
                 return f"{self.object_kind.plural}:{self.database}.{self.schema}"
             case ScopeKind.COLUMNS:
                 return f"columns:{self.database}.{self.schema}.{self.table}"
+            case ScopeKind.DATABASE_PRIME:
+                assert self.object_kind is not None
+                return f"{self.object_kind.plural}@{self.database}"
 
     def __str__(self) -> str:
         return self.key
@@ -104,6 +111,10 @@ def objects_scope(kind: ObjectKind, database: str, schema: str) -> Scope:
 
 def columns_scope(database: str, schema: str, table: str) -> Scope:
     return Scope(ScopeKind.COLUMNS, database=database, schema=schema, table=table)
+
+
+def prime_scope(kind: ObjectKind, database: str) -> Scope:
+    return Scope(ScopeKind.DATABASE_PRIME, database=database, object_kind=kind)
 
 
 @dataclass(frozen=True)

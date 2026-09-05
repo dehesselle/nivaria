@@ -348,3 +348,80 @@ def test_only_the_scopes_offered_are_considered(repo) -> None:
     unwatched = schemas_scope("MYDB")
     assert repo.stale_scopes(900, [watched]) == [watched]
     assert unwatched not in repo.stale_scopes(900, [watched])
+
+
+# ------------------------------------------- schema.sql / TableSpec agreement
+
+
+def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
+    """schema.sql and the TableSpecs are two hand-written lists of the same
+    columns. A column in a spec but not the DDL fails only when that object
+    kind is first fetched, which could be days after the typo."""
+    from snowcone.cache.repository import (
+        _COLUMNS,
+        _DATABASES,
+        _OBJECT_TABLES,
+        _SCHEMAS,
+    )
+
+    specs = [_DATABASES, _SCHEMAS, _COLUMNS, *_OBJECT_TABLES.values()]
+    with repo._db.connect() as connection:
+        for spec in specs:
+            actual = {
+                row["name"].lower()
+                for row in connection.execute(f"PRAGMA table_info({spec.name})")
+            }
+            declared = {column.lower() for column in spec.columns}
+            missing = declared - actual
+            assert not missing, f"{spec.name} is missing {sorted(missing)}"
+
+
+def test_every_object_kind_has_a_mirror_table(repo) -> None:
+    from snowcone.cache.repository import _OBJECT_TABLES
+    from snowcone.models import ObjectKind
+
+    assert set(_OBJECT_TABLES) == set(ObjectKind)
+
+
+def test_a_verified_snowflake_column_survives_a_round_trip(repo) -> None:
+    """The columns below come from a real SHOW TABLES result, so this pins the
+    mirror against the shape the account actually returns."""
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "created_on": "2026-01-01 00:00:00",
+                "name": "ORDERS",
+                "database_name": "MYDB",
+                "schema_name": "PUBLIC",
+                "kind": "TABLE",
+                "comment": "",
+                "cluster_by": "",
+                "rows": 42,
+                "bytes": 8192,
+                "owner": "ANALYST",
+                "retention_time": "1",
+                "automatic_clustering": "OFF",
+                "change_tracking": "OFF",
+                "search_optimization": "OFF",
+                "is_external": "N",
+                "is_event": "N",
+                "is_hybrid": "N",
+                "is_iceberg": "N",
+                "is_dynamic": "N",
+                "owner_role_type": "ROLE",
+                # Columns snowcone does not mirror, present in the real result.
+                "search_optimization_progress": None,
+                "enable_schema_evolution": "N",
+                "is_immutable": "N",
+                "row_timestamp": None,
+                "error_logging": None,
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["is_iceberg"] == "N"
+    assert stored["rows"] == 42
+    assert "is_immutable" not in stored

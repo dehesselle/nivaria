@@ -121,8 +121,10 @@ PAGE_SIZE = Setting(
     key="page_size",
     label="fetch page size",
     description=(
-        "How many rows one fetch job asks Snowflake for. Smaller pages make "
-        "a cold cache fill the tree in more, smaller visible steps."
+        "How many rows one fetch job asks Snowflake for. Bigger is faster: a "
+        "SHOW round trip costs about the same regardless of how many rows it "
+        "returns, so pages exist to bound a job, not to make progress "
+        "visible. Lowering this mainly multiplies latency."
     ),
     group="Cache",
     default=1000,

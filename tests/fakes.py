@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from snowcone.gateway import queries
 from snowcone.gateway.pool import ConnectionPool, ConnectParams
 from snowcone.models import ObjectKind
 
@@ -130,31 +131,53 @@ class FakeGateway:
             for name in names
         ]
 
-    def information_schema_columns(
-        self, database: str, schema: str, table: str | None = None
+    def show_objects_in_database(
+        self,
+        kind: ObjectKind,
+        database: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
     ) -> list[Row]:
-        self.calls.append(("information_schema_columns", (database, schema, table)))
-        rows: list[Row] = []
-        for (db, sch, tbl), names in sorted(self.columns.items()):
-            if db != database or sch != schema:
+        self.calls.append(("show_objects_in_database", (kind, database, after, limit)))
+        everything: list[tuple[str, str]] = []
+        for (db, schema, object_kind), names in self.objects.items():
+            if db != database or object_kind != kind:
                 continue
-            if table is not None and tbl != table:
-                continue
-            for position, name in enumerate(names, start=1):
-                rows.append(
-                    {
-                        "TABLE_CATALOG": db,
-                        "TABLE_SCHEMA": sch,
-                        "TABLE_NAME": tbl,
-                        "COLUMN_NAME": name,
-                        "ORDINAL_POSITION": position,
-                        "DATA_TYPE": "TEXT",
-                        "IS_NULLABLE": "YES",
-                        "COLUMN_DEFAULT": None,
-                        "CHARACTER_MAXIMUM_LENGTH": None,
-                        "NUMERIC_PRECISION": None,
-                        "NUMERIC_SCALE": None,
-                        "COMMENT": "",
-                    }
-                )
-        return rows
+            everything.extend((name, schema) for name in names)
+        everything.sort()
+        if after is not None:
+            everything = [pair for pair in everything if pair[0] > after]
+        return [
+            {
+                "name": name,
+                "database_name": database,
+                "schema_name": schema,
+                "kind": kind.value,
+                "comment": "",
+                "rows": 0,
+                "bytes": 0,
+            }
+            for name, schema in everything[:limit]
+        ]
+
+    def show_columns(self, database: str, schema: str, table: str) -> list[Row]:
+        """Returns raw SHOW COLUMNS shape, so the real mapper is exercised."""
+        self.calls.append(("show_columns", (database, schema, table)))
+        raw = [
+            {
+                "table_name": table,
+                "schema_name": schema,
+                "database_name": database,
+                "column_name": name,
+                "data_type": '{"type":"TEXT","length":16777216,"nullable":true}',
+                "null?": "Y",
+                "default": None,
+                "kind": "COLUMN",
+                "expression": None,
+                "comment": "",
+                "autoincrement": "",
+            }
+            for name in self.columns.get((database, schema, table), [])
+        ]
+        return queries.map_show_columns(raw)

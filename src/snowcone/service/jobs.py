@@ -20,6 +20,7 @@ from enum import IntEnum
 from typing import Any
 
 from snowcone.gateway.gateway import SnowflakeGateway
+from snowcone.gateway.queries import MAX_PAGE_SIZE
 from snowcone.models import Scope, ScopeKind
 
 _sequence = itertools.count()
@@ -103,12 +104,15 @@ def fetch_page(
         case ScopeKind.COLUMNS:
             assert scope.database is not None
             assert scope.schema is not None
+            assert scope.table is not None
             # A single table's columns are a small, bounded result, so this
             # one is deliberately not paged.
-            rows = gateway.information_schema_columns(
-                scope.database, scope.schema, scope.table
-            )
+            rows = gateway.show_columns(scope.database, scope.schema, scope.table)
             return rows, None
+        case ScopeKind.DATABASE_PRIME:
+            raise ValueError(
+                "a prime scope is fetched by fetch_database, not fetch_page"
+            )
 
     if len(rows) < limit or not rows:
         return rows, None
@@ -119,3 +123,31 @@ def fetch_page(
 #: value sorts it ahead of every real job, so stopping is prompt rather than
 #: queued behind whatever work is outstanding.
 SHUTDOWN = FetchJob(priority=Priority.INTERACTIVE, seq=-1, shutdown=True)
+
+
+def fetch_database(
+    gateway: SnowflakeGateway,
+    scope: Scope,
+    cap: int = MAX_PAGE_SIZE,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Every object of one kind in a database. Returns (rows, usable).
+
+    Deliberately a single unpaged statement, unlike every other fetch here.
+
+    Keyset paging is unsafe across a whole database: `LIMIT n FROM 'name'`
+    resumes after an object *name*, and names are not unique across schemas --
+    an ORDERS table in forty schemas is forty rows sharing one cursor value.
+    Resuming after it skips the rest of them. (Within a single schema, where
+    names are unique, paging is verified correct and still used.)
+
+    So the prime asks for everything at once and reports `usable=False` if the
+    result came back at Snowflake's 10k SHOW cap, since at that point the
+    result is truncated and there is no safe way to ask for the remainder.
+    The caller falls back to fetching schema by schema.
+    """
+    assert scope.object_kind is not None
+    assert scope.database is not None
+    rows = gateway.show_objects_in_database(
+        scope.object_kind, scope.database, after=None, limit=cap
+    )
+    return rows, len(rows) < cap
