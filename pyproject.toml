@@ -1,0 +1,34 @@
+[project]
+name = "snowcone"
+version = "0.1.0"
+description = "A TUI for quickly browsing and searching Snowflake objects"
+readme = "README.md"
+authors = [
+    { name = "René de Hesselle", email = "dehesselle@web.de" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "platformdirs>=4.11.0",
+    "snowflake-connector-python>=4.7.3",
+    "textual>=8.2.8",
+]
+
+[project.scripts]
+snowcone = "snowcone:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The UI tests are all async; auto mode saves marking every one of them.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "textual-dev>=1.8.0",
+]

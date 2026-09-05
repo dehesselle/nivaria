@@ -1,0 +1,45 @@
+/* ---- main screen: 25% tree / 75% detail, split 25/75 vertically ------- */
+
+MainScreen {
+    layout: horizontal;
+}
+
+#left {
+    width: 1fr;
+}
+
+#right {
+    width: 3fr;
+}
+
+#db-button {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $text;
+}
+
+#db-button:hover {
+    background: $accent;
+}
+
+#tree {
+    height: 1fr;
+    border: round $panel;
+}
+
+#context {
+    height: 1fr;
+    border: round $panel;
+}
+
+#detail {
+    height: 3fr;
+    border: round $panel;
+}
+
+#tree:focus-within,
+#context:focus-within,
+#detail:focus-within {
+    border: round $accent;
+}
