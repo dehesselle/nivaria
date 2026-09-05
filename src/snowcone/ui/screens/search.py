@@ -14,8 +14,14 @@ keystroke used to pay to notice a stale corpus.
 Loading is kicked off in `on_mount` but not awaited there, and reading the
 cache plus building a `Column`-shaped corpus is real work, not a formality --
 measured at ~77ms for 30k cached columns, which would otherwise delay the
-dialog's first paint by that much. `_run_query` awaits the same load before
-ranking, so correctness is unaffected either way.
+dialog's first paint by that much. `_run_query` does not wait for it either:
+a fast typist would feel that wait on every keystroke while it is still
+pending, so ranking proceeds against whatever corpus already exists --
+empty, or however far the load has gotten -- and once loading finishes it
+re-runs the last query itself, so the list corrects itself in place rather
+than a keystroke ever blocking on it. Enter is the one exception: choosing a
+result and closing the dialog is a commitment a still-partial corpus should
+not get to make, so that path alone waits for the load first.
 """
 
 from __future__ import annotations
@@ -76,8 +82,21 @@ class SearchScreen(DialogScreen[ObjectRef]):
         # input already focused, and only actual ranking waits on it.
         self._loaded: asyncio.Task[None] = asyncio.create_task(self._load_corpus())
 
+    def on_unmount(self) -> None:
+        # Otherwise a slow load still in flight when the dialog closes would
+        # resume after unmount and touch widgets that no longer exist.
+        self._loaded.cancel()
+
     async def _load_corpus(self) -> None:
         self._corpus, self._column_corpus = await asyncio.to_thread(self._read_corpus)
+        # A quick typist can have a query in the box before this finishes --
+        # _run_query never waits for it (see there), so whatever it showed
+        # was ranked against a partial or still-empty corpus. Re-running now
+        # replaces that with the real thing. A fresh keystroke arriving in
+        # between just makes this redundant, not wrong: _run_query's own
+        # stale-result check means only the most recent one actually renders.
+        if self.query_one("#search-query", Input).value.strip():
+            await self._run_query()
 
     def _read_corpus(
         self,
@@ -107,6 +126,11 @@ class SearchScreen(DialogScreen[ObjectRef]):
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
+        # Enter commits to a choice and closes the dialog, unlike a plain
+        # keystroke's list refresh -- so unlike _run_query's live-typing path,
+        # this one waits for the real corpus rather than risk picking (or
+        # closing on) a result ranked against one still partially empty.
+        await self._loaded
         await self._run_query()
         self._choose(0)
 
@@ -128,13 +152,14 @@ class SearchScreen(DialogScreen[ObjectRef]):
             self.query_one("#search-results", OptionList).clear_options()
             return
 
-        # The corpus load kicked off in on_mount usually finishes well before
-        # anyone can type a whole query, but it is not guaranteed to -- a
-        # fast-open, fast-type sequence could otherwise rank an incomplete or
-        # still-empty corpus. Waiting here costs nothing once it is already
-        # done, which is the overwhelmingly common case.
-        await self._loaded
-
+        # Deliberately not waiting for the corpus load here: a fast typist
+        # who opens search and starts typing immediately would otherwise feel
+        # that wait on every keystroke while it is still pending. Ranking
+        # proceeds against whatever self._corpus/_column_corpus currently are
+        # -- empty or partial before the load finishes -- and _load_corpus
+        # re-runs this once it completes, so the list corrects itself rather
+        # than the keystroke blocking on it.
+        #
         # Ranking is CPU-bound, not I/O, so it would otherwise run on and
         # block the event loop for the duration -- fine at the sizes measured
         # in fuzzy.py alone, but a column corpus routinely outnumbers the
@@ -150,9 +175,13 @@ class SearchScreen(DialogScreen[ObjectRef]):
     def _rank(self, query: str) -> list[tuple[ObjectRef, Match, str | None]]:
         """Best hit per object, from either its own name or a column's.
 
-        Pure and widget-free -- safe to call from a thread, since `_corpus`
-        and `_column_corpus` are built once on mount and never mutated while
-        the modal is open (see the module docstring).
+        Pure and widget-free -- safe to call from a thread. `_corpus` and
+        `_column_corpus` do get reassigned once, when the background load in
+        `_load_corpus` finishes, but never mutated in place, and a plain
+        attribute reassignment is atomic under the GIL -- so a read from this
+        thread always sees one complete corpus or the other, never a partial
+        write (see the module docstring for why this runs against a
+        possibly-incomplete corpus at all).
         """
         # `rank`/`rank_qualified` break score ties by corpus order, which is
         # what keeps an empty query a plain passthrough; merging two ranked

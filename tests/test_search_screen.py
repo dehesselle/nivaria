@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 import pytest
@@ -383,3 +384,69 @@ async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopen
         put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "CUSTOMERS")
         await type_query(pilot, app, "cust")
         assert shown(app) == []
+
+
+# ------------------------------------------------------- progressive loading
+
+
+def slow_search_corpus(repo: Repository, release: threading.Event) -> None:
+    """Make the corpus load block until the test releases it, so typing
+    during that window is deterministic instead of racing a fast fixture."""
+    original = repo.search_corpus
+
+    def slow(database):
+        release.wait(timeout=2)
+        return original(database)
+
+    repo.search_corpus = slow
+
+
+async def test_typing_before_the_corpus_loads_shows_nothing_yet(repo) -> None:
+    """A fast typist must not wait on the corpus load -- see search.py."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    release = threading.Event()
+    slow_search_corpus(repo, release)
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "ord")
+        # The load is still blocked, so there is nothing to have matched yet
+        # -- the point is that this returned at all rather than hanging.
+        assert shown(app) == []
+        release.set()
+
+
+async def test_the_list_corrects_itself_once_a_slow_load_lands(repo) -> None:
+    """The result the user actually asked for is not lost, only delayed."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    release = threading.Event()
+    slow_search_corpus(repo, release)
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "ord")
+        release.set()
+        await app.screen._loaded
+        await pilot.pause()
+        assert shown(app) == ["SALES.ORDERS"]
+
+
+async def test_enter_waits_for_a_still_loading_corpus(repo) -> None:
+    """Enter commits to a choice and closes the dialog, so unlike a plain
+    keystroke it must not act on a still-partial corpus."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    release = threading.Event()
+    slow_search_corpus(repo, release)
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        app.screen.query_one("#search-query", Input).value = "orders"
+        await pilot.pause()
+
+        enter = asyncio.create_task(pilot.press("enter"))
+        await asyncio.sleep(0.05)
+        assert not enter.done(), "Enter must not resolve before the corpus does"
+        release.set()
+        await enter
+        await pilot.pause()
+    assert app.selected[0].name == "ORDERS"
