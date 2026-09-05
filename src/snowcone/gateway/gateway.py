@@ -69,6 +69,10 @@ class SnowflakeGateway(Protocol):
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
+    def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]: ...
+
+    def show_roles(self, *, allow_reconnect: bool = True) -> list[Row]: ...
+
 
 class PoolGateway:
     """A gateway that borrows a pool connection per call.
@@ -189,3 +193,9 @@ class PoolGateway:
         # Mapped here rather than in the cache, so the mirror only ever sees
         # the INFORMATION_SCHEMA shape no matter which statement produced it.
         return queries.map_show_columns(rows)
+
+    def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]:
+        return self._fetch(queries.show_warehouses(), allow_reconnect=allow_reconnect)
+
+    def show_roles(self, *, allow_reconnect: bool = True) -> list[Row]:
+        return self._fetch(queries.show_roles(), allow_reconnect=allow_reconnect)

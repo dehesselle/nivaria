@@ -16,10 +16,11 @@ import contextlib
 import queue
 import threading
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from snowcone.errors import SnowconeError
+from snowcone.gateway import queries
 
 EXTERNAL_BROWSER = "externalbrowser"
 USERNAME_PASSWORD_MFA = "username_password_mfa"
@@ -124,6 +125,13 @@ class ConnectionPool:
         self._in_use = 0
         self._lock = threading.Lock()
         self._closed = False
+        #: Held for the whole duration of `run_on_all`, so a session-wide
+        #: change (USE ROLE / USE WAREHOUSE) can never overlap a worker's
+        #: query on the same connection -- the driver does not support
+        #: concurrent cursors on one connection object. `acquire()` waits on
+        #: it before every checkout; `run_on_all` holds it while it drains and
+        #: rewrites every connection in the pool.
+        self._maintenance = threading.Lock()
 
     @property
     def in_use(self) -> int:
@@ -203,6 +211,10 @@ class ConnectionPool:
         """
         if self._closed:
             raise ConnectionError_("connection pool is closed")
+        # A pure barrier: wait for any in-progress run_on_all to finish before
+        # taking a connection, so nothing can check one out mid-rewrite.
+        with self._maintenance:
+            pass
         connection = self._checkout(timeout=timeout, allow_reconnect=allow_reconnect)
         with self._lock:
             self._in_use += 1
@@ -320,6 +332,68 @@ class ConnectionPool:
         else:
             with self._lock:
                 self.size -= 1
+
+    def run_on_all(self, statement: str, *, timeout: float = 30.0) -> None:
+        """Run a session-scoped statement (USE ROLE / USE WAREHOUSE) against
+        every pooled connection, so a later query cannot land on a connection
+        that still carries the old session state.
+
+        Every currently live connection is drained from the free queue first
+        -- blocking, like any other checkout, until whatever is mid-query
+        finishes and returns it -- and only put back once the statement has
+        run on all of them. Held via `_maintenance` throughout, which is what
+        stops `acquire()` from handing one of them to a worker half-way
+        through. A connection found dead while draining is replaced the same
+        way `acquire()` would.
+
+        Not transactional across connections: if the statement fails on one
+        (a typo'd role, say) after already succeeding on another, the pool is
+        left with a real split and the caller sees the error rather than a
+        silent partial switch. Full atomicity would need Snowflake's
+        cooperation across sessions, which does not exist -- and the common
+        failure here is "no such role", which the picker already guards
+        against by only ever offering roles SHOW ROLES actually returned.
+        """
+        with self._maintenance:
+            with self._lock:
+                expected = self.size
+            held: list[Any] = []
+            try:
+                for _ in range(expected):
+                    try:
+                        connection = self._free.get(timeout=timeout)
+                    except queue.Empty as error:
+                        raise ConnectionError_(
+                            "timed out waiting for a connection to go idle"
+                        ) from error
+                    if self._is_dead(connection):
+                        self._detach(connection)
+                        connection = self._open_one()
+                    held.append(connection)
+                for connection in held:
+                    cursor = connection.cursor()
+                    try:
+                        cursor.execute(statement)
+                    finally:
+                        cursor.close()
+            finally:
+                for connection in held:
+                    self._free.put(connection)
+
+    def set_role(self, role: str) -> None:
+        """Switch every pooled connection's role.
+
+        SHOW results are filtered by the session's role, so every connection
+        has to agree -- otherwise which role served a given query would
+        depend on which pool connection happened to be free.
+        """
+        self.run_on_all(queries.use_role(role))
+        self.params = replace(self.params, role=role)
+
+    def set_warehouse(self, warehouse: str) -> None:
+        """Switch every pooled connection's warehouse. See `set_role`."""
+        self.run_on_all(queries.use_warehouse(warehouse))
+        self.params = replace(self.params, warehouse=warehouse)
 
     def close(self) -> None:
         self._closed = True

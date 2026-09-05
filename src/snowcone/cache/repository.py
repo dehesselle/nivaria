@@ -39,7 +39,9 @@ from snowcone.models import (
     SFObject,
 )
 from snowcone.models import Database as DatabaseRow
+from snowcone.models import Role as RoleRow
 from snowcone.models import Schema as SchemaRow
+from snowcone.models import Warehouse as WarehouseRow
 
 
 @dataclass(frozen=True)
@@ -200,6 +202,20 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
     ),
 }
 
+_WAREHOUSES = TableSpec(
+    name="show_warehouses",
+    columns=("name", "comment"),
+    key=("name",),
+    order_by=("name",),
+)
+
+_ROLES = TableSpec(
+    name="show_roles",
+    columns=("name", "comment"),
+    key=("name",),
+    order_by=("name",),
+)
+
 _COLUMNS = TableSpec(
     name="information_schema_columns",
     columns=(
@@ -232,6 +248,10 @@ def spec_for(scope: Scope) -> TableSpec:
             return _OBJECT_TABLES[scope.object_kind]
         case ScopeKind.COLUMNS:
             return _COLUMNS
+        case ScopeKind.WAREHOUSES:
+            return _WAREHOUSES
+        case ScopeKind.ROLES:
+            return _ROLES
         case ScopeKind.DATABASE_PRIME:
             # A prime is a fetch strategy, not a set of rows: it fills other
             # scopes' tables and owns none of its own.
@@ -344,6 +364,18 @@ class Repository:
         return self._cached(
             scope,
             lambda row: DatabaseRow(name=row["name"], comment=row["comment"] or ""),
+        )
+
+    def warehouses(self, scope: Scope) -> Cached[WarehouseRow]:
+        return self._cached(
+            scope,
+            lambda row: WarehouseRow(name=row["name"], comment=row["comment"] or ""),
+        )
+
+    def roles(self, scope: Scope) -> Cached[RoleRow]:
+        return self._cached(
+            scope,
+            lambda row: RoleRow(name=row["name"], comment=row["comment"] or ""),
         )
 
     def schemas(self, scope: Scope) -> Cached[SchemaRow]:

@@ -104,6 +104,17 @@ async def test_the_database_list_is_requested_on_mount(repo) -> None:
     assert "databases" in fetch.scopes
 
 
+async def test_warehouses_and_roles_are_also_requested_on_mount(repo) -> None:
+    """Regression: fetching them lazily on the picker's first open meant the
+    dialog had nothing cached yet, so opening it just re-requested the list
+    and closed again -- a second, separate open was needed to see it."""
+    fetch = RecordingFetch()
+    async with Harness(repo, fetch).run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+    assert "warehouses" in fetch.scopes
+    assert "roles" in fetch.scopes
+
+
 async def test_no_database_is_selected_initially(repo) -> None:
     fetch = RecordingFetch()
     app = Harness(repo, fetch)

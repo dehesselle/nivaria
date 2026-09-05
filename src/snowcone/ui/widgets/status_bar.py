@@ -57,6 +57,24 @@ class PoolGauge(Static):
         return f"({self.in_use}/{self.pool_size})"
 
 
+class WarehouseLabel(Static):
+    """The session's current warehouse, or "none" until one is set."""
+
+    warehouse: reactive[str | None] = reactive(None)
+
+    def render(self) -> str:
+        return self.warehouse or "none"
+
+
+class RoleLabel(Static):
+    """The session's current role, or "none" until one is set."""
+
+    role: reactive[str | None] = reactive(None)
+
+    def render(self) -> str:
+        return self.role or "none"
+
+
 class StatusFooter(Footer):
     remaining: reactive[int] = reactive(0)
     refreshing: reactive[bool] = reactive(False)
@@ -64,11 +82,19 @@ class StatusFooter(Footer):
     frame: reactive[int] = reactive(0)
     in_use: reactive[int] = reactive(0)
     pool_size: reactive[int] = reactive(0)
+    warehouse: reactive[str | None] = reactive(None)
+    role: reactive[str | None] = reactive(None)
 
     def compose(self) -> ComposeResult:
         yield from super().compose()
         if self._bindings_ready:
             yield Static(classes="footer-spacer")
+            yield WarehouseLabel(id="footer-warehouse").data_bind(
+                warehouse=StatusFooter.warehouse,
+            )
+            yield RoleLabel(id="footer-role").data_bind(
+                role=StatusFooter.role,
+            )
             yield Countdown(id="footer-countdown").data_bind(
                 remaining=StatusFooter.remaining,
                 refreshing=StatusFooter.refreshing,

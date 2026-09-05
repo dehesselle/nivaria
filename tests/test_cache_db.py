@@ -97,6 +97,8 @@ def test_every_mirror_table_exists(tmp_path) -> None:
         "show_pipes",
         "show_stages",
         "show_tasks",
+        "show_warehouses",
+        "show_roles",
         "information_schema_columns",
         "cache_entry",
     } <= names

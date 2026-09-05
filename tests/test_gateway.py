@@ -162,6 +162,26 @@ def test_a_query_that_keeps_failing_surfaces_the_real_error() -> None:
     assert connection.attempts == 2
 
 
+def test_show_warehouses_sends_the_unpaged_statement() -> None:
+    gateway, connection, _ = make_gateway()
+    connection.columns = ["name", "comment"]
+    connection.rows = [("MYWH", "")]
+    assert gateway.show_warehouses() == [{"name": "MYWH", "comment": ""}]
+    statement, params = connection.executed[-1]
+    assert statement == "SHOW WAREHOUSES"
+    assert params is None
+
+
+def test_show_roles_sends_the_unpaged_statement() -> None:
+    gateway, connection, _ = make_gateway()
+    connection.columns = ["name", "comment"]
+    connection.rows = [("SYSADMIN", "")]
+    assert gateway.show_roles() == [{"name": "SYSADMIN", "comment": ""}]
+    statement, params = connection.executed[-1]
+    assert statement == "SHOW ROLES"
+    assert params is None
+
+
 def test_background_priority_retries_but_never_reconnects_unattended() -> None:
     """The retry itself must respect allow_reconnect: a background-priority
     caller whose only connection just failed must not have it replaced by a

@@ -95,6 +95,35 @@ def show_objects_in_database(
     return f"SHOW {kind.plural.upper()} IN DATABASE {scope}{_paging(after, limit)}"
 
 
+def show_warehouses() -> str:
+    """Every warehouse in one call.
+
+    Unlike the object lists above, SHOW WAREHOUSES does not document LIMIT/FROM
+    support, and an account's warehouse count is small enough that one unpaged
+    call is always the whole picture.
+    """
+    return "SHOW WAREHOUSES"
+
+
+def show_roles() -> str:
+    """Every role in one call, for the same reason as `show_warehouses`."""
+    return "SHOW ROLES"
+
+
+def use_role(role: str) -> str:
+    """Switch the session's active role.
+
+    Issued once per pooled connection when the user picks a role from the
+    role dialog -- see `ConnectionPool.set_role`.
+    """
+    return f"USE ROLE {quote_identifier(role)}"
+
+
+def use_warehouse(warehouse: str) -> str:
+    """Switch the session's active warehouse. See `use_role`."""
+    return f"USE WAREHOUSE {quote_identifier(warehouse)}"
+
+
 def show_columns(database: str, schema: str, table: str) -> str:
     """A table's columns without needing a running warehouse.
 

@@ -285,3 +285,88 @@ def test_acquiring_from_a_closed_pool_is_an_error() -> None:
     pool.close()
     with pytest.raises(ConnectionError_), pool.acquire():
         pass
+
+
+# --------------------------------------------------------- session-wide changes
+
+
+def test_set_role_runs_use_role_on_every_connection() -> None:
+    """SHOW results are filtered by role, so every pooled connection has to
+    agree or which role served a query would depend on which one was free."""
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    pool.set_role("SYSADMIN")
+    assert all(c.executed == ['USE ROLE "SYSADMIN"'] for c in pool._all)
+    assert pool.params.role == "SYSADMIN"
+
+
+def test_set_warehouse_runs_use_warehouse_on_every_connection() -> None:
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    pool.set_warehouse("COMPUTE_WH")
+    assert all(c.executed == ['USE WAREHOUSE "COMPUTE_WH"'] for c in pool._all)
+    assert pool.params.warehouse == "COMPUTE_WH"
+
+
+def test_a_dead_connection_is_replaced_during_a_session_change() -> None:
+    """Draining the pool for a role/warehouse switch has to heal a connection
+    Snowflake already dropped, the same as an ordinary acquire() would."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    pool._all[0].closed = True
+    pool.set_role("SYSADMIN")
+    assert len(connector.calls) == 2
+    assert pool.params.role == "SYSADMIN"
+
+
+def test_run_on_all_waits_for_an_in_flight_query_to_finish() -> None:
+    """A connection mid-query cannot have a second cursor opened on it, so the
+    switch has to wait for it to come back rather than seize it."""
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    finished = threading.Event()
+
+    def switch() -> None:
+        pool.set_role("SYSADMIN")
+        finished.set()
+
+    with pool.acquire():
+        thread = threading.Thread(target=switch, daemon=True)
+        thread.start()
+        time.sleep(0.05)
+        assert not finished.is_set()
+    thread.join(timeout=2)
+    assert finished.is_set()
+    assert pool.params.role == "SYSADMIN"
+
+
+def test_acquire_waits_behind_an_in_progress_session_change() -> None:
+    """The other half of the same guarantee: a worker must not check out a
+    connection while a switch is mid-way through rewriting the pool."""
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    acquired = threading.Event()
+    pool._maintenance.acquire()
+    try:
+
+        def go() -> None:
+            with pool.acquire():
+                acquired.set()
+
+        thread = threading.Thread(target=go, daemon=True)
+        thread.start()
+        time.sleep(0.05)
+        assert not acquired.is_set()
+    finally:
+        pool._maintenance.release()
+    thread.join(timeout=2)
+    assert acquired.is_set()
+
+
+def test_run_on_all_times_out_rather_than_hanging_forever() -> None:
+    """A connection that is merely busy elsewhere must not be able to wedge a
+    session change forever -- it surfaces as an error instead."""
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    with pool.acquire(), pytest.raises(ConnectionError_):
+        pool.run_on_all('USE ROLE "X"', timeout=0.05)

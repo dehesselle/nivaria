@@ -129,6 +129,11 @@ def fetch_page(
                 allow_reconnect=allow_reconnect,
             )
             return rows, None
+        case ScopeKind.WAREHOUSES:
+            # Small, flat, unpaged lists -- see queries.show_warehouses.
+            return gateway.show_warehouses(allow_reconnect=allow_reconnect), None
+        case ScopeKind.ROLES:
+            return gateway.show_roles(allow_reconnect=allow_reconnect), None
         case ScopeKind.DATABASE_PRIME:
             raise ValueError(
                 "a prime scope is fetched by fetch_database, not fetch_page"

@@ -59,3 +59,15 @@ def test_page_limits_are_clamped_to_what_snowflake_accepts(limit, expected) -> N
     """SHOW caps its result at 10k rows regardless of LIMIT; asking for more
     would quietly truncate a page and make the keyset cursor skip rows."""
     assert f"LIMIT {expected}" in queries.show_databases(limit=limit)
+
+
+def test_show_warehouses_and_roles_are_unpaged() -> None:
+    """Unlike the object lists, these are small flat lists with no LIMIT/FROM
+    clause -- see the docstrings in gateway/queries.py."""
+    assert queries.show_warehouses() == "SHOW WAREHOUSES"
+    assert queries.show_roles() == "SHOW ROLES"
+
+
+def test_use_role_and_warehouse_quote_the_identifier() -> None:
+    assert queries.use_role("SYSADMIN") == 'USE ROLE "SYSADMIN"'
+    assert queries.use_warehouse("my_wh") == 'USE WAREHOUSE "my_wh"'

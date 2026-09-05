@@ -12,7 +12,9 @@ from snowcone.models import (
     columns_scope,
     databases_scope,
     objects_scope,
+    roles_scope,
     schemas_scope,
+    warehouses_scope,
 )
 
 
@@ -75,6 +77,21 @@ def test_rows_come_back_in_name_order_regardless_of_arrival_order(repo) -> None:
     scope = databases_scope()
     load(repo, scope, db_rows("ZULU", "ALPHA", "MIKE"))
     assert [d.name for d in repo.databases(scope).rows] == ["ALPHA", "MIKE", "ZULU"]
+
+
+def test_warehouses_and_roles_read_back_by_name(repo) -> None:
+    """Same mapping shape as databases -- name plus comment -- since both are
+    flat, unpaged SHOW results."""
+    load(repo, warehouses_scope(), db_rows("COMPUTE_WH", "ETL_WH"))
+    load(repo, roles_scope(), db_rows("SYSADMIN", "ACCOUNTADMIN"))
+    assert [w.name for w in repo.warehouses(warehouses_scope()).rows] == [
+        "COMPUTE_WH",
+        "ETL_WH",
+    ]
+    assert [r.name for r in repo.roles(roles_scope()).rows] == [
+        "ACCOUNTADMIN",
+        "SYSADMIN",
+    ]
 
 
 def test_scopes_do_not_leak_into_each_other(repo) -> None:

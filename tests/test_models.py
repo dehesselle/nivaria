@@ -8,7 +8,9 @@ from snowcone.models import (
     columns_scope,
     databases_scope,
     objects_scope,
+    roles_scope,
     schemas_scope,
+    warehouses_scope,
 )
 
 
@@ -70,3 +72,12 @@ def test_scope_defaults_leave_unused_fields_none() -> None:
     scope = Scope(ScopeKind.DATABASES)
     assert scope.database is None
     assert scope.object_kind is None
+
+
+def test_warehouses_and_roles_are_flat_scopes_like_databases() -> None:
+    """Neither is scoped to a database, so -- like databases_scope -- there is
+    exactly one of each, account-wide."""
+    assert warehouses_scope().key == "warehouses"
+    assert roles_scope().key == "roles"
+    assert warehouses_scope() == warehouses_scope()
+    assert warehouses_scope() != roles_scope()

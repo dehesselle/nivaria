@@ -46,13 +46,13 @@ Use these names when discussing changes.
 │ │                 ││        (hosts exactly one Object view)              │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ ^d Database  / Search  r Refresh  q Quit          Countdown  Pool gauge  │
+│ ^d Database  / Search  r Refresh  q Quit  Warehouse  Role  Countdown  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, **Warehouse ...** (`w`) and **Role ...** (`r`) to open the same fuzzy-picker pattern as the database picker over cached warehouses/roles, applying the choice session-wide (see below). |
 | **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
 | **Top pane** | Holds the Search bar plus one of: Context bar, or Search results. |
 | **Search bar** | Find-as-you-type over every cached object in the current database. `/` focuses it. |
@@ -60,7 +60,7 @@ Use these names when discussing changes.
 | **Search results** | Ranked hits. Takes the Context bar's place while a query is active, because the top pane shows one thing at a time: what you are looking at, or what you are looking for. |
 | **Detail pane** | Hosts exactly one **Object view** at a time, chosen by object kind. |
 | **Object view** | The per-kind detail UI (e.g. Table view, Pipe view). Owns both its detail body and its Context bar contribution. |
-| **Status footer** | Key bindings on the left; **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
+| **Status footer** | Key bindings on the left; **Warehouse**/**Role** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
 
 The right-hand split is 25 % top pane / 75 % Detail pane; the left pane is 25 %
 of the width. All sizing is in `fr` units, never percentages, so panes stay
@@ -406,10 +406,23 @@ plain function precisely so that stays an easy change.
 
 ## Status footer
 
-The right corner carries two indicators. Textual's command-palette binding is
+The right corner carries four indicators. Textual's command-palette binding is
 suppressed so the corner is available; the footer is otherwise Textual's, so
 key bindings keep working without being re-implemented.
 
+- **Warehouse** / **Role** — the pool's current warehouse and role, read
+  straight off the pool's connect params each tick; each reads `none` until
+  one has ever been set. Picked from **Connect > Warehouse ...** / **Role
+  ...**, the same fuzzy-picker-over-cached-rows pattern as the database
+  picker, backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
+  — small, flat, unpaged lists, unlike the object mirrors), requested
+  eagerly on mount alongside the database list rather than on the picker's
+  first open — lazily fetching it there meant the first open ever just
+  requested the list and closed again, since there was nothing cached yet
+  to show. Unlike the
+  database picker, which only ever changes what a query is built to ask for,
+  picking a warehouse or role actually rewrites the session: see
+  `ConnectionPool.set_role` / `set_warehouse` below.
 - **Countdown** — seconds until the data *currently on screen* goes stale: the
   TTL minus the age of the scope behind the cursor. It is not a global timer;
   it changes as you navigate, and for an object leaf it reports the list the
@@ -423,7 +436,31 @@ key bindings keep working without being re-implemented.
 The gauge is polled a few times a second rather than pushed from the pool. Pool
 usage changes on worker threads, so pushing would require marshalling on every
 acquire and release; polling a lock-guarded integer is simpler, has no thread
-hazards, and is still fast enough to register a ~187 ms round trip.
+hazards, and is still fast enough to register a ~187 ms round trip. The
+warehouse/role labels ride the same poll for the same reason.
+
+### Switching warehouse or role mid-session
+
+Unlike the database picker, `SHOW WAREHOUSES` and `SHOW ROLES` carry no
+per-query qualifier — role and warehouse are session state, and the pool holds
+several physical sessions. Picking one therefore runs `USE ROLE` / `USE
+WAREHOUSE` on **every** pooled connection (`ConnectionPool.run_on_all`), not
+just whichever one a checkout would have handed out next, or later results
+would depend on which connection happened to serve a given query.
+
+That statement must never run concurrently with a worker's query on the same
+connection — the driver does not support two cursors in flight on one
+connection object — so `run_on_all` drains every connection out of the free
+queue first (blocking on whatever is still mid-query, the same as an ordinary
+checkout) and holds a pool-wide lock that `acquire()` also waits on, so nothing
+can be checked out mid-rewrite. This is not transactional across connections:
+if the statement fails on one after already succeeding on another (a network
+blip, say), the pool is left with a genuine split and the error surfaces to the
+user rather than being papered over — full atomicity would need Snowflake's
+cooperation across independent sessions, which does not exist. The common
+failure mode, an invalid role or warehouse name, cannot happen here since the
+picker only ever offers names `SHOW ROLES` / `SHOW WAREHOUSES` actually
+returned.
 
 ---
 

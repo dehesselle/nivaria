@@ -19,7 +19,14 @@ from textual.screen import Screen
 
 from snowcone.cache.repository import Repository
 from snowcone.gateway.pool import ConnectionPool
-from snowcone.models import Scope, databases_scope, prime_scope, schemas_scope
+from snowcone.models import (
+    Scope,
+    databases_scope,
+    prime_scope,
+    roles_scope,
+    schemas_scope,
+    warehouses_scope,
+)
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import Priority
 from snowcone.settings import CACHE_TTL, config
@@ -91,6 +98,12 @@ class MainScreen(Screen):
 
     def on_mount(self) -> None:
         self._request(databases_scope(), Priority.INTERACTIVE)
+        # Prefetched too, not just databases: both are cheap, unpaged SHOW
+        # calls, and fetching them lazily on the picker's first open meant the
+        # dialog didn't have anything to show yet -- one keypress to request
+        # the list, a second to actually get the picker.
+        self._request(warehouses_scope(), Priority.INTERACTIVE)
+        self._request(roles_scope(), Priority.INTERACTIVE)
         self.set_interval(TICK, self._tick)
         self.set_interval(SWEEP, self._sweep)
         self._tick()
@@ -124,6 +137,8 @@ class MainScreen(Screen):
         if self.pool is not None:
             footer.in_use = self.pool.in_use
             footer.pool_size = self.pool.size
+            footer.warehouse = self.pool.params.warehouse
+            footer.role = self.pool.params.role
 
         # Read at the point of use, so changing it in settings takes effect
         # without a restart.
@@ -226,7 +241,7 @@ class MainScreen(Screen):
 
     def _menu_items_for(self, menu_id: str) -> list[MenuItem]:
         if menu_id == "connect":
-            return connect_menu_items(self.app)
+            return connect_menu_items(self.app, self)
         raise ValueError(f"unknown menu: {menu_id!r}")
 
     # --------------------------------------------------------------- routing
@@ -325,6 +340,87 @@ class MainScreen(Screen):
         )
         if chosen is not None:
             self.set_database(chosen)
+
+    # ------------------------------------------------------ warehouse / role
+
+    async def pick_warehouse(self) -> None:
+        """Open the warehouse picker from the Connect menu.
+
+        Awaited directly rather than via `@work`: the menu already runs the
+        handler from inside a worker (see `_run_menu`), so a second one here
+        would buy nothing.
+        """
+        if self.pool is None:
+            return
+        cached = self.repo.warehouses(warehouses_scope())
+        if cached.is_empty:
+            self._request(warehouses_scope(), Priority.INTERACTIVE)
+            self.notify("Loading warehouses...", timeout=3)
+            return
+        current = self.pool.params.warehouse
+        chosen = await self.app.push_screen_wait(
+            PickerScreen(
+                [row.name for row in cached.rows],
+                title="Warehouse",
+                placeholder="type to filter warehouses",
+                current=current,
+            )
+        )
+        if chosen is not None and chosen != current:
+            self._switch_warehouse(chosen)
+
+    async def pick_role(self) -> None:
+        if self.pool is None:
+            return
+        cached = self.repo.roles(roles_scope())
+        if cached.is_empty:
+            self._request(roles_scope(), Priority.INTERACTIVE)
+            self.notify("Loading roles...", timeout=3)
+            return
+        current = self.pool.params.role
+        chosen = await self.app.push_screen_wait(
+            PickerScreen(
+                [row.name for row in cached.rows],
+                title="Role",
+                placeholder="type to filter roles",
+                current=current,
+            )
+        )
+        if chosen is not None and chosen != current:
+            self._switch_role(chosen)
+
+    @work(thread=True)
+    def _switch_warehouse(self, warehouse: str) -> None:
+        """Apply the switch pool-wide. Threaded: `ConnectionPool.set_warehouse`
+        blocks until every connection is idle -- see `ConnectionPool.run_on_all`.
+        """
+        assert self.pool is not None
+        try:
+            self.pool.set_warehouse(warehouse)
+        # A worker thread boundary, same as fetch.py: the driver raises many
+        # unrelated types, and any escape here would kill the thread silently.
+        except Exception as error:  # noqa: BLE001
+            message = str(error) or error.__class__.__name__
+            self.app.call_from_thread(
+                self.notify,
+                f"Could not switch warehouse: {message}",
+                severity="error",
+                timeout=8,
+            )
+
+    @work(thread=True)
+    def _switch_role(self, role: str) -> None:
+        assert self.pool is not None
+        try:
+            self.pool.set_role(role)
+        except Exception as error:  # noqa: BLE001 -- see _switch_warehouse
+            message = str(error) or error.__class__.__name__
+            self.app.call_from_thread(
+                self.notify,
+                f"Could not switch role: {message}",
+                severity="error",
+                timeout=8,
+            )
 
     def action_refresh(self) -> None:
         """Explicitly refresh whatever the cursor is on."""

@@ -79,6 +79,20 @@ def test_columns_are_fetched_in_one_shot() -> None:
     assert cursor is None
 
 
+def test_warehouses_and_roles_are_fetched_in_one_shot() -> None:
+    """Small, flat, unpaged lists -- like columns, not like the object mirrors."""
+    from snowcone.models import roles_scope, warehouses_scope
+
+    gateway = FakeGateway(warehouses=["COMPUTE_WH"], roles=["SYSADMIN", "PUBLIC"])
+    rows, cursor = fetch_page(gateway, warehouses_scope(), None, limit=1)
+    assert [row["name"] for row in rows] == ["COMPUTE_WH"]
+    assert cursor is None
+
+    rows, cursor = fetch_page(gateway, roles_scope(), None, limit=1)
+    assert [row["name"] for row in rows] == ["PUBLIC", "SYSADMIN"]
+    assert cursor is None
+
+
 # -------------------------------------------------------------- end to end
 
 

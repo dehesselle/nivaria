@@ -26,7 +26,7 @@ from pathlib import Path
 #: never be opened again.
 _MIGRATIONS: tuple[str, ...] = tuple(
     files("snowcone.cache").joinpath(name).read_text()
-    for name in ("schema.sql", "search.sql")
+    for name in ("schema.sql", "search.sql", "roles_warehouses.sql")
 )
 
 SCHEMA_VERSION = len(_MIGRATIONS)

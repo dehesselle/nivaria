@@ -46,6 +46,8 @@ class ScopeKind(StrEnum):
     #: scope in one database from a single statement. It exists as a scope so
     #: the scheduler can deduplicate and cancel it like any other work.
     DATABASE_PRIME = "prime"
+    WAREHOUSES = "warehouses"
+    ROLES = "roles"
 
 
 class CacheState(StrEnum):
@@ -92,6 +94,10 @@ class Scope:
             case ScopeKind.DATABASE_PRIME:
                 assert self.object_kind is not None
                 return f"{self.object_kind.plural}@{self.database}"
+            case ScopeKind.WAREHOUSES:
+                return "warehouses"
+            case ScopeKind.ROLES:
+                return "roles"
 
     def __str__(self) -> str:
         return self.key
@@ -117,8 +123,28 @@ def prime_scope(kind: ObjectKind, database: str) -> Scope:
     return Scope(ScopeKind.DATABASE_PRIME, database=database, object_kind=kind)
 
 
+def warehouses_scope() -> Scope:
+    return Scope(ScopeKind.WAREHOUSES)
+
+
+def roles_scope() -> Scope:
+    return Scope(ScopeKind.ROLES)
+
+
 @dataclass(frozen=True)
 class Database:
+    name: str
+    comment: str = ""
+
+
+@dataclass(frozen=True)
+class Warehouse:
+    name: str
+    comment: str = ""
+
+
+@dataclass(frozen=True)
+class Role:
     name: str
     comment: str = ""
 

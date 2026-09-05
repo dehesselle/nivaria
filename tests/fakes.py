@@ -18,15 +18,32 @@ from snowcone.models import ObjectKind
 Row = dict[str, Any]
 
 
+class FakeCursor:
+    def __init__(self, owner: FakeConnection) -> None:
+        self._owner = owner
+
+    def execute(self, statement: str) -> None:
+        self._owner.executed.append(statement)
+
+    def close(self) -> None:
+        pass
+
+
 class FakeConnection:
     def __init__(self) -> None:
         self.closed = False
+        #: Every statement run via cursor(), so a test can prove exactly which
+        #: connections a pool-wide change like set_role reached.
+        self.executed: list[str] = []
 
     def is_closed(self) -> bool:
         return self.closed
 
     def close(self) -> None:
         self.closed = True
+
+    def cursor(self) -> FakeCursor:
+        return FakeCursor(self)
 
 
 class FakeConnector:
@@ -73,11 +90,15 @@ class FakeGateway:
         schemas: dict[str, list[str]] | None = None,
         objects: dict[tuple[str, str, ObjectKind], list[str]] | None = None,
         columns: dict[tuple[str, str, str], list[str]] | None = None,
+        warehouses: list[str] | None = None,
+        roles: list[str] | None = None,
     ) -> None:
         self.databases = databases or []
         self.schemas = schemas or {}
         self.objects = objects or {}
         self.columns = columns or {}
+        self.warehouses = warehouses or []
+        self.roles = roles or []
         #: Every call, so a test can assert *what was fetched*, not merely
         #: what ended up rendered.
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -199,3 +220,11 @@ class FakeGateway:
             for name in self.columns.get((database, schema, table), [])
         ]
         return queries.map_show_columns(raw)
+
+    def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]:
+        self.calls.append(("show_warehouses", ()))
+        return [{"name": name, "comment": ""} for name in sorted(self.warehouses)]
+
+    def show_roles(self, *, allow_reconnect: bool = True) -> list[Row]:
+        self.calls.append(("show_roles", ()))
+        return [{"name": name, "comment": ""} for name in sorted(self.roles)]
