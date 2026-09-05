@@ -4,14 +4,21 @@ This screen owns the whole "produce a working connection pool" interaction,
 including the retry loop, rather than handing parameters up and letting the app
 drive it. That keeps the progress reporting local to the widget that shows it.
 
-Opening the pool is where every MFA prompt in a snowcone session happens. The
-pool opens its connections one at a time, so the prompts arrive one at a time
-too; `_on_progress` is what turns that into "Connecting 2/5" instead of an
-unexplained pause with browser windows appearing.
+Opening the pool is where every MFA prompt in a snowcone session happens, so
+only **one** connection is opened on submit -- there is no point prompting for
+more before knowing the first one even works. If the configured pool size asks
+for more, a confirmation dialog spells out how many additional connections
+that means and lets the user decline, which is also what keeps a pool size of
+1 always reachable (handy under test, and for a quick look that does not want
+extra MFA prompts). The pool still opens connections one at a time, so the
+prompts arrive one at a time too; `_on_progress` is what turns that into
+"Connecting 2/5" instead of an unexplained pause with browser windows
+appearing.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import ClassVar
 
 from textual import events, work
@@ -31,6 +38,7 @@ from snowcone.gateway.pool import (
     Connector,
     ConnectParams,
 )
+from snowcone.ui.screens.confirm import ConfirmScreen
 
 _AUTHENTICATOR_LABELS = {
     EXTERNAL_BROWSER: "Browser SSO",
@@ -256,12 +264,14 @@ class ConnectScreen(Screen["ConnectionPool | None"]):
         if params is None:
             return
         self._set_busy(True)
-        self._status(f"Connecting 0/{self._pool_size} ...")
+        self._status("Connecting ...")
         self._connect(params)
 
     @work(thread=True, exclusive=True, group="connect")
     def _connect(self, params: ConnectParams) -> None:
-        pool = ConnectionPool(params, self._pool_size, connector=self._connector)
+        """Open exactly one connection -- growing the pool further is only
+        worth asking about once this one is known to work."""
+        pool = ConnectionPool(params, 1, connector=self._connector)
         try:
             pool.connect_all(progress=self._on_progress)
         # The driver raises many unrelated types, and a browser-SSO timeout is
@@ -271,10 +281,44 @@ class ConnectScreen(Screen["ConnectionPool | None"]):
             message = str(error) or error.__class__.__name__
             self.app.call_from_thread(self._failed, message)
             return
-        self.app.call_from_thread(self._succeeded, params, pool)
+        self.app.call_from_thread(self._connected, params, pool)
+
+    def _connected(self, params: ConnectParams, pool: ConnectionPool) -> None:
+        additional = self._pool_size - pool.size
+        if additional < 1:
+            self._finish(params, pool)
+            return
+        self._offer_growth(params, pool, additional)
+
+    @work(exclusive=True, group="connect")
+    async def _offer_growth(
+        self, params: ConnectParams, pool: ConnectionPool, additional: int
+    ) -> None:
+        noun = "connection" if additional == 1 else "connections"
+        confirmed = await self.app.push_screen_wait(
+            ConfirmScreen(
+                f"Open {additional} additional {noun}?",
+                title="Connection pool",
+            )
+        )
+        if not confirmed:
+            self._finish(params, pool)
+            return
+        try:
+            # to_thread, not another @work(thread=True): this coroutine is
+            # already the one awaiting the confirm dialog, and splitting the
+            # blocking connector calls into a second worker would gain nothing
+            # but a second callback to marshal back.
+            await asyncio.to_thread(pool.grow, additional, self._on_progress)
+        except Exception as error:  # noqa: BLE001
+            pool.close()
+            message = str(error) or error.__class__.__name__
+            self._failed(message)
+            return
+        self._finish(params, pool)
 
     def _on_progress(self, done: int, total: int) -> None:
-        """Called from the connect thread, so it has to marshal back."""
+        """Called from a worker thread, so it has to marshal back."""
         self.app.call_from_thread(
             self._status, f"Connecting {done}/{total} ... (approve any MFA prompt)"
         )
@@ -284,7 +328,7 @@ class ConnectScreen(Screen["ConnectionPool | None"]):
         self._status(f"Could not connect: {message}")
         self.app.bell()
 
-    def _succeeded(self, params: ConnectParams, pool: ConnectionPool) -> None:
+    def _finish(self, params: ConnectParams, pool: ConnectionPool) -> None:
         # Recorded only now: a connection that never worked is not one worth
         # offering again next time.
         self._recent_store.add(RecentEntry.from_params(params))

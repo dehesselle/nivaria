@@ -86,6 +86,39 @@ def test_a_failure_to_connect_is_reported_as_a_snowcone_error() -> None:
         pool.connect_all()
 
 
+def test_grow_opens_exactly_the_additional_connections() -> None:
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    pool.grow(2)
+    assert len(connector.calls) == 3
+    assert pool.size == 3
+
+
+def test_grow_reports_progress_against_the_new_total() -> None:
+    """The connect screen only asks about the connections beyond the first,
+    so progress has to count from where that first one left off."""
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    seen: list[tuple[int, int]] = []
+    pool.grow(2, progress=lambda done, total: seen.append((done, total)))
+    assert seen == [(2, 3), (3, 3)]
+
+
+def test_a_failure_to_grow_is_reported_as_a_snowcone_error() -> None:
+    connector = FakeConnector(fail_after=1)
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    with pytest.raises(ConnectionError_):
+        pool.grow(2)
+
+
+def test_grow_requires_at_least_one_additional_connection() -> None:
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    with pytest.raises(ValueError):
+        pool.grow(0)
+
+
 def test_acquire_hands_out_and_returns_a_connection() -> None:
     pool, _ = make_pool(size=1)
     pool.connect_all()

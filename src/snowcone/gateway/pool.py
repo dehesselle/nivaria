@@ -142,6 +142,32 @@ class ConnectionPool:
                 progress(index + 1, self.size)
         self._notify_usage()
 
+    def grow(
+        self, additional: int, progress: Callable[[int, int], None] | None = None
+    ) -> None:
+        """Open `additional` more connections on top of what is already open.
+
+        Same one-at-a-time rule as `connect_all`, for the same reason: this is
+        the path taken when the user agrees to more than the single connection
+        opened up front, and those prompts must not all land at once either.
+        `size` grows as each connection lands, so a caller reading it mid-grow
+        (the pool gauge, say) sees the true count rather than the eventual one.
+        """
+        if additional < 1:
+            raise ValueError("additional must be at least 1")
+        target = self.size + additional
+        for _ in range(additional):
+            try:
+                connection = self._connector(**self.params.to_connect_kwargs())
+            except Exception as error:
+                raise ConnectionError_(str(error)) from error
+            self._all.append(connection)
+            self._free.put(connection)
+            self.size += 1
+            if progress is not None:
+                progress(self.size, target)
+        self._notify_usage()
+
     @contextlib.contextmanager
     def acquire(self, timeout: float | None = None) -> Iterator[Any]:
         """Borrow a connection for the duration of the block.

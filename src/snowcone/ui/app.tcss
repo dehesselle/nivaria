@@ -114,6 +114,17 @@ PickerScreen > #dialog {
     max-height: 20;
 }
 
+/* ---- confirm modal ----------------------------------------------------- */
+
+ConfirmScreen > #dialog {
+    width: 60;
+    max-width: 100%;
+}
+
+#confirm-message {
+    margin: 1 0;
+}
+
 /* ---- status footer ---------------------------------------------------- */
 
 StatusFooter .footer-spacer {

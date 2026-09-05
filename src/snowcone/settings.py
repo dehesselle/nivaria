@@ -109,9 +109,11 @@ POOL_SIZE = Setting(
     key="pool_size",
     label="connection pool size",
     description=(
-        "How many persistent Snowflake connections to open at startup. Every "
-        "connection may cost an MFA prompt, so they are all opened up front "
-        "and then reused for the rest of the session."
+        "How many persistent Snowflake connections to open at startup. The "
+        "first is opened as soon as you connect; every connection may cost an "
+        "MFA prompt, so anything beyond that first one is only opened after "
+        "you confirm it in the connect dialog. All of them are then reused "
+        "for the rest of the session."
     ),
     group="Connection",
     default=3,

@@ -212,11 +212,21 @@ database-prime path does not, so the exposure is small.
 In a corporate account **every new connection can trigger an interactive MFA
 prompt**. The pool exists to make that a one-time event.
 
-- N connections are opened **eagerly at startup**, before the user starts
-  working, with progress reported as `Connecting 2/5 …`.
-- They are opened **sequentially**. Opening them in parallel would fan out N
-  browser windows or push notifications simultaneously — exactly the disruption
-  this design exists to avoid.
+- The connect dialog opens exactly **one** connection when submitted. There is
+  no point asking about the rest before knowing that one even works, and a
+  failed first connection is the common case the retry loop exists for.
+- If the configured pool size is more than one, success is followed by a
+  confirmation dialog spelling out how many *additional* connections that
+  means, with plain **OK** / **Cancel** options. Declining leaves the pool at
+  size one rather than failing or silently upgrading — which is also what
+  keeps a pool size of one always reachable on demand, handy under test and
+  for a quick look that would rather not field extra MFA prompts.
+- Confirmed growth, like the first connection, is opened **eagerly**, with
+  progress reported as `Connecting 2/5 …`.
+- Every connection — the first and any confirmed growth — is opened
+  **sequentially**. Opening them in parallel would fan out N browser windows or
+  push notifications simultaneously — exactly the disruption this design
+  exists to avoid.
 - Sessions are kept alive, and the driver's SSO/MFA token cache is enabled, so
   the session does not expire mid-browse and re-prompt hours later, and
   connections 2..N usually do not prompt at all.

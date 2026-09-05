@@ -10,6 +10,7 @@ from textual.widgets import Button, Input, Select, Static
 import snowcone.ui.app as app_module
 from snowcone.connections import RecentConnections, RecentEntry
 from snowcone.gateway.pool import EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA
+from snowcone.ui.screens.confirm import ConfirmScreen
 from snowcone.ui.screens.connect import ConnectScreen, RecentList
 from tests.fakes import FakeConnector
 
@@ -36,7 +37,7 @@ class Harness(App[None]):
         self.result = result
 
 
-def make_app(tmp_path, *, recent=None, connector=None, pool_size=2) -> Harness:
+def make_app(tmp_path, *, recent=None, connector=None, pool_size=1) -> Harness:
     screen = ConnectScreen(
         RecentConnections(tmp_path / "recent.json"),
         pool_size=pool_size,
@@ -138,7 +139,23 @@ async def test_nothing_is_connected_when_validation_fails(tmp_path) -> None:
 # ----------------------------------------------------------------- connect
 
 
-async def test_a_successful_connect_returns_a_pool_of_the_right_size(
+async def test_a_successful_connect_opens_only_one_connection_up_front(
+    tmp_path,
+) -> None:
+    """The rest are only worth prompting for once the first is known to
+    work."""
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=3)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        assert len(connector.calls) == 1
+        assert isinstance(pilot.app.screen, ConfirmScreen)
+
+
+async def test_confirming_growth_returns_a_pool_of_the_configured_size(
     tmp_path,
 ) -> None:
     connector = FakeConnector()
@@ -148,9 +165,42 @@ async def test_a_successful_connect_returns_a_pool_of_the_right_size(
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
         await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
     assert len(connector.calls) == 3
     assert app.result is not None
     assert app.result.size == 3
+
+
+async def test_declining_growth_returns_a_pool_of_just_the_one_connection(
+    tmp_path,
+) -> None:
+    """Also what keeps a pool size of 1 always reachable, e.g. under test."""
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=3)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        await pilot.press("tab", "enter")  # move focus to Cancel, then press it
+        await settle(pilot)
+    assert len(connector.calls) == 1
+    assert app.result is not None
+    assert app.result.size == 1
+
+
+async def test_a_pool_of_exactly_one_is_never_asked_about(tmp_path) -> None:
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=1)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+    assert len(connector.calls) == 1
+    assert app.result is not None
+    assert app.result.size == 1
 
 
 async def test_a_successful_connect_is_recorded_as_recent(tmp_path) -> None:
@@ -189,9 +239,11 @@ async def test_a_failed_connect_reports_why_and_re_enables_the_button(
         assert pilot.app.screen.query_one("#connect-go", Button).disabled is False
 
 
-async def test_progress_is_reported_while_connecting(tmp_path) -> None:
+async def test_progress_is_reported_for_the_additional_connections(tmp_path) -> None:
     """Opening the pool is where every MFA prompt happens, so an unexplained
-    pause is exactly what this has to avoid."""
+    pause is exactly what this has to avoid. The first connection reports
+    1/1 -- the eventual total is not known to be worth prompting for until
+    after it succeeds -- and the confirmed growth reports the rest."""
     seen: list[str] = []
     app = make_app(tmp_path, pool_size=3)
 
@@ -208,10 +260,13 @@ async def test_progress_is_reported_while_connecting(tmp_path) -> None:
             pilot.app.screen.query_one("#user", Input).value = "me"
             pilot.app.screen.submit()
             await settle(pilot)
+            await pilot.press("enter")
+            await settle(pilot)
     finally:
         ConnectScreen._status = original
 
-    assert any("1/3" in message for message in seen)
+    assert any("1/1" in message for message in seen)
+    assert any("2/3" in message for message in seen)
     assert any("3/3" in message for message in seen)
 
 

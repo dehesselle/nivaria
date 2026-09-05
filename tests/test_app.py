@@ -28,6 +28,8 @@ async def test_the_app_opens_the_connect_screen_first() -> None:
 
 
 async def test_connecting_hands_over_to_the_browser(monkeypatch, tmp_path) -> None:
+    """The default pool size is more than one, so this also exercises
+    confirming the extra connections on the way to the browser."""
     monkeypatch.setattr(app_module.paths, "cache_file", lambda: tmp_path / "cache.db")
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
@@ -36,6 +38,8 @@ async def test_connecting_hands_over_to_the_browser(monkeypatch, tmp_path) -> No
         screen.query_one("#account", Input).value = "ACME"
         screen.query_one("#user", Input).value = "me"
         screen.submit()
+        await settle(pilot)
+        await pilot.press("enter")  # confirm opening the additional connections
         await settle(pilot)
         assert isinstance(pilot.app.screen, MainScreen)
         assert app.pool is not None
