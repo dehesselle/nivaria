@@ -18,7 +18,7 @@ from snowcone.ui.views.base import ObjectView, view_for
 
 
 class DetailPane(Vertical):
-    """Shows whatever object the tree or the search bar last selected."""
+    """Shows whatever object the tree or the search modal last selected."""
 
     def __init__(self, repo: Repository, **kwargs) -> None:
         super().__init__(**kwargs)

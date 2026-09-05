@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 from textual.app import App
-from textual.containers import Vertical
 from textual.widgets import Input
 
 import snowcone.ui.app as app_module
@@ -577,11 +576,23 @@ async def test_switching_between_object_kinds_rebuilds_the_context(repo) -> None
 # ---------------------------------------------------------------- searching
 
 
+async def test_slash_opens_the_search_modal(repo) -> None:
+    from snowcone.ui.screens.search import SearchScreen
+
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.query_one(ObjectTree).focus()
+        await pilot.pause()
+        await pilot.press("slash")
+        await settle(pilot)
+        assert isinstance(app.screen, SearchScreen)
+        assert app.screen.query_one("#search-query", Input).has_focus
+
+
 async def test_a_search_hit_reveals_in_the_tree_and_fills_the_detail(repo) -> None:
     """A hit has to leave you somewhere you can keep browsing from, not a
     detail pane pointing at an object the tree has never heard of."""
-    from snowcone.ui.widgets.search_bar import SearchBar
-
     put_schemas(repo, "MYDB", "AAA", "BBB")
     put_tables(repo, "MYDB", "BBB", "STG_CUSTOMER_ORDERS")
     app = Harness(repo, RecordingFetch())
@@ -591,9 +602,11 @@ async def test_a_search_hit_reveals_in_the_tree_and_fills_the_detail(repo) -> No
         screen.set_database("MYDB")
         await settle(pilot)
 
-        screen.query_one("#search-query", Input).value = "stgord"
+        await pilot.press("slash")
         await settle(pilot)
-        screen.query_one(SearchBar)._choose(0)
+        app.screen.query_one("#search-query", Input).value = "stgord"
+        await settle(pilot)
+        await pilot.press("enter")
         await settle(pilot)
 
         assert screen.detail.ref.fqn == "MYDB.BBB.STG_CUSTOMER_ORDERS"
@@ -602,11 +615,7 @@ async def test_a_search_hit_reveals_in_the_tree_and_fills_the_detail(repo) -> No
         assert tree.cursor_node.data.key == "STG_CUSTOMER_ORDERS"
 
 
-async def test_searching_hides_the_context_bar(repo) -> None:
-    """The top pane shows one thing at a time: what you are looking at, or
-    what you are looking for."""
-    from snowcone.ui.widgets.search_bar import SearchBar
-
+async def test_escape_closes_the_search_modal_without_choosing(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")
     app = Harness(repo, RecordingFetch())
@@ -615,24 +624,13 @@ async def test_searching_hides_the_context_bar(repo) -> None:
         screen = app.screen
         screen.set_database("MYDB")
         await settle(pilot)
-        bar = screen.query_one("#context-bar", Vertical)
-        assert bar.display is True
 
-        screen.query_one("#search-query", Input).value = "ord"
-        await settle(pilot)
-        assert bar.display is False
-
-        screen.query_one(SearchBar).action_clear()
-        await settle(pilot)
-        assert bar.display is True
-
-
-async def test_slash_focuses_the_search_box(repo) -> None:
-    app = Harness(repo, RecordingFetch())
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        app.screen.query_one(ObjectTree).focus()
-        await pilot.pause()
         await pilot.press("slash")
         await settle(pilot)
-        assert app.screen.query_one("#search-query", Input).has_focus
+        app.screen.query_one("#search-query", Input).value = "ord"
+        await settle(pilot)
+        await pilot.press("escape")
+        await settle(pilot)
+
+        assert app.screen is screen
+        assert screen.detail.ref is None

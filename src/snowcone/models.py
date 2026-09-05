@@ -184,7 +184,7 @@ class Column:
 
 @dataclass(frozen=True)
 class ObjectRef:
-    """What the tree and the search bar hand to the detail pane."""
+    """What the tree and the search modal hand to the detail pane."""
 
     kind: ObjectKind
     database: str

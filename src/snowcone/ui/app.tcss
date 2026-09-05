@@ -243,26 +243,24 @@ StatusFooter #footer-pool {
     color: $text-muted;
 }
 
-/* ---- search ----------------------------------------------------------- */
+/* ---- search modal: 90% of the screen, room for a lot of matches -------- */
 
-#search {
-    height: auto;
+SearchScreen > #dialog {
+    width: 90%;
+    height: 90%;
 }
 
-#search-query {
+SearchScreen #search-query {
+    /* Input's default border needs three rows to show anything inside it;
+       squeezing that to one row without dropping the border first left the
+       text and cursor with nowhere to actually paint. */
     border: none;
     height: 1;
     padding: 0 1;
     background: $panel;
+    margin-bottom: 1;
 }
 
-#search-query:focus {
-    background: $boost;
-}
-
-#search-results {
-    height: auto;
-    max-height: 12;
-    border: none;
-    background: $surface;
+SearchScreen #search-results {
+    height: 1fr;
 }

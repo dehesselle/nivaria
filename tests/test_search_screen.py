@@ -1,4 +1,4 @@
-"""Find-as-you-type search over cached objects."""
+"""Find-as-you-type search over cached objects, as a modal dialog."""
 
 from __future__ import annotations
 
@@ -6,15 +6,14 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from textual.app import App, ComposeResult
-from textual.widgets import Input, OptionList
+from textual.app import App
+from textual.widgets import Input
 
 import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import ObjectKind, ObjectRef, objects_scope
-from snowcone.ui.messages import ObjectSelected
-from snowcone.ui.widgets.search_bar import SearchBar
+from snowcone.ui.screens.search import SearchScreen
 
 
 @pytest.fixture
@@ -25,26 +24,19 @@ def repo(tmp_path) -> Repository:
 
 
 class Harness(App[None]):
+    """Pushes the dialog on mount, the same way MainScreen.action_search
+    does, and records whatever it is dismissed with."""
+
     CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
 
     def __init__(self, repo: Repository, database: str | None = "MYDB") -> None:
         super().__init__()
         self._repo = repo
         self._database = database
-        self.selected: list[ObjectRef] = []
-        self.activity: list[bool] = []
-
-    def compose(self) -> ComposeResult:
-        yield SearchBar(self._repo, id="search")
+        self.selected: list[ObjectRef | None] = []
 
     def on_mount(self) -> None:
-        self.query_one(SearchBar).set_database(self._database)
-
-    def on_object_selected(self, event: ObjectSelected) -> None:
-        self.selected.append(event.ref)
-
-    def on_search_bar_activity(self, event: SearchBar.Activity) -> None:
-        self.activity.append(event.active)
+        self.push_screen(SearchScreen(self._repo, self._database), self.selected.append)
 
 
 def load(repo: Repository, scope, rows) -> None:
@@ -71,7 +63,7 @@ def put(repo: Repository, kind: ObjectKind, schema: str, *names: str, database="
 
 
 async def type_query(pilot, app: Harness, text: str) -> None:
-    app.query_one("#search-query", Input).value = text
+    app.screen.query_one("#search-query", Input).value = text
     for _ in range(4):
         await pilot.pause()
         await asyncio.sleep(0.05)
@@ -79,7 +71,7 @@ async def type_query(pilot, app: Harness, text: str) -> None:
 
 
 def shown(app: Harness) -> list[str]:
-    return [f"{ref.schema}.{ref.name}" for ref in app.query_one(SearchBar)._shown]
+    return [f"{ref.schema}.{ref.name}" for ref in app.screen._shown]
 
 
 # ----------------------------------------------------------------- corpus
@@ -114,6 +106,16 @@ def test_an_unknown_database_has_an_empty_corpus(repo) -> None:
     assert repo.search_corpus("NOPE") == []
 
 
+# ---------------------------------------------------------------- opening
+
+
+async def test_the_query_box_is_focused_on_open(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        assert app.screen.query_one("#search-query", Input).has_focus
+
+
 # ---------------------------------------------------------------- searching
 
 
@@ -122,9 +124,7 @@ async def test_results_appear_as_you_type(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         await pilot.pause()
-        assert app.query_one("#search-results", OptionList).display is False
         await type_query(pilot, app, "ord")
-        assert app.query_one("#search-results", OptionList).display is True
         assert set(shown(app)) == {"SALES.ORDERS", "SALES.ORDER_ITEMS"}
 
 
@@ -157,114 +157,13 @@ async def test_no_match_shows_nothing(repo) -> None:
         assert shown(app) == []
 
 
-async def test_clearing_the_query_hides_the_results(repo) -> None:
+async def test_clearing_the_query_empties_the_results(repo) -> None:
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         await pilot.pause()
         await type_query(pilot, app, "ord")
         await type_query(pilot, app, "")
-        assert app.query_one("#search-results", OptionList).display is False
-        assert app.activity[-1] is False
-
-
-async def test_escape_clears_the_search(repo) -> None:
-    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "ord")
-        app.query_one(SearchBar).action_clear()
-        await pilot.pause()
-        assert shown(app) == []
-        assert app.query_one("#search-query", Input).value == ""
-
-
-# --------------------------------------------------------------- selection
-
-
-async def test_submitting_chooses_the_top_hit(repo) -> None:
-    put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "ORDER_ITEMS")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "orders")
-        app.query_one("#search-query", Input).post_message(
-            Input.Submitted(app.query_one("#search-query", Input), "orders")
-        )
-        await pilot.pause()
-    assert app.selected[0].name == "ORDERS"
-
-
-async def test_a_chosen_result_carries_its_kind(repo) -> None:
-    put(repo, ObjectKind.PIPE, "RAW", "LOAD_ORDERS")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "load")
-        app.query_one(SearchBar)._choose(0)
-        await pilot.pause()
-    assert app.selected[0].kind is ObjectKind.PIPE
-
-
-# ------------------------------------------------------------------ corpus
-# freshness
-
-
-async def test_new_objects_become_searchable_after_a_cache_update(repo) -> None:
-    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "cust")
-        assert shown(app) == []
-
-        put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "CUSTOMERS")
-        app.query_one(SearchBar).cache_updated()
-        await type_query(pilot, app, "custo")
-        assert shown(app) == ["SALES.CUSTOMERS"]
-
-
-async def test_the_corpus_is_not_rebuilt_on_every_keystroke(repo) -> None:
-    """A database-wide prime lands dozens of updates a second; rebuilding on
-    each would be work nobody is waiting on."""
-    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        bar = app.query_one(SearchBar)
-        calls: list[str] = []
-        original = bar.repo.search_corpus
-
-        def spy(database):
-            calls.append(database)
-            return original(database)
-
-        bar.repo.search_corpus = spy
-        await type_query(pilot, app, "o")
-        await type_query(pilot, app, "or")
-        await type_query(pilot, app, "ord")
-        assert calls == ["MYDB"]
-
-
-async def test_switching_database_resets_the_search(repo) -> None:
-    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "ord")
-        assert shown(app) != []
-        app.query_one(SearchBar).set_database("OTHERDB")
-        await pilot.pause()
-        assert shown(app) == []
-        assert app.query_one("#search-query", Input).value == ""
-
-
-async def test_searching_without_a_database_is_empty_not_an_error(repo) -> None:
-    app = Harness(repo, database=None)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "ord")
         assert shown(app) == []
 
 
@@ -278,3 +177,87 @@ async def test_the_schema_prefix_does_not_outrank_the_object_name(repo) -> None:
         await pilot.pause()
         await type_query(pilot, app, "stgord")
         assert shown(app)[0] == "STAGING.STG_CUSTOMER_ORDERS"
+
+
+async def test_searching_without_a_database_is_empty_not_an_error(repo) -> None:
+    app = Harness(repo, database=None)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "ord")
+        assert shown(app) == []
+
+
+# --------------------------------------------------------------- selection
+
+
+async def test_enter_chooses_the_top_hit_and_closes_the_dialog(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "ORDER_ITEMS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders")
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.selected[0].name == "ORDERS"
+
+
+async def test_a_chosen_result_carries_its_kind(repo) -> None:
+    put(repo, ObjectKind.PIPE, "RAW", "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "load")
+        app.screen._choose(0)
+        await pilot.pause()
+    assert app.selected[0].kind is ObjectKind.PIPE
+
+
+async def test_escape_cancels_without_choosing(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "ord")
+        await pilot.press("escape")
+        await pilot.pause()
+    assert app.selected == [None]
+
+
+# ------------------------------------------------------------------ corpus
+# freshness
+
+
+async def test_the_corpus_is_built_once_not_on_every_keystroke(repo) -> None:
+    """A database prime lands dozens of scope updates a second; rebuilding on
+    each keystroke would be work nobody is waiting on -- and see search.py for
+    why there is no live update to react to anyway."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    calls: list[str] = []
+    original = repo.search_corpus
+
+    def spy(database):
+        calls.append(database)
+        return original(database)
+
+    repo.search_corpus = spy
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "o")
+        await type_query(pilot, app, "or")
+        await type_query(pilot, app, "ord")
+    assert calls == ["MYDB"]
+
+
+async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopens(
+    repo,
+) -> None:
+    """The corpus is a snapshot taken when the dialog opens; see search.py for
+    why a cache update reaching it while it is open is not on the table."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "CUSTOMERS")
+        await type_query(pilot, app, "cust")
+        assert shown(app) == []

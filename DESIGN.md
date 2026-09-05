@@ -36,12 +36,10 @@ Use these names when discussing changes.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                            Menu bar (F9)                                 │
 ├────────────────────┬─────────────────────────────────────────────────────┤
-│ ┌─ MYDB ──────────┐│ Search bar                                          │
-│ │                 │├ ....................................................│
-│ │                 ││ Context bar                                         │
-│ │                 ││  (replaced by Search results while searching)       │
-│ │   Object tree   │├─────────────────────────────────────────────────────┤
+│ ┌─ MYDB ──────────┐│ Context bar                                         │
+│ │                 │├─────────────────────────────────────────────────────┤
 │ │                 ││                                                     │
+│ │   Object tree   ││                                                     │
 │ │                 ││              Detail pane                            │
 │ │                 ││        (hosts exactly one Object view)              │
 │ └─────────────────┘│                                                     │
@@ -50,21 +48,38 @@ Use these names when discussing changes.
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
+`/` opens the **Search modal** over this screen, at roughly 90 % of the
+terminal:
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ┌────────────────────────────────────────────────────────────────────┐   │
+│ │ search objects                                                      │   │
+│ │ ......................................................................│
+│ │  STAGING.STG_CUSTOMER_ORDERS                                 table  │   │
+│ │  SALES.ORDERS                                                  view │   │
+│ │  RAW.LOAD_ORDERS                                               pipe │   │
+│ │  ...                                                                │   │
+│ └────────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
 | Name | What it is |
 |---|---|
 | **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, **Warehouse ...** (`w`) and **Role ...** (`r`) to open the same fuzzy-picker pattern as the database picker over cached warehouses/roles, applying the choice session-wide (see below). |
 | **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
-| **Top pane** | Holds the Search bar plus one of: Context bar, or Search results. |
-| **Search bar** | Find-as-you-type over every cached object in the current database. `/` focuses it. |
+| **Top pane** | Holds the Context bar. |
 | **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |
-| **Search results** | Ranked hits. Takes the Context bar's place while a query is active, because the top pane shows one thing at a time: what you are looking at, or what you are looking for. |
+| **Search modal** | Find-as-you-type over every cached object in the current database, opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
 | **Detail pane** | Hosts exactly one **Object view** at a time, chosen by object kind. |
 | **Object view** | The per-kind detail UI (e.g. Table view, Pipe view). Owns both its detail body and its Context bar contribution. |
 | **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
 
 The right-hand split is 25 % top pane / 75 % Detail pane; the left pane is 25 %
 of the width. All sizing is in `fr` units, never percentages, so panes stay
-resizable later without rework.
+resizable later without rework -- except the search modal, sized in `%` on
+purpose: it wants a share of whatever terminal it is in, not a fixed cell
+count.
 
 ---
 
@@ -428,14 +443,28 @@ indistinguishable from a healthy one until you read that field.
 
 ## Search
 
+A modal (`SearchScreen`), opened by `/` at roughly 90 % of the screen and
+closed by `escape` (dismisses with nothing chosen) or `enter` (opens the
+highlighted hit and closes). It is a modal rather than an always-mounted
+widget in the top pane because search is the primary way to navigate a
+database of thousands of objects, and it earns the room only a modal can take
+without permanently stealing it from the tree and detail pane.
+
 Find-as-you-type over every cached object in the current database, ranked by
 subsequence matching so `stgord` finds `STG_CUSTOMER_ORDERS`. Substring search
 would not, which is the whole point; sqlite's full-text matching cannot express
 it either, so ranking happens in Python over an in-memory corpus.
 
-The corpus is rebuilt lazily — a cache update marks it stale and the next
-keystroke rebuilds it. A database prime lands dozens of scope updates in a
-second, and rebuilding on each would be wasted work.
+The corpus is built once, when the dialog opens, from whatever the cache holds
+right then — there is no lazy staleness tracking to rebuild it while the
+dialog is closed, because there is no widget left mounted for a cache update
+to mark stale. This is also why it needs none: `SnowconeApp` routes
+`CacheUpdated` to `self.screen`, which while the modal is open is the modal
+itself, not `MainScreen`, so a background update would not reach a live corpus
+here any more than it reaches the tree or detail pane while any other modal
+(the database picker, say) is on top. Closing and reopening the dialog picks
+up whatever changed in between, at the cost a keystroke used to pay to notice
+a stale corpus.
 
 Matching scores **both `SCHEMA.NAME` and the bare name**, keeping whichever is
 better, with a small preference for the name. This is not gold-plating:
