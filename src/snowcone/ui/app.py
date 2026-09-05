@@ -28,11 +28,6 @@ class SnowconeApp(App[None]):
         self.repo: Repository | None = None
 
     def on_mount(self) -> None:
-        # paths.cache_file() called through the module, not imported by name, so
-        # test isolation can redirect it after this module was imported.
-        database = Database(paths.cache_file())
-        database.prepare()
-        self.repo = Repository(database)
         self._start()
 
     @work
@@ -40,7 +35,9 @@ class SnowconeApp(App[None]):
         """Connect, then hand over to the browser.
 
         A failed connect re-opens the dialog rather than dropping the user at a
-        dead screen, so the loop lives here.
+        dead screen, so the loop lives here. The cache is not opened until a
+        pool exists: which file that is depends on the connection's identity
+        (see `paths.cache_file`), which is not known any earlier than this.
         """
         pool = await self.push_screen_wait(
             ConnectScreen(
@@ -53,8 +50,7 @@ class SnowconeApp(App[None]):
             self.exit()
             return
         self.pool = pool
-        self.fetch = self._make_fetch(pool)
-        self.fetch.start()
+        self.switch_repo(pool)
         # push, not switch: push_screen_wait has already popped the connect
         # screen, so the stack top here is the default screen and switching
         # would try to pop a result callback it never had.
@@ -79,15 +75,46 @@ class SnowconeApp(App[None]):
             return
         old_fetch, old_pool = self.fetch, self.pool
         self.pool = pool
-        self.fetch = self._make_fetch(pool)
-        self.fetch.start()
+        self.switch_repo(pool)
         if isinstance(self.screen, MainScreen):
-            self.screen.fetch = self.fetch
             self.screen.pool = pool
+            self.screen.fetch = self.fetch
+            # A reconnect can just as well land on a different account or
+            # role as the last one -- same reasoning as a role switch, so the
+            # same reset applies: whatever was on screen belonged to the old
+            # identity's cache.
+            self.screen.set_repo(self.repo)
         if old_fetch is not None:
             old_fetch.stop()
         if old_pool is not None:
             old_pool.close()
+
+    def _open_repo(self, pool: ConnectionPool) -> Repository:
+        """The cache for whatever identity `pool.params` currently describes.
+        See `paths.cache_file` for why that identity is the whole key."""
+        database = Database(paths.cache_file(pool.params.account, pool.params.role))
+        database.prepare()
+        return Repository(database)
+
+    def restart_fetch(self, pool: ConnectionPool) -> None:
+        """A fresh FetchService against the current `self.repo` and `pool`.
+
+        Used to get fetching going again after it was stopped without the
+        identity actually changing -- e.g. a role switch that failed after
+        the fetch service was pre-emptively stopped to keep it from racing
+        the switch (see `MainScreen._switch_role`).
+        """
+        self.fetch = self._make_fetch(pool)
+        self.fetch.start()
+
+    def switch_repo(self, pool: ConnectionPool) -> None:
+        """Point at the cache for whatever identity `pool.params` now
+        describes, and restart fetch against it. Used after a fresh connect, a
+        reconnect, and a successful role switch -- anywhere the identity
+        behind `pool` may have just changed.
+        """
+        self.repo = self._open_repo(pool)
+        self.restart_fetch(pool)
 
     def _make_fetch(self, pool: ConnectionPool) -> FetchService:
         assert self.repo is not None

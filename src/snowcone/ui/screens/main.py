@@ -247,8 +247,11 @@ class MainScreen(Screen):
     # --------------------------------------------------------------- routing
 
     def on_cache_updated(self, event: CacheUpdated) -> None:
-        self.tree.cache_updated(event.scope)
-        self.detail.cache_updated(event.scope)
+        self._route_cache_update(event.scope)
+
+    def _route_cache_update(self, scope: Scope) -> None:
+        self.tree.cache_updated(scope)
+        self.detail.cache_updated(scope)
         self.search.cache_updated()
 
     def on_search_bar_activity(self, event: SearchBar.Activity) -> None:
@@ -299,6 +302,26 @@ class MainScreen(Screen):
     def _request(self, scope: Scope, priority: Priority) -> None:
         if self.fetch is not None:
             self.fetch.request(scope, priority)
+
+    # ----------------------------------------------------------------- repo
+
+    def set_repo(self, repo: Repository) -> None:
+        """Point every cache-reading widget at a different Repository.
+
+        Used for a role switch or a reconnect to a different identity -- see
+        `SnowconeApp.switch_repo`. Whatever was on screen was read out of the
+        old identity's cache file and cannot simply be relabelled against the
+        new one (a different file entirely), so this resets browsing state
+        the same way a fresh connect would: no database selected, nothing in
+        the detail pane, search cleared.
+        """
+        self.repo = repo
+        self.database = None
+        self.tree.set_repo(repo)
+        self.detail.set_repo(repo)
+        self.search.set_repo(repo)
+        self._context_view = None
+        self._rebuild_context(None)
 
     # -------------------------------------------------------------- database
 
@@ -410,10 +433,23 @@ class MainScreen(Screen):
 
     @work(thread=True)
     def _switch_role(self, role: str) -> None:
+        """Apply the switch, then repoint the app at that role's own cache.
+
+        The fetch service is stopped *before* the role itself changes, not
+        after: `pool.set_role` returning means every connection already
+        carries the new role, so a worker still bound to the old repo that
+        drew one of them afterward would write new-role results into the old
+        role's cache file -- the exact bleed a file-per-identity cache exists
+        to rule out. Stopping first closes that window entirely.
+        """
         assert self.pool is not None
+        if self.fetch is not None:
+            self.fetch.stop()
         try:
             self.pool.set_role(role)
-        except Exception as error:  # noqa: BLE001 -- see _switch_warehouse
+        # A worker thread boundary, same as fetch.py: the driver raises many
+        # unrelated types, and any escape here would kill the thread silently.
+        except Exception as error:  # noqa: BLE001
             message = str(error) or error.__class__.__name__
             self.app.call_from_thread(
                 self.notify,
@@ -421,6 +457,29 @@ class MainScreen(Screen):
                 severity="error",
                 timeout=8,
             )
+            # The role never changed, so the same cache is still correct --
+            # only the fetch service this method stopped needs restarting.
+            self.app.call_from_thread(self._role_switch_failed)
+            return
+        self.app.call_from_thread(self._role_switched)
+
+    def _role_switched(self) -> None:
+        assert self.pool is not None
+        self.app.switch_repo(self.pool)
+        self.fetch = self.app.fetch
+        self.set_repo(self.app.repo)
+        # Prefetched immediately rather than waiting for the picker's next
+        # open, same reasoning as on_mount: a brand-new role's cache file has
+        # nothing in it yet, and even a previously-visited one may have gone
+        # stale while this role was not the active one.
+        self._request(databases_scope(), Priority.INTERACTIVE)
+        self._request(warehouses_scope(), Priority.INTERACTIVE)
+        self._request(roles_scope(), Priority.INTERACTIVE)
+
+    def _role_switch_failed(self) -> None:
+        assert self.pool is not None
+        self.app.restart_fetch(self.pool)
+        self.fetch = self.app.fetch
 
     def action_refresh(self) -> None:
         """Explicitly refresh whatever the cursor is on."""

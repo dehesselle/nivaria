@@ -91,6 +91,16 @@ class ObjectTree(Tree[NodeData]):
         #: a cursor restore emits is not mistaken for a user selection.
         self.rebuilding = False
 
+    # ----------------------------------------------------------------- repo
+
+    def set_repo(self, repo: Repository) -> None:
+        """Point at a different cache entirely -- a role switch, or a
+        reconnect to a different identity. Whatever this showed was read out
+        of the old identity's cache file and cannot simply be relabelled
+        against the new one."""
+        self.repo = repo
+        self.set_database(None)
+
     # ------------------------------------------------------------- database
 
     def set_database(self, database: str | None) -> None:

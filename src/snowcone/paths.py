@@ -25,8 +25,29 @@ def recent_file() -> Path:
     return config_dir() / "recent.json"
 
 
-def cache_file() -> Path:
-    return cache_dir() / "cache.db"
+def cache_file(account: str, role: str | None) -> Path:
+    """The sqlite cache file for one (account, role) identity.
+
+    SHOW output is filtered by the session's role, and the mirror tables carry
+    no per-role column, so two different roles must never be able to read each
+    other's cached rows -- including two different accounts that happen to use
+    the same role name, e.g. a generic SYSADMIN. One file per identity makes
+    that a non-issue by construction, and switching back to a role already
+    used in this session reopens its own warm file rather than an empty one.
+
+    Warehouse is deliberately not part of the key: SHOW is served by
+    Snowflake's metadata layer and consults no warehouse, so nothing it
+    returns can vary with which one is active.
+    """
+    return cache_dir() / f"cache-{_slug(account)}-{_slug(role)}.db"
+
+
+def _slug(value: str | None) -> str:
+    """A filesystem-safe stand-in for an identifier that may contain almost
+    anything -- Snowflake quoted identifiers allow it."""
+    text = value or "default"
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in text)
+    return safe or "default"
 
 
 def write_json_atomic(path: Path, data: Any) -> None:

@@ -4,7 +4,8 @@ import asyncio
 
 from textual.widgets import Footer, Input
 
-import snowcone.ui.app as app_module
+from snowcone.cache.db import Database
+from snowcone.cache.repository import Repository
 from snowcone.ui.app import SnowconeApp
 from snowcone.ui.screens.connect import ConnectScreen
 from snowcone.ui.screens.main import MainScreen
@@ -27,10 +28,9 @@ async def test_the_app_opens_the_connect_screen_first() -> None:
         assert isinstance(pilot.app.screen, ConnectScreen)
 
 
-async def test_connecting_hands_over_to_the_browser(monkeypatch, tmp_path) -> None:
+async def test_connecting_hands_over_to_the_browser() -> None:
     """The default pool size is more than one, so this also exercises
     confirming the extra connections on the way to the browser."""
-    monkeypatch.setattr(app_module.paths, "cache_file", lambda: tmp_path / "cache.db")
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -46,12 +46,9 @@ async def test_connecting_hands_over_to_the_browser(monkeypatch, tmp_path) -> No
         assert app.fetch is not None
 
 
-async def test_connect_open_menu_item_reopens_the_connect_dialog(
-    monkeypatch, tmp_path
-) -> None:
+async def test_connect_open_menu_item_reopens_the_connect_dialog() -> None:
     """The menu bar's only item today: get back to the connect dialog without
     restarting the app, e.g. to switch accounts mid-session."""
-    monkeypatch.setattr(app_module.paths, "cache_file", lambda: tmp_path / "cache.db")
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -73,8 +70,7 @@ async def test_connect_open_menu_item_reopens_the_connect_dialog(
         assert isinstance(pilot.app.screen, ConnectScreen)
 
 
-async def test_quitting_the_connect_screen_exits(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(app_module.paths, "cache_file", lambda: tmp_path / "cache.db")
+async def test_quitting_the_connect_screen_exits() -> None:
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -83,27 +79,45 @@ async def test_quitting_the_connect_screen_exits(monkeypatch, tmp_path) -> None:
     assert app.pool is None
 
 
-async def test_the_cache_is_prepared_before_anything_is_fetched(
-    monkeypatch, tmp_path
-) -> None:
-    """The UI reads only the cache, so it has to exist before the first
-    screen can ask it anything."""
-    path = tmp_path / "cache.db"
-    monkeypatch.setattr(app_module.paths, "cache_file", lambda: path)
+async def test_the_cache_is_not_opened_until_an_identity_is_known() -> None:
+    """Which file to open depends on the connection's account and role (see
+    paths.cache_file), so unlike before, nothing is prepared at bare startup."""
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
+        assert app.repo is None
+
+
+async def test_the_cache_is_prepared_once_connected(tmp_path) -> None:
+    """The UI reads only the cache, so it has to exist before the browser
+    screen can ask it anything -- which is as soon as a pool exists."""
+    app = SnowconeApp(connector=FakeConnector())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = pilot.app.screen
+        screen.query_one("#account", Input).value = "ACME"
+        screen.query_one("#user", Input).value = "me"
+        screen.submit()
+        await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
         assert app.repo is not None
-        assert path.exists()
+        assert app.repo._db.path.exists()
 
 
 # ------------------------------------------------------------- main screen
 
 
-async def test_the_main_screen_has_its_three_panes() -> None:
+def _repo(tmp_path) -> Repository:
+    database = Database(tmp_path / "cache.db")
+    assert database.prepare()
+    return Repository(database)
+
+
+async def test_the_main_screen_has_its_three_panes(tmp_path) -> None:
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.app.push_screen(MainScreen(app.repo))
+        await pilot.app.push_screen(MainScreen(_repo(tmp_path)))
         await pilot.pause()
         screen = pilot.app.screen
         assert screen.query_one("#left")
@@ -112,12 +126,12 @@ async def test_the_main_screen_has_its_three_panes() -> None:
         assert screen.query_one("#detail")
 
 
-async def test_the_command_palette_binding_is_hidden_from_the_footer() -> None:
+async def test_the_command_palette_binding_is_hidden_from_the_footer(tmp_path) -> None:
     """The footer's right corner is reserved for snowcone's own status
     indicators, so Textual's ctrl+p key must not claim it."""
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.app.push_screen(MainScreen(app.repo))
+        await pilot.app.push_screen(MainScreen(_repo(tmp_path)))
         await pilot.pause()
         footer = pilot.app.screen.query_one(Footer)
         assert footer.show_command_palette is False

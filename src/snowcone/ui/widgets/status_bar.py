@@ -60,7 +60,11 @@ class PoolGauge(Static):
 class WarehouseLabel(Static):
     """The session's current warehouse, or "none" until one is set."""
 
-    warehouse: reactive[str | None] = reactive(None)
+    # layout=True: this is width: auto, and a plain reactive only repaints in
+    # place -- a name longer or shorter than whatever was there before would
+    # render clipped or leave trailing space until something else (e.g. a
+    # terminal resize) happened to force a relayout.
+    warehouse: reactive[str | None] = reactive(None, layout=True)
 
     def render(self) -> str:
         return self.warehouse or "none"
@@ -69,7 +73,7 @@ class WarehouseLabel(Static):
 class RoleLabel(Static):
     """The session's current role, or "none" until one is set."""
 
-    role: reactive[str | None] = reactive(None)
+    role: reactive[str | None] = reactive(None, layout=True)
 
     def render(self) -> str:
         return self.role or "none"
@@ -89,11 +93,11 @@ class StatusFooter(Footer):
         yield from super().compose()
         if self._bindings_ready:
             yield Static(classes="footer-spacer")
-            yield WarehouseLabel(id="footer-warehouse").data_bind(
-                warehouse=StatusFooter.warehouse,
-            )
             yield RoleLabel(id="footer-role").data_bind(
                 role=StatusFooter.role,
+            )
+            yield WarehouseLabel(id="footer-warehouse").data_bind(
+                warehouse=StatusFooter.warehouse,
             )
             yield Countdown(id="footer-countdown").data_bind(
                 remaining=StatusFooter.remaining,

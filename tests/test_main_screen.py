@@ -44,6 +44,12 @@ class RecordingFetch:
     def is_busy(self, scope) -> bool:
         return scope.key in self.busy
 
+    def start(self) -> None:
+        pass
+
+    def stop(self, timeout: float = 2.0) -> None:
+        pass
+
     @property
     def scopes(self) -> list[str]:
         return [key for key, _ in self.requests]

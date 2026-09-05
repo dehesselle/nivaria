@@ -11,9 +11,10 @@ from textual.app import App
 from textual.widgets import Input
 
 import snowcone.ui.app as app_module
+from snowcone import paths
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
-from snowcone.models import roles_scope, warehouses_scope
+from snowcone.models import databases_scope, roles_scope, warehouses_scope
 from snowcone.ui.screens.main import MainScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.widgets.status_bar import StatusFooter
@@ -29,20 +30,37 @@ def repo(tmp_path) -> Repository:
 
 
 class Harness(App[None]):
+    """Stands in for SnowconeApp: MainScreen's role-switch path needs the app
+    to repoint it at a different identity's cache (see SnowconeApp.switch_repo
+    / restart_fetch), so this fake provides the same two methods, backed by a
+    real per-identity Repository via the same paths.cache_file every real
+    switch goes through -- which is what lets a test prove a role's cache
+    survives being switched away from and back to.
+    """
+
     CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
 
     def __init__(self, repo: Repository, fetch, pool) -> None:
         super().__init__()
-        self._repo = repo
-        self._fetch = fetch
         self._pool = pool
+        self.repo = repo
+        self.fetch = fetch
 
     def on_mount(self) -> None:
-        self.push_screen(MainScreen(self._repo, self._fetch, self._pool))
+        self.push_screen(MainScreen(self.repo, self.fetch, self._pool))
 
     async def open_connect(self) -> None:
         """Never exercised here, but connect_menu_items always builds this
         item, so the menu dropdown needs it to resolve."""
+
+    def restart_fetch(self, pool) -> None:
+        self.fetch = RecordingFetch()
+
+    def switch_repo(self, pool) -> None:
+        database = Database(paths.cache_file(pool.params.account, pool.params.role))
+        database.prepare()
+        self.repo = Repository(database)
+        self.restart_fetch(pool)
 
 
 def put_warehouses(repo: Repository, *names: str) -> None:
@@ -151,6 +169,91 @@ async def test_picking_a_role_switches_every_pooled_connection(repo) -> None:
             await pilot.pause()
     assert pool.params.role == "SYSADMIN"
     assert all(c.executed == ['USE ROLE "SYSADMIN"'] for c in pool._all)
+
+
+async def test_a_successful_role_switch_repoints_the_screen_at_a_new_cache(
+    repo,
+) -> None:
+    """No clear_all, no wipe: a different Repository object entirely, backed
+    by that role's own file (see SnowconeApp.switch_repo)."""
+    put_roles(repo, "SYSADMIN")
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    app = Harness(repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        original_repo = app.screen.repo
+        await open_via_menu(pilot, "r")
+        app.screen.query_one("#picker-query", Input).value = "SYSADMIN"
+        await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
+        for _ in range(20):
+            if pool.params.role == "SYSADMIN":
+                break
+            await pilot.pause()
+        await pilot.pause()
+        assert app.screen.repo is not original_repo
+        assert app.repo is app.screen.repo
+        # Nothing was picked yet under the new identity, so browsing resets --
+        # same as a fresh connect, not a database switch.
+        assert app.screen.database is None
+
+
+async def test_switching_back_to_a_role_reopens_its_own_warm_cache(repo) -> None:
+    """The whole point of a file-per-identity cache: an admin alternating
+    between two roles should not pay a full refetch every time they switch
+    back to one they were already using this session."""
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+
+    # Already acting as ROLE_A, with a database cached from before -- as if
+    # this session had switched to it earlier.
+    pool.set_role("ROLE_A")
+    role_a_path = paths.cache_file(pool.params.account, "ROLE_A")
+    role_a_database = Database(role_a_path)
+    assert role_a_database.prepare()
+    role_a_repo = Repository(role_a_database)
+    put_roles(role_a_repo, "ROLE_A", "ROLE_B")
+    load(role_a_repo, databases_scope(), [{"name": "ROLE_A_DB", "comment": ""}])
+
+    app = Harness(role_a_repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        # Switch away to ROLE_B.
+        await open_via_menu(pilot, "r")
+        app.screen.query_one("#picker-query", Input).value = "ROLE_B"
+        await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
+        for _ in range(20):
+            if pool.params.role == "ROLE_B":
+                break
+            await pilot.pause()
+        assert pool.params.role == "ROLE_B"
+        # A brand-new identity's cache starts with nothing in it.
+        assert app.repo.databases(databases_scope()).is_empty
+        # SHOW ROLES would return the same roles regardless of which one is
+        # active, so ROLE_B's own cache offers ROLE_A again too.
+        put_roles(app.repo, "ROLE_A", "ROLE_B")
+
+        # Switch back to ROLE_A.
+        await open_via_menu(pilot, "r")
+        app.screen.query_one("#picker-query", Input).value = "ROLE_A"
+        await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
+        for _ in range(20):
+            if pool.params.role == "ROLE_A":
+                break
+            await pilot.pause()
+        await pilot.pause()
+
+    assert pool.params.role == "ROLE_A"
+    # The database cached before ever switching away is still there, warm --
+    # nothing had to be refetched to see it again.
+    assert [d.name for d in app.repo.databases(databases_scope()).rows] == ["ROLE_A_DB"]
 
 
 async def test_reselecting_the_current_warehouse_does_nothing(repo) -> None:

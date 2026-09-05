@@ -46,7 +46,7 @@ Use these names when discussing changes.
 │ │                 ││        (hosts exactly one Object view)              │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ ^d Database  / Search  r Refresh  q Quit  Warehouse  Role  Countdown  (2/5)│
+│ ^d Database  / Search  r Refresh  q Quit  Role  Warehouse  Countdown  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
@@ -60,7 +60,7 @@ Use these names when discussing changes.
 | **Search results** | Ranked hits. Takes the Context bar's place while a query is active, because the top pane shows one thing at a time: what you are looking at, or what you are looking for. |
 | **Detail pane** | Hosts exactly one **Object view** at a time, chosen by object kind. |
 | **Object view** | The per-kind detail UI (e.g. Table view, Pipe view). Owns both its detail body and its Context bar contribution. |
-| **Status footer** | Key bindings on the left; **Warehouse**/**Role** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
+| **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
 
 The right-hand split is 25 % top pane / 75 % Detail pane; the left pane is 25 %
 of the width. All sizing is in `fr` units, never percentages, so panes stay
@@ -109,6 +109,58 @@ query is self-contained, so they simply run concurrently. There is no
 dependency graph, no ordering constraint and no deadlock surface. If a schema
 really was dropped, its tables fetch fails, that failure is recorded, and the
 schema refresh removes the node on its own next pass.
+
+### One cache file per identity, not a role dimension on Scope
+
+A scope is keyed by database/schema/object/table — never by role. That is
+deliberate, not an oversight: `database` can be part of a scope key because it
+is explicit in the statement text (`SHOW SCHEMAS IN DATABASE X`), but role has
+no such syntax. It is pure session state, invisible in the SQL, so "which
+role was active" cannot be recovered from a scope alone — it would have to be
+stamped onto every row at fetch time from whatever the connection's role
+happened to be *right then*, which is a much bigger seam to open (every scope
+constructor, every mirror table's key, a schema migration) for a problem that
+has a far cheaper fix.
+
+That fix: `SHOW` output is filtered by role, so the whole cache — not one
+table, not one scope kind, all of it — is only ever valid for the role that
+was active while it was built. So instead of tagging rows, snowcone keeps a
+**separate sqlite file per (account, role)** (`paths.cache_file`), and treats
+switching roles as switching *which file* `Repository` points at, the same way
+`open_connect` already swaps in a whole new `ConnectionPool`. Within one file,
+everything above (scopes, the pass protocol, staleness) is exactly as
+described and needs no changes, because it was already correct for a single,
+fixed identity — the one thing that used to not hold across a role switch.
+
+This is also why it does not cost a wipe: switching back to a role visited
+earlier in the session reopens that role's own file, warm, rather than
+refetching everything. An admin who alternates between two roles all day
+pays one refetch per role the *first* time they use it that session, not
+every time they switch. Account is part of the key too, not just role, so
+two different accounts that happen to use a same-named role (a generic
+`SYSADMIN` exists in plenty of accounts) cannot share a file either. Warehouse
+is deliberately excluded from the key: `SHOW` needs no warehouse (see below),
+so nothing it returns can vary with which one is active.
+
+Because the identity is not known until a connection exists, the cache is not
+opened at app startup — `SnowconeApp.on_mount` no longer creates a `Repository`
+before the connect dialog even runs. It is opened once a pool exists
+(`SnowconeApp.switch_repo`), and re-opened by the same call after a role
+switch or a reconnect. `MainScreen.set_repo` (and the matching method on
+`ObjectTree`, `DetailPane`, `SearchBar`) is what repoints a widget at a
+different `Repository` object entirely; it resets browsing state exactly like
+a fresh connect would, since whatever was on screen was read out of a file
+that no longer applies.
+
+The one sequencing rule this depends on: the running `FetchService` must be
+stopped *before* `ConnectionPool.set_role` actually changes the role on every
+connection, not after. A role switch reuses the same pool — only the
+connections' session state changes — so a fetch worker still bound to the old
+`Repository` that drew a connection after the role flipped would execute
+under the new role but write results into the old role's file. Stopping fetch
+first closes that window; `MainScreen._switch_role` does this, and restarts a
+fresh `FetchService` against the new (or, on failure, the unchanged) repo
+afterward.
 
 ### The freshness ledger and the pass protocol
 
@@ -410,9 +462,9 @@ The right corner carries four indicators. Textual's command-palette binding is
 suppressed so the corner is available; the footer is otherwise Textual's, so
 key bindings keep working without being re-implemented.
 
-- **Warehouse** / **Role** — the pool's current warehouse and role, read
+- **Role** / **Warehouse** — the pool's current role and warehouse, read
   straight off the pool's connect params each tick; each reads `none` until
-  one has ever been set. Picked from **Connect > Warehouse ...** / **Role
+  one has ever been set. Picked from **Connect > Role ...** / **Warehouse
   ...**, the same fuzzy-picker-over-cached-rows pattern as the database
   picker, backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
   — small, flat, unpaged lists, unlike the object mirrors), requested
@@ -461,6 +513,16 @@ cooperation across independent sessions, which does not exist. The common
 failure mode, an invalid role or warehouse name, cannot happen here since the
 picker only ever offers names `SHOW ROLES` / `SHOW WAREHOUSES` actually
 returned.
+
+#### What a role change does to the cache
+
+A role switch does not touch the cache at all in the sense above — no row is
+deleted or invalidated. Instead the *file* changes: `MainScreen` is repointed
+at a different `Repository`, one sqlite file per (account, role). See "One
+cache file per identity, not a role dimension on Scope" earlier in this
+document for why, and for the fetch-service sequencing a same-pool role switch
+requires. Warehouse switches skip all of this: `SHOW` is metadata-layer and
+consults no warehouse, so nothing about the cache needs to change when it does.
 
 ---
 

@@ -15,7 +15,13 @@ from snowcone.models import ObjectKind, databases_scope, objects_scope, schemas_
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.screens.main import MainScreen
 from snowcone.ui.widgets.object_tree import ObjectTree
-from snowcone.ui.widgets.status_bar import Countdown, PoolGauge, StatusFooter
+from snowcone.ui.widgets.status_bar import (
+    Countdown,
+    PoolGauge,
+    RoleLabel,
+    StatusFooter,
+    WarehouseLabel,
+)
 from tests.fakes import make_pool
 from tests.test_main_screen import RecordingFetch, put_schemas
 
@@ -120,6 +126,55 @@ async def test_the_footer_carries_both_indicators(repo) -> None:
         footer = app.screen.query_one(StatusFooter)
         assert footer.query_one("#footer-countdown", Countdown)
         assert footer.query_one("#footer-pool", PoolGauge)
+
+
+async def test_the_role_label_appears_before_the_warehouse_label(repo) -> None:
+    """Requested order: role, then warehouse, left of the countdown/gauge."""
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        for _ in range(4):
+            await pilot.pause()
+        footer = app.screen.query_one(StatusFooter)
+        ids = [child.id for child in footer.children if child.id]
+    assert ids.index("footer-role") < ids.index("footer-warehouse")
+
+
+async def test_the_warehouse_label_widens_for_a_longer_name(repo) -> None:
+    """Regression: these labels are width: auto, and a plain reactive only
+    repaints in place -- a longer value stayed clipped at whatever width the
+    first one happened to need until something unrelated forced a relayout."""
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        # The footer recomposes via call_after_refresh once its bindings are
+        # ready (see test_key_bindings_are_still_shown); a single pause can
+        # catch it still empty, so #footer-warehouse would not exist yet.
+        for _ in range(4):
+            await pilot.pause()
+        footer = app.screen.query_one(StatusFooter)
+        footer.warehouse = "WH"
+        await pilot.pause()
+        short_width = footer.query_one(WarehouseLabel).size.width
+
+        footer.warehouse = "A_MUCH_LONGER_WAREHOUSE_NAME"
+        await pilot.pause()
+        long_width = footer.query_one(WarehouseLabel).size.width
+    assert long_width > short_width
+
+
+async def test_the_role_label_widens_for_a_longer_name(repo) -> None:
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        for _ in range(4):
+            await pilot.pause()
+        footer = app.screen.query_one(StatusFooter)
+        footer.role = "PUBLIC"
+        await pilot.pause()
+        short_width = footer.query_one(RoleLabel).size.width
+
+        footer.role = "A_MUCH_LONGER_ROLE_NAME"
+        await pilot.pause()
+        long_width = footer.query_one(RoleLabel).size.width
+    assert long_width > short_width
 
 
 async def test_the_command_palette_key_does_not_claim_the_corner(repo) -> None:

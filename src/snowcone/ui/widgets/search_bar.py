@@ -87,6 +87,11 @@ class SearchBar(Vertical):
         self._stale = True
         self.action_clear()
 
+    def set_repo(self, repo: Repository) -> None:
+        """Point at a different cache entirely -- see `ObjectTree.set_repo`."""
+        self.repo = repo
+        self.set_database(None)
+
     def cache_updated(self) -> None:
         """Mark the corpus stale; it is rebuilt on the next keystroke."""
         self._stale = True

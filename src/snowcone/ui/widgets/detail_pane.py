@@ -63,6 +63,16 @@ class DetailPane(Vertical):
         self._ref = None
         self.remove_children()
 
+    def set_repo(self, repo: Repository) -> None:
+        """Point at a different cache entirely -- see `ObjectTree.set_repo`.
+
+        The mounted view (if any) is bound to the old repo internally, so it
+        is discarded rather than re-pointed; `show()` builds a fresh one
+        against the new repo the next time something is selected.
+        """
+        self.repo = repo
+        self.clear()
+
     def cache_updated(self, scope: Scope) -> None:
         if self._view is not None:
             self._view.cache_updated(scope)

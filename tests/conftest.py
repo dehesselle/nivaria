@@ -33,7 +33,9 @@ def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(
         paths, "recent_file", lambda: tmp_path / "config" / "recent.json"
     )
-    monkeypatch.setattr(paths, "cache_file", lambda: tmp_path / "cache" / "cache.db")
+    # cache_file() is not patched directly: it takes (account, role) now, and
+    # its own implementation already builds on cache_dir(), patched above, so
+    # isolating that one function is enough to keep it under tmp_path too.
 
     monkeypatch.setattr(config, "path", tmp_path / "config" / "settings.json")
     monkeypatch.setattr(config, "_values", {})
