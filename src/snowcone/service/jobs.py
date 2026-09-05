@@ -77,19 +77,33 @@ def fetch_page(
     scope: Scope,
     cursor: str | None,
     limit: int,
+    *,
+    allow_reconnect: bool = True,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Fetch one page, returning (rows, next_cursor).
 
     `next_cursor` is the last row's name when the page came back full, and
     None when it did not -- a short page means the end of the result, which is
     what terminates the continuation chain.
+
+    `allow_reconnect` is passed straight through to the gateway: false for a
+    background-priority job, so a dead pooled connection is never repaired by
+    opening a new, possibly-interactive session while nobody is watching --
+    see `ConnectionPool.acquire`.
     """
     match scope.kind:
         case ScopeKind.DATABASES:
-            rows = gateway.show_databases(after=cursor, limit=limit)
+            rows = gateway.show_databases(
+                after=cursor, limit=limit, allow_reconnect=allow_reconnect
+            )
         case ScopeKind.SCHEMAS:
             assert scope.database is not None
-            rows = gateway.show_schemas(scope.database, after=cursor, limit=limit)
+            rows = gateway.show_schemas(
+                scope.database,
+                after=cursor,
+                limit=limit,
+                allow_reconnect=allow_reconnect,
+            )
         case ScopeKind.OBJECTS:
             assert scope.object_kind is not None
             assert scope.database is not None
@@ -100,6 +114,7 @@ def fetch_page(
                 scope.schema,
                 after=cursor,
                 limit=limit,
+                allow_reconnect=allow_reconnect,
             )
         case ScopeKind.COLUMNS:
             assert scope.database is not None
@@ -107,7 +122,12 @@ def fetch_page(
             assert scope.table is not None
             # A single table's columns are a small, bounded result, so this
             # one is deliberately not paged.
-            rows = gateway.show_columns(scope.database, scope.schema, scope.table)
+            rows = gateway.show_columns(
+                scope.database,
+                scope.schema,
+                scope.table,
+                allow_reconnect=allow_reconnect,
+            )
             return rows, None
         case ScopeKind.DATABASE_PRIME:
             raise ValueError(
@@ -129,6 +149,8 @@ def fetch_database(
     gateway: SnowflakeGateway,
     scope: Scope,
     cap: int = MAX_PAGE_SIZE,
+    *,
+    allow_reconnect: bool = True,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Every object of one kind in a database. Returns (rows, usable).
 
@@ -148,6 +170,10 @@ def fetch_database(
     assert scope.object_kind is not None
     assert scope.database is not None
     rows = gateway.show_objects_in_database(
-        scope.object_kind, scope.database, after=None, limit=cap
+        scope.object_kind,
+        scope.database,
+        after=None,
+        limit=cap,
+        allow_reconnect=allow_reconnect,
     )
     return rows, len(rows) < cap

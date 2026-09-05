@@ -90,7 +90,11 @@ class FakeGateway:
         return ordered[:limit]
 
     def show_databases(
-        self, *, after: str | None = None, limit: int = 1000
+        self,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
         self.calls.append(("show_databases", (after, limit)))
         return [
@@ -99,7 +103,12 @@ class FakeGateway:
         ]
 
     def show_schemas(
-        self, database: str, *, after: str | None = None, limit: int = 1000
+        self,
+        database: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
         self.calls.append(("show_schemas", (database, after, limit)))
         names = self._page(self.schemas.get(database, []), after, limit)
@@ -115,6 +124,7 @@ class FakeGateway:
         *,
         after: str | None = None,
         limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
         self.calls.append(("show_objects", (kind, database, schema, after, limit)))
         names = self._page(self.objects.get((database, schema, kind), []), after, limit)
@@ -138,6 +148,7 @@ class FakeGateway:
         *,
         after: str | None = None,
         limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
         self.calls.append(("show_objects_in_database", (kind, database, after, limit)))
         everything: list[tuple[str, str]] = []
@@ -161,7 +172,14 @@ class FakeGateway:
             for name, schema in everything[:limit]
         ]
 
-    def show_columns(self, database: str, schema: str, table: str) -> list[Row]:
+    def show_columns(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
         """Returns raw SHOW COLUMNS shape, so the real mapper is exercised."""
         self.calls.append(("show_columns", (database, schema, table)))
         raw = [

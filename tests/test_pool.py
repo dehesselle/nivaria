@@ -185,6 +185,95 @@ def test_a_closed_connection_is_replaced_on_acquire() -> None:
     assert len(connector.calls) == 2
 
 
+def test_the_pool_actually_heals_after_replacing_a_closed_connection() -> None:
+    """Regression: acquire() used to recycle the *original* dead connection
+    back into the free queue instead of the replacement, so the pool never
+    healed -- every later acquire reconnected fresh again and leaked the
+    one-shot connection it handed out, forever."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    with pool.acquire() as connection:
+        connection.closed = True
+    with pool.acquire() as replacement:
+        assert not replacement.is_closed()
+    # A third acquire must reuse the now-healthy replacement, not reconnect
+    # yet again.
+    with pool.acquire() as third:
+        assert third is replacement
+    assert len(connector.calls) == 2
+
+
+def test_background_priority_skips_a_dead_connection_for_a_live_one() -> None:
+    """The staleness sweep must never open a new session unattended, but it
+    also should not fail just because the one connection it happened to draw
+    is dead while others are perfectly fine."""
+    pool, connector = make_pool(size=2)
+    pool.connect_all()
+    with pool.acquire() as first:
+        first.closed = True
+    with pool.acquire(allow_reconnect=False) as connection:
+        assert not connection.is_closed()
+    # No reconnect attempted: still exactly the two connections opened by
+    # connect_all, and the dead one's slot is gone.
+    assert len(connector.calls) == 2
+    assert pool.size == 1
+
+
+def test_background_priority_fails_fast_when_nothing_idle_is_alive() -> None:
+    """Per the design: better to surface 'the pool is empty' immediately than
+    block or silently open a new, possibly-interactive session unattended."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    with pool.acquire() as connection:
+        connection.closed = True
+    with pytest.raises(ConnectionError_), pool.acquire(allow_reconnect=False):
+        pass
+    assert len(connector.calls) == 1
+    assert pool.size == 0
+
+
+def test_an_interactive_checkout_repairs_a_slot_a_background_job_dropped() -> None:
+    """The gap a background drop leaves behind is only ever repaired by an
+    interactive/visible caller, on demand -- the background sweep itself must
+    never grow the pool back by reconnecting."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    with pool.acquire() as connection:
+        connection.closed = True
+    with pytest.raises(ConnectionError_), pool.acquire(allow_reconnect=False):
+        pass
+    assert pool.size == 0
+    with pool.acquire() as repaired:
+        assert not repaired.is_closed()
+    assert pool.size == 1
+    assert len(connector.calls) == 2
+
+
+def test_background_priority_shrinks_the_pool_on_a_mid_use_failure() -> None:
+    """A connection that fails once actually queried -- the case a checkout
+    time is_closed() check cannot see -- must not be replaced unattended
+    either; it is dropped and the gauge shrinks instead."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    with pytest.raises(ValueError), pool.acquire(allow_reconnect=False):
+        raise ValueError("boom")
+    assert len(connector.calls) == 1
+    assert pool.size == 0
+
+
+def test_interactive_priority_still_reconnects_transparently() -> None:
+    """The default behaviour -- someone actively at the keyboard -- is
+    unaffected by the background-priority carve-out."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    with pool.acquire() as connection:
+        connection.closed = True
+    with pool.acquire(allow_reconnect=True) as replacement:
+        assert not replacement.is_closed()
+    assert len(connector.calls) == 2
+    assert pool.size == 1
+
+
 def test_a_pool_must_have_at_least_one_connection() -> None:
     with pytest.raises(ValueError):
         ConnectionPool(ConnectParams(account="a", user="u"), 0)

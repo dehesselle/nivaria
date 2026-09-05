@@ -23,11 +23,20 @@ Row = dict[str, Any]
 
 class SnowflakeGateway(Protocol):
     def show_databases(
-        self, *, after: str | None = None, limit: int = 1000
+        self,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
     def show_schemas(
-        self, database: str, *, after: str | None = None, limit: int = 1000
+        self,
+        database: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
     def show_objects(
@@ -38,6 +47,7 @@ class SnowflakeGateway(Protocol):
         *,
         after: str | None = None,
         limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
     def show_objects_in_database(
@@ -47,9 +57,17 @@ class SnowflakeGateway(Protocol):
         *,
         after: str | None = None,
         limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
-    def show_columns(self, database: str, schema: str, table: str) -> list[Row]: ...
+    def show_columns(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
 
 
 class PoolGateway:
@@ -63,9 +81,32 @@ class PoolGateway:
         self._pool = pool
 
     def _fetch(
-        self, statement: str, params: tuple[Any, ...] | None = None
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
-        with self._pool.acquire() as connection:
+        # One retry, against a freshly-acquired connection, covers what a
+        # checkout-time is_closed() check cannot see: a session Snowflake
+        # dropped server-side, which only surfaces once actually queried.
+        # Safe to retry blindly -- every statement here is a read-only SHOW or
+        # INFORMATION_SCHEMA SELECT -- so a genuine (non-staleness) failure
+        # just fails identically the second time, at the cost of one extra
+        # round trip on an already-rare path.
+        try:
+            return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
+        except Exception:  # noqa: BLE001 -- see pool.acquire, same boundary
+            return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
+
+    def _fetch_once(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None,
+        *,
+        allow_reconnect: bool,
+    ) -> list[Row]:
+        with self._pool.acquire(allow_reconnect=allow_reconnect) as connection:
             cursor = connection.cursor()
             try:
                 if params:
@@ -80,14 +121,29 @@ class PoolGateway:
                 cursor.close()
 
     def show_databases(
-        self, *, after: str | None = None, limit: int = 1000
+        self,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
-        return self._fetch(queries.show_databases(after=after, limit=limit))
+        return self._fetch(
+            queries.show_databases(after=after, limit=limit),
+            allow_reconnect=allow_reconnect,
+        )
 
     def show_schemas(
-        self, database: str, *, after: str | None = None, limit: int = 1000
+        self,
+        database: str,
+        *,
+        after: str | None = None,
+        limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
-        return self._fetch(queries.show_schemas(database, after=after, limit=limit))
+        return self._fetch(
+            queries.show_schemas(database, after=after, limit=limit),
+            allow_reconnect=allow_reconnect,
+        )
 
     def show_objects(
         self,
@@ -97,9 +153,11 @@ class PoolGateway:
         *,
         after: str | None = None,
         limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.show_objects(kind, database, schema, after=after, limit=limit)
+            queries.show_objects(kind, database, schema, after=after, limit=limit),
+            allow_reconnect=allow_reconnect,
         )
 
     def show_objects_in_database(
@@ -109,13 +167,25 @@ class PoolGateway:
         *,
         after: str | None = None,
         limit: int = 1000,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.show_objects_in_database(kind, database, after=after, limit=limit)
+            queries.show_objects_in_database(kind, database, after=after, limit=limit),
+            allow_reconnect=allow_reconnect,
         )
 
-    def show_columns(self, database: str, schema: str, table: str) -> list[Row]:
-        rows = self._fetch(queries.show_columns(database, schema, table))
+    def show_columns(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        rows = self._fetch(
+            queries.show_columns(database, schema, table),
+            allow_reconnect=allow_reconnect,
+        )
         # Mapped here rather than in the cache, so the mirror only ever sees
         # the INFORMATION_SCHEMA shape no matter which statement produced it.
         return queries.map_show_columns(rows)

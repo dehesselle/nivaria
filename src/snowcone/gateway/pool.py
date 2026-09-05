@@ -109,7 +109,14 @@ class ConnectionPool:
         if size < 1:
             raise ValueError("pool size must be at least 1")
         self.params = params
+        #: How many connections are actually alive right now -- what the Pool
+        #: gauge shows as the total. This can fall below `_target_size` when
+        #: a background job drops a dead connection rather than replace it.
         self.size = size
+        #: What the user asked for. Only `grow()` raises this; a background
+        #: shrink never lowers it, so an interactive/visible checkout later
+        #: knows there is a gap worth repairing.
+        self._target_size = size
         self._connector = connector or _real_connector
         self._on_usage_change = on_usage_change
         self._free: queue.LifoQueue[Any] = queue.LifoQueue()
@@ -156,6 +163,7 @@ class ConnectionPool:
         if additional < 1:
             raise ValueError("additional must be at least 1")
         target = self.size + additional
+        self._target_size = target
         for _ in range(additional):
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
@@ -169,38 +177,149 @@ class ConnectionPool:
         self._notify_usage()
 
     @contextlib.contextmanager
-    def acquire(self, timeout: float | None = None) -> Iterator[Any]:
+    def acquire(
+        self, timeout: float | None = None, *, allow_reconnect: bool = True
+    ) -> Iterator[Any]:
         """Borrow a connection for the duration of the block.
 
-        Blocks while every connection is busy. A connection found closed is
-        replaced rather than handed out -- that reconnect may prompt, which is
-        why it is reported through the usage gauge like any other activity.
+        Blocks while every connection is busy -- that is the ordinary "stalled
+        worker" state and is unaffected by `allow_reconnect`.
+
+        `allow_reconnect` gates whether a *bad* connection may cause a new
+        authenticated session to be opened, which for `externalbrowser` can
+        mean an interactive MFA prompt:
+
+        - True (the default -- an interactive or visible-priority caller,
+          someone actively at the keyboard): a dead connection is replaced
+          transparently, at checkout and if the body raises.
+        - False (the background staleness sweep, nobody watching): never open
+          a new session unattended. A dead connection found at checkout is
+          dropped and the pool tries whatever else is already idle instead of
+          waiting or reconnecting; a connection that fails mid-use is likewise
+          dropped rather than replaced. Either way the pool's advertised
+          `size` shrinks to match what is actually alive -- visible on the
+          Pool gauge -- and the gap is only repaired later by an
+          `allow_reconnect=True` caller that finds the pool short.
         """
         if self._closed:
             raise ConnectionError_("connection pool is closed")
-        connection = self._free.get(timeout=timeout)
+        connection = self._checkout(timeout=timeout, allow_reconnect=allow_reconnect)
         with self._lock:
             self._in_use += 1
         self._notify_usage()
+        ok = False
         try:
-            yield self._ensure_open(connection)
+            yield connection
+            ok = True
         finally:
             with self._lock:
                 self._in_use -= 1
-            self._free.put(connection)
+            if ok:
+                self._free.put(connection)
+            else:
+                self._discard(connection, allow_reconnect=allow_reconnect)
             self._notify_usage()
 
-    def _ensure_open(self, connection: Any) -> Any:
-        is_closed = getattr(connection, "is_closed", None)
-        if is_closed is None or not is_closed():
+    def _checkout(self, *, timeout: float | None, allow_reconnect: bool) -> Any:
+        connection = self._acquire_free(
+            timeout=timeout, allow_reconnect=allow_reconnect
+        )
+        if not self._is_dead(connection):
             return connection
-        replacement = self._connector(**self.params.to_connect_kwargs())
+        if allow_reconnect:
+            self._detach(connection)
+            return self._open_one()
+        # Background priority: skip past dead connections rather than
+        # reconnect unattended, but never wait for one that is merely busy
+        # elsewhere -- only what is already idle right now is a candidate.
+        self._drop(connection)
+        while True:
+            try:
+                candidate = self._free.get_nowait()
+            except queue.Empty as error:
+                raise ConnectionError_(
+                    "no live connection available without reconnecting"
+                ) from error
+            if not self._is_dead(candidate):
+                return candidate
+            self._drop(candidate)
+
+    def _acquire_free(self, *, timeout: float | None, allow_reconnect: bool) -> Any:
+        """Dequeue an idle connection -- this is also where a slot a
+        background job dropped earlier gets repaired.
+
+        A background job never opens a connection here: if none are alive at
+        all, waiting would hang forever (nothing left to ever free one up),
+        so that fails fast instead; if some are merely busy, blocking is the
+        ordinary, harmless "stalled worker" state and is left alone.
+
+        An interactive/visible caller (`allow_reconnect=True`) may find `size`
+        short of what growth last established (`_target_size`) because a
+        background job dropped a dead connection rather than replace it. If
+        nothing is idle to dequeue in that case, it opens the missing
+        connection itself right now, rather than waiting on a slot that may
+        never be handed back.
+        """
+        with self._lock:
+            live = self.size
+        if not allow_reconnect:
+            if live == 0:
+                raise ConnectionError_("connection pool is empty")
+            return self._free.get(timeout=timeout)
+        with self._lock:
+            short = self.size < self._target_size
+        if not short:
+            return self._free.get(timeout=timeout)
+        try:
+            return self._free.get_nowait()
+        except queue.Empty:
+            connection = self._open_one()
+            with self._lock:
+                self.size += 1
+            self._notify_usage()
+            return connection
+
+    @staticmethod
+    def _is_dead(connection: Any) -> bool:
+        is_closed = getattr(connection, "is_closed", None)
+        return is_closed is not None and is_closed()
+
+    def _detach(self, connection: Any) -> None:
+        """Close a bad connection and remove it from the live set."""
+        with contextlib.suppress(Exception):
+            connection.close()
         with self._lock:
             for index, existing in enumerate(self._all):
                 if existing is connection:
-                    self._all[index] = replacement
+                    del self._all[index]
                     break
-        return replacement
+
+    def _open_one(self) -> Any:
+        connection = self._connector(**self.params.to_connect_kwargs())
+        with self._lock:
+            self._all.append(connection)
+        return connection
+
+    def _drop(self, connection: Any) -> None:
+        """Detach a bad connection and shrink `size` to match -- no replacement."""
+        self._detach(connection)
+        with self._lock:
+            self.size -= 1
+        self._notify_usage()
+
+    def _discard(self, connection: Any, *, allow_reconnect: bool) -> None:
+        """A connection that just failed mid-use is never handed out again.
+
+        Mirrors the checkout-time policy: replaced in place (and queued for
+        the next caller) when reconnecting is allowed, otherwise dropped and
+        the pool shrinks -- repaired later by an interactive/visible caller.
+        """
+        self._detach(connection)
+        if allow_reconnect:
+            self._free.put(self._open_one())
+        else:
+            with self._lock:
+                self.size -= 1
 
     def close(self) -> None:
         self._closed = True

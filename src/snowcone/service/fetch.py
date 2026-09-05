@@ -172,10 +172,19 @@ class FetchService:
             return
         scope = job.scope
         generation = job.generation
+        # Never let an unattended sweep open a new authenticated session --
+        # see ConnectionPool.acquire.
+        allow_reconnect = job.priority is not Priority.BACKGROUND
         try:
             if generation == 0:
                 generation = self._repo.begin_pass(scope)
-            rows, cursor = fetch_page(self._gateway, scope, job.cursor, self._page_size)
+            rows, cursor = fetch_page(
+                self._gateway,
+                scope,
+                job.cursor,
+                self._page_size,
+                allow_reconnect=allow_reconnect,
+            )
         # A worker thread boundary: the driver, the network and sqlite all
         # raise unrelated exception types, and any escape here would kill the
         # thread and silently strand every later job.
@@ -217,8 +226,11 @@ class FetchService:
         assert scope.database is not None
         kind: ObjectKind = scope.object_kind
         database: str = scope.database
+        allow_reconnect = job.priority is not Priority.BACKGROUND
         try:
-            rows, usable = fetch_database(self._gateway, scope)
+            rows, usable = fetch_database(
+                self._gateway, scope, allow_reconnect=allow_reconnect
+            )
         # See _execute: a worker thread boundary.
         except Exception as error:  # noqa: BLE001
             message = str(error) or error.__class__.__name__

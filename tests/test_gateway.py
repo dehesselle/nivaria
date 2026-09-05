@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from snowcone.gateway.gateway import PoolGateway
-from snowcone.gateway.pool import ConnectionPool, ConnectParams
+from snowcone.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
 from snowcone.models import ObjectKind
 
 
@@ -15,6 +17,10 @@ class RecordingCursor:
         self.closed = False
 
     def execute(self, statement: str, params: tuple[Any, ...] | None = None) -> None:
+        self._owner.attempts += 1
+        if self._owner.fail_times > 0:
+            self._owner.fail_times -= 1
+            raise RuntimeError("session expired")
         self._owner.executed.append((statement, params))
         self.description = [(name,) for name in self._owner.columns]
         self._rows = list(self._owner.rows)
@@ -33,6 +39,11 @@ class RecordingConnection:
         self.columns: list[str] = ["name"]
         self.rows: list[tuple[Any, ...]] = [("ACME",)]
         self.closed_cursors = 0
+        #: How many times a query still needs to fail before it succeeds, and
+        #: how many times one was actually attempted -- together they let a
+        #: test prove there was exactly one retry, not a loop.
+        self.fail_times = 0
+        self.attempts = 0
 
     def cursor(self) -> RecordingCursor:
         return RecordingCursor(self)
@@ -126,3 +137,39 @@ def test_an_empty_result_is_an_empty_list_not_an_error() -> None:
     gateway, connection, _ = make_gateway()
     connection.rows = []
     assert gateway.show_databases() == []
+
+
+# --------------------------------------------------------- retry on failure
+
+
+def test_a_query_that_fails_once_is_retried_and_succeeds() -> None:
+    """A connection can look open at checkout and still fail the instant it
+    is used -- the gap a checkout-time is_closed() check cannot see. One
+    retry against a freshly-acquired connection covers it."""
+    gateway, connection, _ = make_gateway()
+    connection.fail_times = 1
+    assert gateway.show_databases() == [{"name": "ACME"}]
+    assert connection.attempts == 2
+
+
+def test_a_query_that_keeps_failing_surfaces_the_real_error() -> None:
+    """Exactly one retry, not a loop -- a genuine, non-staleness failure must
+    still surface rather than be retried forever."""
+    gateway, connection, _ = make_gateway()
+    connection.fail_times = 5
+    with pytest.raises(RuntimeError):
+        gateway.show_databases()
+    assert connection.attempts == 2
+
+
+def test_background_priority_retries_but_never_reconnects_unattended() -> None:
+    """The retry itself must respect allow_reconnect: a background-priority
+    caller whose only connection just failed must not have it replaced by a
+    freshly opened, possibly-interactive session."""
+    gateway, connection, _ = make_gateway()
+    connection.fail_times = 1
+    with pytest.raises(ConnectionError_):
+        gateway.show_databases(allow_reconnect=False)
+    # One real attempt, then the retry's own acquire fails fast -- no second
+    # query attempt against a reconnected session.
+    assert connection.attempts == 1

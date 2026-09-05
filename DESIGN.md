@@ -234,7 +234,25 @@ prompt**. The pool exists to make that a one-time event.
 - A worker that needs a connection while all N are busy simply blocks. That is
   the "stalled worker" state and it needs no special handling beyond the Pool
   gauge reflecting it.
-- A connection found closed is transparently replaced rather than handed out.
+- A connection found closed is transparently replaced rather than handed out
+  — but only for an **interactive or visible-priority** caller, someone
+  actively at the keyboard right now. A **background-priority** caller (the
+  staleness sweep, which can run for hours with nobody watching) must never
+  cause a new authenticated session to be opened unattended, since for
+  `externalbrowser` that can mean a browser/MFA prompt appearing while the
+  user is away. So a background job that draws a dead connection skips past
+  it to whatever else is already idle instead — never waiting on one that is
+  merely busy, only on one already known to be dead — and if nothing idle is
+  alive, it fails fast rather than block or reconnect. Either way, the
+  connection is closed and dropped from the pool rather than reused, so the
+  **Pool gauge's total honestly shrinks** (e.g. `(2/4)` instead of `(2/5)`)
+  to match what is actually alive. The gap this leaves is only ever repaired
+  by the next interactive/visible checkout that finds the pool short — it
+  opens the missing connection itself, on demand, restoring the total. A
+  connection that fails only once actually queried (the case a closed-check
+  at checkout cannot see) follows the same rule: replaced transparently for
+  an interactive/visible caller, retried once against the fresh connection;
+  dropped and shrunk, with no retry, for a background one.
 
 Two authenticators are supported and chosen in the connect dialog: browser SSO
 (`externalbrowser`) and password + MFA (`username_password_mfa`). The password
