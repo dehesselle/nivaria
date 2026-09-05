@@ -17,7 +17,7 @@ from typing import ClassVar
 from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
@@ -79,37 +79,48 @@ class ConnectScreen(Screen["ConnectionPool | None"]):
         with Horizontal(id="connect"):
             with Vertical(id="connect-form"):
                 yield Label("Connect to Snowflake", id="connect-title")
-                yield Select(
-                    [(label, value) for value, label in _AUTHENTICATOR_LABELS.items()],
-                    value=entry.authenticator if entry else EXTERNAL_BROWSER,
-                    allow_blank=False,
-                    id="authenticator",
-                )
-                yield Input(
-                    value=entry.account if entry else "",
-                    placeholder="account (ORG-ACCOUNT)",
-                    id="account",
-                )
-                yield Input(
-                    value=entry.user if entry else "",
-                    placeholder="user",
-                    id="user",
-                )
-                yield Input(
-                    placeholder="password",
-                    password=True,
-                    id="password",
-                )
-                yield Input(
-                    value=entry.role if entry else "",
-                    placeholder="role (optional)",
-                    id="role",
-                )
-                yield Input(
-                    value=entry.warehouse if entry else "",
-                    placeholder="warehouse (optional)",
-                    id="warehouse",
-                )
+                # Scrollable, with the status line and buttons outside it, so
+                # a short terminal loses field visibility rather than losing
+                # the means to submit or leave.
+                with VerticalScroll(id="connect-fields"):
+                    yield Select(
+                        [
+                            (label, value)
+                            for value, label in _AUTHENTICATOR_LABELS.items()
+                        ],
+                        value=entry.authenticator if entry else EXTERNAL_BROWSER,
+                        allow_blank=False,
+                        id="authenticator",
+                    )
+                    yield Input(
+                        value=entry.account if entry else "",
+                        placeholder="account (ORG-ACCOUNT)",
+                        id="account",
+                    )
+                    yield Input(
+                        value=entry.user if entry else "",
+                        placeholder="user",
+                        id="user",
+                    )
+                    yield Input(
+                        placeholder="password",
+                        password=True,
+                        id="password",
+                    )
+                    # Both optional and both short: pairing them buys back
+                    # three rows, which is the difference between fitting an
+                    # 80x24 terminal and not.
+                    with Horizontal(id="connect-optional"):
+                        yield Input(
+                            value=entry.role if entry else "",
+                            placeholder="role (optional)",
+                            id="role",
+                        )
+                        yield Input(
+                            value=entry.warehouse if entry else "",
+                            placeholder="warehouse (optional)",
+                            id="warehouse",
+                        )
                 yield Static("", id="connect-status")
                 with Horizontal(id="connect-buttons"):
                     yield Button("Connect", variant="primary", id="connect-go")

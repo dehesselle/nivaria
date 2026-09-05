@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 
@@ -325,3 +326,66 @@ async def test_quitting_returns_no_pool(tmp_path) -> None:
         await pilot.press("escape")
         await pilot.pause()
     assert app.result is None
+
+
+# ------------------------------------------------------------------ fitting
+
+
+def fits(widget, screen) -> bool:
+    region = widget.region
+    return (
+        region.x >= 0
+        and region.y >= 0
+        and region.right <= screen.size.width
+        and region.bottom <= screen.size.height
+    )
+
+
+@pytest.mark.parametrize("size", [(80, 24), (64, 16), (100, 30), (120, 40)])
+async def test_the_dialog_fits_the_terminal(tmp_path, size) -> None:
+    """Regression: a fixed 90x24 dialog was clipped on both axes in an 80x24
+    terminal -- the account box was cut off and neither button was reachable."""
+    app = make_app(tmp_path)
+    async with app.run_test(size=size) as pilot:
+        for _ in range(3):
+            await pilot.pause()
+        screen = pilot.app.screen
+        assert fits(screen.query_one("#connect"), screen)
+
+
+@pytest.mark.parametrize("size", [(80, 24), (64, 16), (120, 40)])
+async def test_both_buttons_stay_on_screen(tmp_path, size) -> None:
+    """A dialog you cannot submit or leave is worse than an ugly one, so the
+    buttons sit outside the scrollable field area."""
+    app = make_app(tmp_path)
+    async with app.run_test(size=size) as pilot:
+        for _ in range(3):
+            await pilot.pause()
+        screen = pilot.app.screen
+        for button_id in ("#connect-go", "#connect-quit"):
+            button = screen.query_one(button_id, Button)
+            assert button.display
+            assert fits(button, screen), f"{button_id} off screen at {size}"
+
+
+async def test_the_fields_scroll_when_they_do_not_fit(tmp_path) -> None:
+    """The short-terminal fallback: lose field visibility, never the means to
+    act on the dialog."""
+    from textual.containers import VerticalScroll
+
+    app = make_app(tmp_path)
+    async with app.run_test(size=(64, 16)) as pilot:
+        for _ in range(3):
+            await pilot.pause()
+        fields = pilot.app.screen.query_one("#connect-fields", VerticalScroll)
+        assert fields.max_scroll_y > 0
+
+
+async def test_every_field_is_still_reachable_on_a_short_terminal(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(64, 16)) as pilot:
+        for _ in range(3):
+            await pilot.pause()
+        screen = pilot.app.screen
+        for field in ("account", "user", "password", "role", "warehouse"):
+            assert screen.query_one(f"#{field}", Input)
