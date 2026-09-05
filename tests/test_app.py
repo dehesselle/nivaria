@@ -46,6 +46,33 @@ async def test_connecting_hands_over_to_the_browser(monkeypatch, tmp_path) -> No
         assert app.fetch is not None
 
 
+async def test_connect_open_menu_item_reopens_the_connect_dialog(
+    monkeypatch, tmp_path
+) -> None:
+    """The menu bar's only item today: get back to the connect dialog without
+    restarting the app, e.g. to switch accounts mid-session."""
+    monkeypatch.setattr(app_module.paths, "cache_file", lambda: tmp_path / "cache.db")
+    app = SnowconeApp(connector=FakeConnector())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = pilot.app.screen
+        screen.query_one("#account", Input).value = "ACME"
+        screen.query_one("#user", Input).value = "me"
+        screen.submit()
+        await settle(pilot)
+        await pilot.press("enter")  # confirm opening the additional connections
+        await settle(pilot)
+        assert isinstance(pilot.app.screen, MainScreen)
+
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("c")  # "Connect" menu's mnemonic
+        await pilot.pause()
+        await pilot.press("o")  # "Open..." item's mnemonic
+        await settle(pilot)
+        assert isinstance(pilot.app.screen, ConnectScreen)
+
+
 async def test_quitting_the_connect_screen_exits(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(app_module.paths, "cache_file", lambda: tmp_path / "cache.db")
     app = SnowconeApp(connector=FakeConnector())

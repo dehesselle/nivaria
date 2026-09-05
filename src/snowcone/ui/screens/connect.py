@@ -25,7 +25,7 @@ from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import Screen
+from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
@@ -57,8 +57,14 @@ class RecentList(OptionList):
             screen.delete_recent(self.highlighted)
 
 
-class ConnectScreen(Screen["ConnectionPool | None"]):
-    """Collects connection details and returns a connected pool."""
+class ConnectScreen(ModalScreen["ConnectionPool | None"]):
+    """Collects connection details and returns a connected pool.
+
+    A modal, not a plain Screen: opened at startup it looks the same either
+    way (nothing is behind it), but reopened from the "Connect > Open..."
+    menu item it dims the browser behind it instead of fully replacing it --
+    the same treatment `ConfirmScreen` and `PickerScreen` already get.
+    """
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "quit_app", "Quit", show=False),

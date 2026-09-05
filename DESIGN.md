@@ -34,7 +34,7 @@ Use these names when discussing changes.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                              Header                                      │
+│                            Menu bar (F9)                                 │
 ├────────────────────┬─────────────────────────────────────────────────────┤
 │ ┌─ MYDB ──────────┐│ Search bar                                          │
 │ │                 │├ ....................................................│
@@ -52,6 +52,7 @@ Use these names when discussing changes.
 
 | Name | What it is |
 |---|---|
+| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns. |
 | **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
 | **Top pane** | Holds the Search bar plus one of: Context bar, or Search results. |
 | **Search bar** | Find-as-you-type over every cached object in the current database. `/` focuses it. |

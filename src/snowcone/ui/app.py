@@ -53,8 +53,45 @@ class SnowconeApp(App[None]):
             self.exit()
             return
         self.pool = pool
+        self.fetch = self._make_fetch(pool)
+        self.fetch.start()
+        # push, not switch: push_screen_wait has already popped the connect
+        # screen, so the stack top here is the default screen and switching
+        # would try to pop a result callback it never had.
+        await self.push_screen(MainScreen(self.repo, self.fetch, pool))
+
+    async def open_connect(self) -> None:
+        """Reopen the connect dialog and swap in the resulting pool.
+
+        Invoked from the "Connect > Open..." menu item once already browsing.
+        A cancelled dialog leaves the existing connection untouched. The old
+        pool and fetch service are only stopped after the new ones are live,
+        so a failed reconnect never leaves the screen without either.
+        """
+        pool = await self.push_screen_wait(
+            ConnectScreen(
+                RecentConnections(),
+                pool_size=config.get(POOL_SIZE),
+                connector=self._connector,
+            )
+        )
+        if pool is None:
+            return
+        old_fetch, old_pool = self.fetch, self.pool
+        self.pool = pool
+        self.fetch = self._make_fetch(pool)
+        self.fetch.start()
+        if isinstance(self.screen, MainScreen):
+            self.screen.fetch = self.fetch
+            self.screen.pool = pool
+        if old_fetch is not None:
+            old_fetch.stop()
+        if old_pool is not None:
+            old_pool.close()
+
+    def _make_fetch(self, pool: ConnectionPool) -> FetchService:
         assert self.repo is not None
-        self.fetch = FetchService(
+        return FetchService(
             PoolGateway(pool),
             self.repo,
             workers=pool.size,
@@ -62,11 +99,6 @@ class SnowconeApp(App[None]):
             notify=self._cache_updated,
             on_error=self._fetch_failed,
         )
-        self.fetch.start()
-        # push, not switch: push_screen_wait has already popped the connect
-        # screen, so the stack top here is the default screen and switching
-        # would try to pop a result callback it never had.
-        await self.push_screen(MainScreen(self.repo, self.fetch, pool))
 
     def _cache_updated(self, scope, complete: bool) -> None:
         """Called on a fetch worker thread; hop to the event loop.

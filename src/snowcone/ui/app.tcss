@@ -1,3 +1,33 @@
+/* ---- menu bar ----------------------------------------------------------- */
+
+MenuBar {
+    dock: top;
+    height: 1;
+    layout: horizontal;
+    background: $panel;
+}
+
+MenuBar > .menubar--title {
+    width: auto;
+    padding: 0 2;
+    color: $text;
+}
+
+MenuBar > .menubar--title:hover {
+    background: $boost;
+}
+
+MenuBar > .menubar--title.-armed {
+    background: $boost;
+}
+
+MenuBar > #menubar-version {
+    width: 1fr;
+    padding: 0 2;
+    color: $text-disabled;
+    content-align: right middle;
+}
+
 /* ---- main screen: 25% tree / 75% detail, split 25/75 vertically ------- */
 
 MainScreen {

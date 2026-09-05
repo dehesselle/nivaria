@@ -7,6 +7,7 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
+import asyncio
 from math import ceil
 from typing import ClassVar
 
@@ -15,7 +16,6 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import Header
 
 from snowcone.cache.repository import Repository
 from snowcone.gateway.pool import ConnectionPool
@@ -23,10 +23,19 @@ from snowcone.models import Scope, databases_scope, prime_scope, schemas_scope
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import Priority
 from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.messages import CacheUpdated, ObjectSelected, ScopeNeeded
+from snowcone.ui.menus import connect_menu_items
+from snowcone.ui.messages import (
+    CacheUpdated,
+    MenuTitleClicked,
+    ObjectSelected,
+    ScopeNeeded,
+)
+from snowcone.ui.screens.menu_dropdown import MenuDropdown, MenuItem, OpenNeighbor
+from snowcone.ui.screens.menu_select import MenuBarSelectScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.views import pipe_view, table_view  # noqa: F401 -- registers views
 from snowcone.ui.widgets.detail_pane import DetailPane
+from snowcone.ui.widgets.menubar import MENU_IDS, MenuBar
 from snowcone.ui.widgets.object_tree import ObjectTree
 from snowcone.ui.widgets.search_bar import SearchBar
 from snowcone.ui.widgets.status_bar import StatusFooter
@@ -46,6 +55,7 @@ SWEEP = 5.0
 
 class MainScreen(Screen):
     BINDINGS: ClassVar[list[Binding]] = [
+        Binding("f9", "open_menu_bar", "Menu"),
         Binding("ctrl+d", "pick_database", "Database"),
         Binding("slash", "search", "Search"),
         Binding("r", "refresh", "Refresh"),
@@ -67,7 +77,7 @@ class MainScreen(Screen):
         self._context_view = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield MenuBar()
         with Vertical(id="left"):
             tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
             tree.border_title = NO_DATABASE
@@ -155,6 +165,69 @@ class MainScreen(Screen):
 
     def action_search(self) -> None:
         self.search.focus_query()
+
+    # ------------------------------------------------------------- menu bar
+
+    def on_menu_title_clicked(self, event: MenuTitleClicked) -> None:
+        self.action_open_menu(event.menu_id)
+
+    @work
+    async def action_open_menu(self, menu_id: str) -> None:
+        await self._open_menu(menu_id)
+
+    @work
+    async def action_open_menu_bar(self) -> None:
+        await self._open_menu(None)
+
+    async def _open_menu(self, menu_id: str | None) -> None:
+        menubar = self.query_one(MenuBar)
+        menubar.reveal()
+        if menubar.auto_hide:
+            # Reappearing changes layout (the panes give back its row), so
+            # the title's region -- needed to position the dropdown under it
+            # -- isn't valid again until after that reflow happens.
+            await self._wait_for_layout()
+        try:
+            if menu_id is None:
+                # Bar-only stage first, Midnight-Commander style: highlight a
+                # title without showing its items yet, so a mnemonic letter
+                # can never be ambiguous between "pick a top-level menu" and
+                # "pick an item" the way it would be if a dropdown were
+                # already open.
+                menu_id = await self.app.push_screen_wait(
+                    MenuBarSelectScreen(MENU_IDS[0], menubar)
+                )
+                if menu_id is None:
+                    return
+            await self._run_menu(menu_id)
+        finally:
+            menubar.set_armed(None)
+            menubar.conceal()
+
+    async def _run_menu(self, menu_id: str) -> None:
+        menubar = self.query_one(MenuBar)
+        menubar.set_armed(menu_id)
+        items = self._menu_items_for(menu_id)
+        title = self.query_one(f"#menu-{menu_id}")
+        result = await self.app.push_screen_wait(
+            MenuDropdown(items, x_offset=title.region.x, menu_id=menu_id)
+        )
+        if isinstance(result, OpenNeighbor):
+            index = MENU_IDS.index(menu_id)
+            next_id = MENU_IDS[(index + result.direction) % len(MENU_IDS)]
+            await self._run_menu(next_id)
+        elif isinstance(result, MenuItem) and result.enabled:
+            await result.handler()
+
+    async def _wait_for_layout(self) -> None:
+        layout_done = asyncio.Event()
+        self.call_after_refresh(layout_done.set)
+        await layout_done.wait()
+
+    def _menu_items_for(self, menu_id: str) -> list[MenuItem]:
+        if menu_id == "connect":
+            return connect_menu_items(self.app)
+        raise ValueError(f"unknown menu: {menu_id!r}")
 
     # --------------------------------------------------------------- routing
 
