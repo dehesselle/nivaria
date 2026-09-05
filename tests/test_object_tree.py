@@ -12,6 +12,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
+from snowcone.ui.messages import ObjectSelected, ScopeNeeded
 from snowcone.ui.widgets.object_tree import ObjectTree
 
 
@@ -24,7 +25,7 @@ class Harness(App[None]):
     def compose(self) -> ComposeResult:
         yield ObjectTree(self.repo, id="tree")
 
-    def on_object_tree_scope_needed(self, event: ObjectTree.ScopeNeeded) -> None:
+    def on_scope_needed(self, event: ScopeNeeded) -> None:
         self.needed.append((event.scope.key, event.interactive))
 
 
@@ -399,9 +400,7 @@ async def test_highlighting_an_object_announces_it(repo) -> None:
     seen: list[str] = []
 
     class Listening(Harness):
-        def on_object_tree_object_selected(
-            self, event: ObjectTree.ObjectSelected
-        ) -> None:
+        def on_object_selected(self, event: ObjectSelected) -> None:
             seen.append(event.ref.fqn)
 
     app = Listening(repo)
@@ -426,9 +425,7 @@ async def test_a_category_node_announces_nothing(repo) -> None:
     seen: list[str] = []
 
     class Listening(Harness):
-        def on_object_tree_object_selected(
-            self, event: ObjectTree.ObjectSelected
-        ) -> None:
+        def on_object_selected(self, event: ObjectSelected) -> None:
             seen.append(event.ref.fqn)
 
     app = Listening(repo)

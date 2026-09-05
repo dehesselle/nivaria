@@ -11,8 +11,9 @@ from snowcone.gateway.gateway import PoolGateway
 from snowcone.gateway.pool import ConnectionPool, Connector
 from snowcone.service.fetch import FetchService
 from snowcone.settings import PAGE_SIZE, POOL_SIZE, config
+from snowcone.ui.messages import CacheUpdated
 from snowcone.ui.screens.connect import ConnectScreen
-from snowcone.ui.screens.main import CacheUpdated, MainScreen
+from snowcone.ui.screens.main import MainScreen
 
 
 class SnowconeApp(App[None]):

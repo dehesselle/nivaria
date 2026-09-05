@@ -13,7 +13,10 @@ import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
+    ObjectKind,
+    columns_scope,
     databases_scope,
+    objects_scope,
     schemas_scope,
 )
 from snowcone.ui.screens.main import CacheUpdated, MainScreen
@@ -362,3 +365,193 @@ async def test_escaping_the_picker_chooses_nothing(repo) -> None:
         await pilot.press("escape")
         await settle(pilot)
     assert app.chosen is None
+
+
+# ------------------------------------------------------------- detail pane
+
+
+def put_tables(repo: Repository, database: str, schema: str, *names: str) -> None:
+    load(
+        repo,
+        objects_scope(ObjectKind.TABLE, database, schema),
+        [
+            {
+                "database_name": database,
+                "schema_name": schema,
+                "name": name,
+                "kind": "TABLE",
+                "comment": "",
+                "rows": 10,
+                "bytes": 1024,
+            }
+            for name in names
+        ],
+    )
+
+
+async def drill_to_tables(app, pilot, screen):
+    tree = screen.query_one(ObjectTree)
+    tree.root.children[0].expand()
+    await pilot.pause()
+    schema = tree.root.children[0].children[0]
+    schema.expand()
+    await pilot.pause()
+    tables = schema.children[0]
+    tables.expand()
+    await pilot.pause()
+    return tree, tables
+
+
+async def test_selecting_a_table_fills_the_detail_pane(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_database("MYDB")
+        await pilot.pause()
+        tree, tables = await drill_to_tables(app, pilot, screen)
+        tree.move_cursor(tables.children[0])
+        await settle(pilot)
+        assert screen.detail.ref is not None
+        assert screen.detail.ref.fqn == "MYDB.AAA.ORDERS"
+
+
+async def test_the_context_bar_follows_the_view(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_database("MYDB")
+        await pilot.pause()
+        tree, tables = await drill_to_tables(app, pilot, screen)
+        tree.move_cursor(tables.children[0])
+        await settle(pilot)
+        title = screen.query_one("#context-title")
+        assert "MYDB.AAA.ORDERS" in str(title.render())
+
+
+async def test_switching_database_clears_the_detail_pane(repo) -> None:
+    """What was on screen belongs to a database nobody is looking at now."""
+    put_databases(repo, "MYDB", "OTHER")
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_database("MYDB")
+        await pilot.pause()
+        tree, tables = await drill_to_tables(app, pilot, screen)
+        tree.move_cursor(tables.children[0])
+        await settle(pilot)
+        assert screen.detail.view is not None
+
+        screen.set_database("OTHER")
+        await settle(pilot)
+        assert screen.detail.view is None
+        assert len(screen.query("#context-title")) == 0
+
+
+async def test_the_sweep_covers_the_detail_pane_too(repo) -> None:
+    """The pane's columns scope is on screen, so it is exactly the sort of
+    thing the sweep exists to keep fresh."""
+    from snowcone.settings import CACHE_TTL, config
+
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    load(
+        repo,
+        columns_scope("MYDB", "AAA", "ORDERS"),
+        [
+            {
+                "TABLE_CATALOG": "MYDB",
+                "TABLE_SCHEMA": "AAA",
+                "TABLE_NAME": "ORDERS",
+                "COLUMN_NAME": "ID",
+                "ORDINAL_POSITION": 1,
+                "DATA_TYPE": "NUMBER",
+                "IS_NULLABLE": "YES",
+            }
+        ],
+    )
+    config.set(CACHE_TTL, 60)
+    try:
+        fetch = RecordingFetch()
+        app = Harness(repo, fetch)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            screen.set_database("MYDB")
+            await pilot.pause()
+            tree, tables = await drill_to_tables(app, pilot, screen)
+            tree.move_cursor(tables.children[0])
+            await settle(pilot)
+
+            with repo._db.connect() as connection:
+                connection.execute(
+                    "UPDATE cache_entry SET fetched_at = fetched_at - 999 "
+                    "WHERE scope = ?",
+                    (columns_scope("MYDB", "AAA", "ORDERS").key,),
+                )
+            fetch.requests.clear()
+            screen._sweep()
+            await pilot.pause()
+        assert "columns:MYDB.AAA.ORDERS" in fetch.scopes
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_switching_between_object_kinds_rebuilds_the_context(repo) -> None:
+    """Regression: remove_children() only queues the removal, so mounting the
+    incoming view's context widgets in the same tick raised DuplicateIds on
+    their shared ids. Only reachable by moving between two *kinds*, which is
+    why building the bar once never showed it."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    load(
+        repo,
+        objects_scope(ObjectKind.PIPE, "MYDB", "AAA"),
+        [
+            {
+                "database_name": "MYDB",
+                "schema_name": "AAA",
+                "name": "LOAD",
+                "definition": "COPY INTO t",
+                "comment": "",
+            }
+        ],
+    )
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_database("MYDB")
+        await pilot.pause()
+        tree = screen.query_one(ObjectTree)
+        tree.root.children[0].expand()
+        await pilot.pause()
+        schema = tree.root.children[0].children[0]
+        schema.expand()
+        await pilot.pause()
+
+        tables = schema.children[0]
+        tables.expand()
+        await pilot.pause()
+        tree.move_cursor(tables.children[0])
+        await settle(pilot)
+        assert "ORDERS" in str(screen.query_one("#context-title").render())
+
+        pipes = schema.children[2]
+        pipes.expand()
+        await pilot.pause()
+        tree.move_cursor(pipes.children[0])
+        await settle(pilot)
+
+        # One title, belonging to the pipe: the old one is gone, not doubled.
+        titles = screen.query("#context-title")
+        assert len(titles) == 1
+        assert "LOAD" in str(titles.first().render())

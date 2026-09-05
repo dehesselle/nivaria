@@ -140,3 +140,56 @@ StatusFooter #footer-pool {
     color: $footer-description-foreground;
     background: $footer-description-background;
 }
+
+/* ---- detail pane and views -------------------------------------------- */
+
+#context-bar {
+    height: auto;
+    padding: 0 1;
+}
+
+#context-title {
+    text-style: bold;
+}
+
+#context-detail {
+    color: $text-muted;
+}
+
+#detail-summary {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#detail-columns {
+    height: 1fr;
+}
+
+#detail-placeholder {
+    padding: 1 2;
+    color: $text-muted;
+}
+
+#pipe-problem {
+    height: auto;
+    padding: 0 1;
+    color: $error;
+    text-style: bold;
+}
+
+#pipe-facts {
+    height: auto;
+    padding: 1;
+}
+
+#pipe-definition-label {
+    padding: 0 1;
+    text-style: bold;
+}
+
+#pipe-definition {
+    height: 1fr;
+    padding: 0 1;
+    color: $text-muted;
+}

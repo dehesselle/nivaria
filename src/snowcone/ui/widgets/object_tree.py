@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from rich.text import Text
-from textual.message import Message
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
@@ -42,6 +41,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
+from snowcone.ui.messages import ObjectSelected, ScopeNeeded
 from snowcone.ui.widgets.plan import Child, plan_children
 
 #: Which object kinds get a category node under each schema, in display order.
@@ -74,25 +74,6 @@ class NodeData:
 
 class ObjectTree(Tree[NodeData]):
     """A lazy tree over the cached metadata of one database."""
-
-    class ObjectSelected(Message):
-        """A browsable object is under the cursor."""
-
-        def __init__(self, ref: ObjectRef) -> None:
-            self.ref = ref
-            super().__init__()
-
-    class ScopeNeeded(Message):
-        """This scope is missing or stale and something is showing it.
-
-        Posted rather than calling the fetch service directly so the tree
-        stays ignorant of scheduling, and so a test can assert on intent.
-        """
-
-        def __init__(self, scope: Scope, *, interactive: bool) -> None:
-            self.scope = scope
-            self.interactive = interactive
-            super().__init__()
 
     def __init__(self, repo: Repository, *, ttl: float = 900.0, **kwargs) -> None:
         super().__init__("root", data=NodeData(NodeKind.SCHEMAS, "root"), **kwargs)
@@ -161,7 +142,7 @@ class ObjectTree(Tree[NodeData]):
             return
         data = event.node.data
         if data is not None and data.ref is not None:
-            self.post_message(self.ObjectSelected(data.ref))
+            self.post_message(ObjectSelected(data.ref))
 
     # ------------------------------------------------------------ freshness
 
@@ -169,7 +150,7 @@ class ObjectTree(Tree[NodeData]):
         entry = self.repo.entry(scope)
         age = entry.age()
         if age is None or (self.ttl > 0 and age >= self.ttl):
-            self.post_message(self.ScopeNeeded(scope, interactive=interactive))
+            self.post_message(ScopeNeeded(scope, interactive=interactive))
 
     def visible_scopes(self) -> list[Scope]:
         """Scopes currently materialised, for the TTL sweep to consider.

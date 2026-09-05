@@ -152,6 +152,7 @@ class Column:
     ordinal_position: int
     data_type: str
     is_nullable: bool
+    default: str = ""
     comment: str = ""
 
 

@@ -29,7 +29,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from snowcone.cache.db import Database
-from snowcone.models import CacheState, Column, ObjectKind, Scope, ScopeKind, SFObject
+from snowcone.models import (
+    CacheState,
+    Column,
+    ObjectKind,
+    ObjectRef,
+    Scope,
+    ScopeKind,
+    SFObject,
+)
 from snowcone.models import Database as DatabaseRow
 from snowcone.models import Schema as SchemaRow
 
@@ -377,9 +385,28 @@ class Repository:
                 ordinal_position=row["ORDINAL_POSITION"] or 0,
                 data_type=row["DATA_TYPE"] or "",
                 is_nullable=(row["IS_NULLABLE"] or "").upper() == "YES",
+                default=row["COLUMN_DEFAULT"] or "",
                 comment=row["COMMENT"] or "",
             ),
         )
+
+    def object_detail(self, ref: ObjectRef) -> dict[str, Any] | None:
+        """One object's mirrored row, addressed by primary key.
+
+        A detail view wants one row; reading a whole schema's list and
+        filtering in Python would mean building several hundred objects to
+        show one.
+        """
+        spec = _OBJECT_TABLES[ref.kind]
+        statement = (
+            f"SELECT * FROM {spec.name} "
+            "WHERE database_name = ? AND schema_name = ? AND name = ?"
+        )
+        with self._db.connect() as connection:
+            row = connection.execute(
+                statement, (ref.database, ref.schema, ref.name)
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def child_count(self, scope: Scope) -> int:
         """The count behind a collapsed tree label, e.g. `Schemas (40)`."""

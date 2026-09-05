@@ -14,7 +14,6 @@ from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Header, Static
 
@@ -24,7 +23,10 @@ from snowcone.models import Scope, databases_scope, prime_scope, schemas_scope
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import Priority
 from snowcone.settings import CACHE_TTL, config
+from snowcone.ui.messages import CacheUpdated, ObjectSelected, ScopeNeeded
 from snowcone.ui.screens.picker import PickerScreen
+from snowcone.ui.views import pipe_view, table_view  # noqa: F401 -- registers views
+from snowcone.ui.widgets.detail_pane import DetailPane
 from snowcone.ui.widgets.object_tree import ObjectTree
 from snowcone.ui.widgets.status_bar import StatusFooter
 
@@ -39,15 +41,6 @@ TICK = 0.2
 #: every scope currently on screen, and nothing it finds is urgent by
 #: definition -- anything urgent was requested interactively.
 SWEEP = 5.0
-
-
-class CacheUpdated(Message):
-    """One cache scope changed. Routed, never broadcast."""
-
-    def __init__(self, scope: Scope, complete: bool) -> None:
-        self.scope = scope
-        self.complete = complete
-        super().__init__()
 
 
 class MainScreen(Screen):
@@ -69,6 +62,7 @@ class MainScreen(Screen):
         self.pool = pool
         self.database: str | None = None
         self._frame = 0
+        self._context_view = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -76,8 +70,9 @@ class MainScreen(Screen):
             yield Static(f"DB  {NO_DATABASE}", id="db-button")
             yield ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
         with Vertical(id="right"):
-            yield Vertical(id="context")
-            yield Vertical(id="detail")
+            with Vertical(id="context"):
+                yield Vertical(id="context-bar")
+            yield DetailPane(self.repo, id="detail")
         yield StatusFooter(show_command_palette=False)
 
     def on_mount(self) -> None:
@@ -138,19 +133,47 @@ class MainScreen(Screen):
         ttl = config.get(CACHE_TTL)
         if ttl <= 0:
             return
-        for scope in self.repo.stale_scopes(ttl, self.tree.visible_scopes()):
+        watched = [*self.tree.visible_scopes(), *self.detail.scopes()]
+        for scope in self.repo.stale_scopes(ttl, watched):
             self._request(scope, Priority.BACKGROUND)
 
     @property
     def tree(self) -> ObjectTree:
         return self.query_one("#tree", ObjectTree)
 
+    @property
+    def detail(self) -> DetailPane:
+        return self.query_one("#detail", DetailPane)
+
     # --------------------------------------------------------------- routing
 
     def on_cache_updated(self, event: CacheUpdated) -> None:
         self.tree.cache_updated(event.scope)
+        self.detail.cache_updated(event.scope)
 
-    def on_object_tree_scope_needed(self, event: ObjectTree.ScopeNeeded) -> None:
+    def on_object_selected(self, event: ObjectSelected) -> None:
+        view = self.detail.show(event.ref)
+        # Rebuilt only when the view instance actually changed: moving between
+        # two tables keeps the same view, so its context is already correct.
+        if view is not self._context_view:
+            self._context_view = view
+            self._rebuild_context(view)
+
+    @work(exclusive=True, group="context")
+    async def _rebuild_context(self, view) -> None:
+        """Replace the context bar's contents.
+
+        Awaited rather than fired and forgotten: remove_children() only
+        *queues* the removal, so mounting the next view's widgets in the same
+        tick collides with the outgoing ones on their ids. Exclusive, so a
+        quick run through several object kinds cannot interleave two rebuilds.
+        """
+        bar = self.query_one("#context-bar", Vertical)
+        await bar.remove_children()
+        if view is not None:
+            await bar.mount_all(list(view.compose_context()))
+
+    def on_scope_needed(self, event: ScopeNeeded) -> None:
         """The tree found something missing or stale.
 
         A whole schema's objects are cheaper to fetch for the entire database
@@ -181,6 +204,9 @@ class MainScreen(Screen):
             self.fetch.cancel_where(lambda scope: scope.database == previous)
         self.query_one("#db-button", Static).update(f"DB  {database or NO_DATABASE}")
         self.tree.set_database(database)
+        self.detail.clear()
+        self._context_view = None
+        self._rebuild_context(None)
 
     def action_pick_database(self) -> None:
         self._pick_database()
