@@ -15,7 +15,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import Header, Static
+from textual.widgets import Header
 
 from snowcone.cache.repository import Repository
 from snowcone.gateway.pool import ConnectionPool
@@ -69,8 +69,9 @@ class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="left"):
-            yield Static(f"DB  {NO_DATABASE}", id="db-button")
-            yield ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
+            tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
+            tree.border_title = NO_DATABASE
+            yield tree
         with Vertical(id="right"):
             with Vertical(id="context"):
                 yield SearchBar(self.repo, id="search")
@@ -222,7 +223,7 @@ class MainScreen(Screen):
             # Whatever was still queued for the old database is work nobody is
             # looking at any more.
             self.fetch.cancel_where(lambda scope: scope.database == previous)
-        self.query_one("#db-button", Static).update(f"DB  {database or NO_DATABASE}")
+        self.tree.border_title = database or NO_DATABASE
         self.tree.set_database(database)
         self.search.set_database(database)
         self.detail.clear()

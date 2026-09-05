@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from textual.app import App
 from textual.containers import Vertical
-from textual.widgets import Input, Static
+from textual.widgets import Input
 
 import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
@@ -109,8 +109,8 @@ async def test_no_database_is_selected_initially(repo) -> None:
     app = Harness(repo, fetch)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        button = app.screen.query_one("#db-button", Static)
-        assert "(none)" in str(button.render())
+        tree = app.screen.query_one(ObjectTree)
+        assert tree.border_title == "(none)"
 
 
 # ----------------------------------------------------------------- routing
@@ -193,7 +193,7 @@ async def test_an_interactive_need_outranks_a_visible_one(repo) -> None:
 # ---------------------------------------------------------------- database
 
 
-async def test_choosing_a_database_updates_the_button_and_the_tree(repo) -> None:
+async def test_choosing_a_database_updates_the_tree_title_and_contents(repo) -> None:
     put_databases(repo, "ALPHA", "BETA")
     put_schemas(repo, "BETA", "S1", "S2")
     fetch = RecordingFetch()
@@ -203,10 +203,9 @@ async def test_choosing_a_database_updates_the_button_and_the_tree(repo) -> None
         screen = app.screen
         screen.set_database("BETA")
         await pilot.pause()
-        assert "BETA" in str(screen.query_one("#db-button", Static).render())
-        assert (
-            screen.query_one(ObjectTree).root.children[0].label.plain == "Schemas (2)"
-        )
+        tree = screen.query_one(ObjectTree)
+        assert tree.border_title == "BETA"
+        assert tree.root.children[0].label.plain == "Schemas (2)"
 
 
 async def test_switching_database_cancels_the_old_ones_work(repo) -> None:

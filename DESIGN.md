@@ -36,15 +36,15 @@ Use these names when discussing changes.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                              Header                                      │
 ├────────────────────┬─────────────────────────────────────────────────────┤
-│ Database button    │ Search bar                                          │
-├────────────────────┤ ....................................................│
-│                    │ Context bar                                         │
-│                    │  (replaced by Search results while searching)       │
-│    Object tree     ├─────────────────────────────────────────────────────┤
-│                    │                                                     │
-│                    │              Detail pane                            │
-│                    │        (hosts exactly one Object view)              │
-│                    │                                                     │
+│ ┌─ MYDB ──────────┐│ Search bar                                          │
+│ │                 │├ ....................................................│
+│ │                 ││ Context bar                                         │
+│ │                 ││  (replaced by Search results while searching)       │
+│ │   Object tree   │├─────────────────────────────────────────────────────┤
+│ │                 ││                                                     │
+│ │                 ││              Detail pane                            │
+│ │                 ││        (hosts exactly one Object view)              │
+│ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
 │ ^d Database  / Search  r Refresh  q Quit          Countdown  Pool gauge  │
 └──────────────────────────── Status footer ───────────────────────────────┘
@@ -52,8 +52,7 @@ Use these names when discussing changes.
 
 | Name | What it is |
 |---|---|
-| **Database button** | One line showing the current database. Click or `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
-| **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. |
+| **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
 | **Top pane** | Holds the Search bar plus one of: Context bar, or Search results. |
 | **Search bar** | Find-as-you-type over every cached object in the current database. `/` focuses it. |
 | **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |
