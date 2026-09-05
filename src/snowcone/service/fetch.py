@@ -1,0 +1,214 @@
+"""The background fetch scheduler.
+
+Nothing here touches a widget. A worker writes its page into sqlite and then
+calls `notify(scope, complete)`; the UI layer is responsible for marshalling
+that onto the event loop (`App.call_from_thread`) and routing it to whichever
+single node or view cares about that scope.
+
+Scopes are deliberately **independent of one another**. It is tempting to think
+a `tables:MYDB.PUBLIC` fetch must wait for `schemas:MYDB` to finish refreshing,
+but `SHOW TABLES IN SCHEMA MYDB.PUBLIC` is a self-contained query either way,
+so the two just run concurrently on different pool connections. If the schema
+really was dropped, the tables job fails, that failure lands in the ledger, and
+the schema refresh removes the node on its own sweep. No dependency graph, no
+ordering constraints, and no deadlock surface.
+"""
+
+from __future__ import annotations
+
+import logging
+import queue
+import threading
+from collections.abc import Callable
+
+from snowcone.cache.repository import Repository
+from snowcone.gateway.gateway import SnowflakeGateway
+from snowcone.models import Scope
+from snowcone.service.jobs import SHUTDOWN, FetchJob, Priority, fetch_page
+
+_log = logging.getLogger(__name__)
+
+Notify = Callable[[Scope, bool], None]
+OnError = Callable[[Scope, str], None]
+
+
+class FetchService:
+    def __init__(
+        self,
+        gateway: SnowflakeGateway,
+        repo: Repository,
+        *,
+        workers: int = 1,
+        page_size: int = 1000,
+        notify: Notify | None = None,
+        on_error: OnError | None = None,
+    ) -> None:
+        self._gateway = gateway
+        self._repo = repo
+        self._workers = max(1, workers)
+        self._page_size = page_size
+        self._notify = notify
+        self._on_error = on_error
+
+        self._queue: queue.PriorityQueue[FetchJob] = queue.PriorityQueue()
+        self._lock = threading.Lock()
+        #: The one authoritative job per scope. A job dequeued that is no
+        #: longer the value here has been superseded and is skipped -- which is
+        #: how a priority upgrade works, since PriorityQueue has no decrease-key.
+        self._pending: dict[Scope, FetchJob] = {}
+        self._running: set[Scope] = set()
+        #: Scopes cancelled while a page was already in flight. Checked before
+        #: a continuation is enqueued, since the running page cannot be stopped.
+        self._cancelled: set[Scope] = set()
+        self._threads: list[threading.Thread] = []
+        self._started = False
+
+    # -------------------------------------------------------------- control
+
+    def start(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        for index in range(self._workers):
+            thread = threading.Thread(
+                target=self._run, name=f"snowcone-fetch-{index}", daemon=True
+            )
+            thread.start()
+            self._threads.append(thread)
+
+    def stop(self, timeout: float = 2.0) -> None:
+        if not self._started:
+            return
+        for _ in self._threads:
+            self._queue.put(SHUTDOWN)
+        for thread in self._threads:
+            thread.join(timeout=timeout)
+        self._threads.clear()
+        self._started = False
+
+    # --------------------------------------------------------------- public
+
+    def request(self, scope: Scope, priority: Priority = Priority.INTERACTIVE) -> bool:
+        """Ask for a scope to be refreshed. Returns whether a job was queued.
+
+        Deduplicated: a scope already running is left alone, and a scope
+        already queued is only re-queued when this request outranks it. That
+        is what stops a burst of expand events from queueing the same work
+        five times over.
+        """
+        with self._lock:
+            self._cancelled.discard(scope)
+            if scope in self._running:
+                return False
+            existing = self._pending.get(scope)
+            if existing is not None and existing.priority <= priority:
+                return False
+            job = FetchJob(priority=priority, scope=scope)
+            self._pending[scope] = job
+        self._queue.put(job)
+        return True
+
+    def cancel_where(self, predicate: Callable[[Scope], bool]) -> list[Scope]:
+        """Drop queued work matching `predicate`, e.g. on a database switch.
+
+        A page already in flight still finishes -- it cannot be interrupted --
+        but its continuation is suppressed, so the chain stops after at most
+        one more page.
+        """
+        with self._lock:
+            doomed = [scope for scope in self._pending if predicate(scope)]
+            for scope in doomed:
+                del self._pending[scope]
+            for scope in self._running:
+                if predicate(scope):
+                    self._cancelled.add(scope)
+                    doomed.append(scope)
+        return doomed
+
+    @property
+    def pending_count(self) -> int:
+        with self._lock:
+            return len(self._pending)
+
+    def is_busy(self, scope: Scope) -> bool:
+        """Whether this scope is queued or mid-fetch, for a spinner."""
+        with self._lock:
+            return scope in self._running or scope in self._pending
+
+    # -------------------------------------------------------------- workers
+
+    def _run(self) -> None:
+        while True:
+            job = self._queue.get()
+            if job.shutdown:
+                return
+            if not self._claim(job):
+                continue
+            try:
+                self._execute(job)
+            finally:
+                with self._lock:
+                    self._running.discard(job.scope)
+
+    def _claim(self, job: FetchJob) -> bool:
+        """Take ownership of a dequeued job, unless it has been superseded."""
+        with self._lock:
+            if self._pending.get(job.scope) is not job:
+                return False
+            del self._pending[job.scope]
+            self._running.add(job.scope)
+            return True
+
+    def _execute(self, job: FetchJob) -> None:
+        scope = job.scope
+        generation = job.generation
+        try:
+            if generation == 0:
+                generation = self._repo.begin_pass(scope)
+            rows, cursor = fetch_page(self._gateway, scope, job.cursor, self._page_size)
+        # A worker thread boundary: the driver, the network and sqlite all
+        # raise unrelated exception types, and any escape here would kill the
+        # thread and silently strand every later job.
+        except Exception as error:  # noqa: BLE001
+            message = str(error) or error.__class__.__name__
+            if generation:
+                self._repo.fail_pass(scope, generation, message)
+            self._report(scope, message)
+            self._announce(scope, complete=True)
+            return
+
+        if not self._repo.write_page(scope, generation, rows, cursor):
+            # A newer pass claimed this scope while the page was in flight.
+            return
+
+        if cursor is None:
+            self._repo.finish_pass(scope, generation)
+            self._announce(scope, complete=True)
+            return
+
+        self._announce(scope, complete=False)
+        with self._lock:
+            if scope in self._cancelled:
+                self._cancelled.discard(scope)
+                return
+            continuation = job.next_page(cursor, generation)
+            self._pending[scope] = continuation
+        self._queue.put(continuation)
+
+    def _announce(self, scope: Scope, *, complete: bool) -> None:
+        if self._notify is None:
+            return
+        # A listener raising here would kill the worker thread and silently
+        # strand every later job, so it is contained.
+        try:
+            self._notify(scope, complete)
+        except Exception:  # noqa: BLE001 -- see _execute
+            _log.exception("cache-update listener failed for %s", scope)
+
+    def _report(self, scope: Scope, message: str) -> None:
+        if self._on_error is None:
+            return
+        try:
+            self._on_error(scope, message)
+        except Exception:  # noqa: BLE001 -- see _execute
+            _log.exception("error listener failed for %s", scope)
