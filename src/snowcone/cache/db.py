@@ -24,8 +24,9 @@ from pathlib import Path
 #: version is just the length. Keep each one idempotent: a crash between the
 #: schema change and the version bump would otherwise leave a file that can
 #: never be opened again.
-_MIGRATIONS: tuple[str, ...] = (
-    files("snowcone.cache").joinpath("schema.sql").read_text(),
+_MIGRATIONS: tuple[str, ...] = tuple(
+    files("snowcone.cache").joinpath(name).read_text()
+    for name in ("schema.sql", "search.sql")
 )
 
 SCHEMA_VERSION = len(_MIGRATIONS)

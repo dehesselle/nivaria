@@ -57,6 +57,9 @@ SCHEMAS_KEY = "__schemas__"
 
 
 class NodeKind(StrEnum):
+    #: The hidden root. It holds the Schemas node and nothing else, and owns
+    #: no scope -- calling it SCHEMAS made it look like a node that did.
+    ROOT = "root"
     SCHEMAS = "schemas"
     SCHEMA = "schema"
     CATEGORY = "category"
@@ -76,7 +79,7 @@ class ObjectTree(Tree[NodeData]):
     """A lazy tree over the cached metadata of one database."""
 
     def __init__(self, repo: Repository, *, ttl: float = 900.0, **kwargs) -> None:
-        super().__init__("root", data=NodeData(NodeKind.SCHEMAS, "root"), **kwargs)
+        super().__init__("root", data=NodeData(NodeKind.ROOT, "root"), **kwargs)
         self.repo = repo
         self.ttl = ttl
         self.show_root = False
@@ -105,6 +108,36 @@ class ObjectTree(Tree[NodeData]):
         )
         self._scoped[scope] = node
         self._ensure(scope, interactive=True)
+
+    def reveal(self, ref: ObjectRef) -> bool:
+        """Expand down to an object and put the cursor on it.
+
+        So a search hit leaves you somewhere you can keep browsing from,
+        rather than showing a detail pane with the tree still elsewhere.
+        Everything it walks is already cached -- expanding materialises from
+        sqlite -- so this stays synchronous.
+        """
+        if self.database != ref.database:
+            return False
+        path = (SCHEMAS_KEY, ref.schema, ref.kind.value, ref.name)
+        node = self.root
+        for key in path:
+            # The root is not expandable and holds the Schemas node already;
+            # every level below it has to be materialised on the way down.
+            if node is not self.root:
+                node.expand()
+                self._apply(node, self._desired(node))
+            for child in node.children:
+                if child.data is not None and child.data.key == key:
+                    node = child
+                    break
+            else:
+                return False
+        # Not an immediate move_cursor: the nodes just materialised on the way
+        # down still have _line == -1 until the next refresh, so the cursor
+        # would silently land on line 0 instead of on the object.
+        self.call_after_refresh(self.move_cursor, node)
+        return True
 
     # ---------------------------------------------------------- cache input
 
@@ -184,6 +217,8 @@ class ObjectTree(Tree[NodeData]):
         if data is None or self.database is None:
             return []
         match data.kind:
+            case NodeKind.ROOT | NodeKind.OBJECT:
+                return []
             case NodeKind.SCHEMAS:
                 assert data.scope is not None
                 return [
@@ -207,8 +242,6 @@ class ObjectTree(Tree[NodeData]):
                     Child(key=obj.name, label=obj.name)
                     for obj in self.repo.objects(data.scope).rows
                 ]
-            case NodeKind.OBJECT:
-                return []
 
     def _child_data(self, parent: TreeNode[NodeData], child: Child) -> NodeData:
         data = parent.data

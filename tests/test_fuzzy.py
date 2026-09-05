@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from snowcone.fuzzy import highlight, match, rank
+from snowcone.fuzzy import highlight, match, match_qualified, rank, rank_qualified
 
 
 def names(*items: str) -> list[tuple[str, str]]:
@@ -136,3 +136,50 @@ def test_highlight_runs_reassemble_into_the_original() -> None:
     hit = match("stgord", text)
     assert hit is not None
     assert "".join(run for run, _ in highlight(text, hit.positions)) == text
+
+
+# ------------------------------------------------------- qualified matching
+
+
+def test_a_schema_prefix_does_not_steal_the_match() -> None:
+    """A STAGING schema full of STG_ tables is the common Snowflake case, and
+    greedy matching spends 'stg' inside the schema, leaving a poor alignment
+    in the name -- ranking LOAD_ORDERS above STG_CUSTOMER_ORDERS."""
+    candidates = [
+        ("STAGING", "LOAD_ORDERS", "load"),
+        ("STAGING", "STG_CUSTOMER_ORDERS", "stg"),
+    ]
+    assert next(p for p, _ in rank_qualified("stgord", candidates)) == "stg"
+
+
+def test_a_qualified_query_still_matches_across_the_dot() -> None:
+    """Typing the schema has to keep working; the name is only preferred when
+    it genuinely matches better."""
+    candidates = [
+        ("SALES", "ORDERS", "sales"),
+        ("STAGING", "LOAD_ORDERS", "staging"),
+    ]
+    assert next(p for p, _ in rank_qualified("salord", candidates)) == "sales"
+
+
+def test_positions_from_a_name_match_land_in_the_qualified_string() -> None:
+    """Highlighting is drawn over 'SCHEMA.NAME', so shifted positions have to
+    point at the right characters there."""
+    hit = match_qualified("ord", "SALES", "ORDERS")
+    assert hit is not None
+    qualified = "SALES.ORDERS"
+    assert "".join(qualified[i] for i in hit.positions).lower() == "ord"
+
+
+def test_a_candidate_matching_neither_form_is_dropped() -> None:
+    assert match_qualified("zzz", "SALES", "ORDERS") is None
+
+
+def test_a_name_only_match_is_kept_when_the_qualified_form_fails() -> None:
+    hit = match_qualified("ord", "X", "ORDERS")
+    assert hit is not None
+
+
+def test_rank_qualified_respects_the_limit() -> None:
+    candidates = [("S", f"ORDERS_{i}", i) for i in range(20)]
+    assert len(rank_qualified("ord", candidates, limit=3)) == 3

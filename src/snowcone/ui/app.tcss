@@ -193,3 +193,27 @@ StatusFooter #footer-pool {
     padding: 0 1;
     color: $text-muted;
 }
+
+/* ---- search ----------------------------------------------------------- */
+
+#search {
+    height: auto;
+}
+
+#search-query {
+    border: none;
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+}
+
+#search-query:focus {
+    background: $boost;
+}
+
+#search-results {
+    height: auto;
+    max-height: 12;
+    border: none;
+    background: $surface;
+}

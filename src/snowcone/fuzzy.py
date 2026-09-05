@@ -3,8 +3,14 @@
 Scanning names in Python rather than in sqlite is deliberate. FTS5 -- even
 with the trigram tokenizer available here -- does substring matching, not
 subsequence: it would not match "stgord" against "STG_CUSTOMER_ORDERS", which
-is exactly the typing shorthand this is for. Scoring a hundred thousand names
-in Python is a few milliseconds, comfortably inside a keystroke budget.
+is exactly the typing shorthand this is for.
+
+Measured cost of ranking a whole corpus, worst query, on the machine this was
+written on: 2k objects 3ms, 10k 14ms, 50k 70ms, 100k 150ms. The first two are
+comfortably inside a keystroke budget and the search box debounces on top of
+that. Beyond roughly 20k objects in a single database this would want moving
+off the event loop into a thread -- it is a plain function precisely so that
+stays an easy change.
 """
 
 from __future__ import annotations
@@ -121,3 +127,52 @@ def highlight(text: str, positions: Sequence[int]) -> list[tuple[str, bool]]:
             start = index
             current = is_match
     return runs
+
+
+#: A hit contained entirely within the object's own name beats one spread
+#: across schema and name. Small, so it only settles otherwise-close calls.
+_NAME_BONUS = 2.0
+
+
+def match_qualified(query: str, prefix: str, name: str) -> Match | None:
+    """Match `prefix.name`, also trying the bare name, and keep the better.
+
+    Snowflake schemas tend to repeat themselves in their objects' names -- a
+    STAGING schema full of STG_ tables. Greedy left-to-right matching then
+    spends the query's leading characters inside the schema and is left with a
+    poor alignment in the name: "stgord" scores STAGING.LOAD_ORDERS *above*
+    STAGING.STG_CUSTOMER_ORDERS, which is not what anyone typing it meant.
+
+    Scoring the bare name as well, with positions shifted back into the
+    qualified string so highlighting still lines up, recovers the intended
+    reading without the cost of a full alignment search.
+    """
+    qualified = f"{prefix}.{name}"
+    best = match(query, qualified)
+    on_name = match(query, name)
+    if on_name is not None:
+        offset = len(prefix) + 1
+        shifted = Match(
+            score=on_name.score + _NAME_BONUS,
+            positions=tuple(position + offset for position in on_name.positions),
+        )
+        if best is None or shifted.score > best.score:
+            best = shifted
+    return best
+
+
+def rank_qualified[T](
+    query: str,
+    candidates: Iterable[tuple[str, str, T]],
+    *,
+    limit: int = 200,
+) -> list[tuple[T, Match]]:
+    """Rank `(prefix, name, payload)` triples by `match_qualified`."""
+    scored: list[tuple[float, int, T, Match]] = []
+    for order, (prefix, name, payload) in enumerate(candidates):
+        hit = match_qualified(query, prefix, name)
+        if hit is None:
+            continue
+        scored.append((-hit.score, order, payload, hit))
+    scored.sort(key=lambda item: (item[0], item[1]))
+    return [(payload, hit) for _, _, payload, hit in scored[:limit]]

@@ -135,9 +135,13 @@ async def test_key_bindings_are_still_shown(repo) -> None:
 
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
+        # The footer recomposes via call_after_refresh once its bindings are
+        # ready, so a single pause can catch it still empty.
+        for _ in range(4):
+            await pilot.pause()
         keys = {key.key for key in app.screen.query(FooterKey)}
     assert "ctrl+d" in keys
+    assert "slash" in keys
 
 
 async def test_the_gauge_follows_the_pool(repo) -> None:

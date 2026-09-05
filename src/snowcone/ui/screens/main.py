@@ -28,6 +28,7 @@ from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.views import pipe_view, table_view  # noqa: F401 -- registers views
 from snowcone.ui.widgets.detail_pane import DetailPane
 from snowcone.ui.widgets.object_tree import ObjectTree
+from snowcone.ui.widgets.search_bar import SearchBar
 from snowcone.ui.widgets.status_bar import StatusFooter
 
 NO_DATABASE = "(none)"
@@ -46,6 +47,7 @@ SWEEP = 5.0
 class MainScreen(Screen):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+d", "pick_database", "Database"),
+        Binding("slash", "search", "Search"),
         Binding("r", "refresh", "Refresh"),
         Binding("q", "app.quit", "Quit"),
     ]
@@ -71,6 +73,7 @@ class MainScreen(Screen):
             yield ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
         with Vertical(id="right"):
             with Vertical(id="context"):
+                yield SearchBar(self.repo, id="search")
                 yield Vertical(id="context-bar")
             yield DetailPane(self.repo, id="detail")
         yield StatusFooter(show_command_palette=False)
@@ -145,13 +148,30 @@ class MainScreen(Screen):
     def detail(self) -> DetailPane:
         return self.query_one("#detail", DetailPane)
 
+    @property
+    def search(self) -> SearchBar:
+        return self.query_one("#search", SearchBar)
+
+    def action_search(self) -> None:
+        self.search.focus_query()
+
     # --------------------------------------------------------------- routing
 
     def on_cache_updated(self, event: CacheUpdated) -> None:
         self.tree.cache_updated(event.scope)
         self.detail.cache_updated(event.scope)
+        self.search.cache_updated()
+
+    def on_search_bar_activity(self, event: SearchBar.Activity) -> None:
+        """The top pane shows one thing at a time: what you are looking at,
+        or what you are looking for."""
+        self.query_one("#context-bar", Vertical).display = not event.active
 
     def on_object_selected(self, event: ObjectSelected) -> None:
+        # A search hit leaves the tree somewhere you can keep browsing from,
+        # rather than a detail pane pointing at an object the tree has never
+        # heard of.
+        self.tree.reveal(event.ref)
         view = self.detail.show(event.ref)
         # Rebuilt only when the view instance actually changed: moving between
         # two tables keeps the same view, so its context is already correct.
@@ -204,6 +224,7 @@ class MainScreen(Screen):
             self.fetch.cancel_where(lambda scope: scope.database == previous)
         self.query_one("#db-button", Static).update(f"DB  {database or NO_DATABASE}")
         self.tree.set_database(database)
+        self.search.set_database(database)
         self.detail.clear()
         self._context_view = None
         self._rebuild_context(None)

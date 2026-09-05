@@ -408,6 +408,39 @@ class Repository:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def search_corpus(self, database: str) -> list[tuple[str, ObjectRef]]:
+        """Every searchable object in a database as (text, ref) pairs.
+
+        The text is `SCHEMA.NAME`, so typing "sales.ord" narrows by schema and
+        object together. Ranking happens in Python: sqlite can match
+        substrings but not subsequences, and "stgord" finding
+        STG_CUSTOMER_ORDERS is the whole point.
+        """
+        with self._db.connect() as connection:
+            rows = connection.execute(
+                "SELECT database_name, schema_name, name, kind FROM search_object "
+                "WHERE database_name = ? ORDER BY schema_name, name",
+                (database,),
+            ).fetchall()
+        corpus: list[tuple[str, ObjectRef]] = []
+        for row in rows:
+            try:
+                kind = ObjectKind(row["kind"])
+            except ValueError:
+                continue
+            corpus.append(
+                (
+                    f"{row['schema_name']}.{row['name']}",
+                    ObjectRef(
+                        kind=kind,
+                        database=row["database_name"],
+                        schema=row["schema_name"],
+                        name=row["name"],
+                    ),
+                )
+            )
+        return corpus
+
     def child_count(self, scope: Scope) -> int:
         """The count behind a collapsed tree label, e.g. `Schemas (40)`."""
         spec = spec_for(scope)
