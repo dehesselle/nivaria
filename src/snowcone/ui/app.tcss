@@ -43,3 +43,58 @@ MainScreen {
 #detail:focus-within {
     border: round $accent;
 }
+
+/* ---- connect screen: form left, recents right ------------------------- */
+
+ConnectScreen {
+    align: center middle;
+}
+
+#connect {
+    layout: horizontal;
+    width: 90;
+    height: 24;
+    border: thick $background 80%;
+    background: $surface;
+}
+
+#connect-form {
+    width: 3fr;
+    padding: 1 2;
+}
+
+#connect-recent {
+    width: 2fr;
+    border-left: solid $panel;
+    padding: 1 2;
+}
+
+#connect-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#connect Input,
+#connect Select {
+    margin: 0 0 1 0;
+}
+
+#connect-status {
+    height: 1;
+    color: $text-muted;
+}
+
+#connect-buttons {
+    height: auto;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+#connect-buttons Button {
+    margin: 0 0 0 1;
+}
+
+#recent-list,
+#recent-empty {
+    margin-top: 1;
+}

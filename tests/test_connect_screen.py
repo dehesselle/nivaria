@@ -1,0 +1,327 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from textual.app import App
+from textual.widgets import Button, Input, Select, Static
+
+import snowcone.ui.app as app_module
+from snowcone.connections import RecentConnections, RecentEntry
+from snowcone.gateway.pool import EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA
+from snowcone.ui.screens.connect import ConnectScreen, RecentList
+from tests.fakes import FakeConnector
+
+
+class Harness(App[None]):
+    """Goes straight to the connect screen, reusing the real stylesheet.
+
+    CSS_PATH is resolved relative to the module that declares the App, so a
+    harness living in tests/ has to spell the path out or Textual looks for
+    tests/app.tcss.
+    """
+
+    CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
+
+    def __init__(self, screen: ConnectScreen) -> None:
+        super().__init__()
+        self._screen = screen
+        self.result: object = "unset"
+
+    def on_mount(self) -> None:
+        self.push_screen(self._screen, callback=self._done)
+
+    def _done(self, result) -> None:
+        self.result = result
+
+
+def make_app(tmp_path, *, recent=None, connector=None, pool_size=2) -> Harness:
+    screen = ConnectScreen(
+        RecentConnections(tmp_path / "recent.json"),
+        pool_size=pool_size,
+        connector=connector or FakeConnector(),
+    )
+    if recent:
+        store = RecentConnections(tmp_path / "recent.json")
+        for entry in reversed(recent):
+            store.add(entry)
+        screen = ConnectScreen(
+            store, pool_size=pool_size, connector=connector or FakeConnector()
+        )
+    return Harness(screen)
+
+
+async def settle(pilot, rounds: int = 4) -> None:
+    """Let the connect worker thread finish and its result paint.
+
+    pilot.pause() alone drains neither a thread worker nor the
+    call_from_thread hop it finishes with.
+    """
+    for _ in range(rounds):
+        await pilot.pause()
+        await asyncio.sleep(0.05)
+        await pilot.pause()
+
+
+# ------------------------------------------------------------------ layout
+
+
+async def test_the_form_and_the_recents_pane_are_both_present(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen = pilot.app.screen
+        assert screen.query_one("#connect-form")
+        assert screen.query_one("#connect-recent")
+        for field in ("account", "user", "password", "role", "warehouse"):
+            assert screen.query_one(f"#{field}", Input)
+
+
+async def test_an_empty_recents_pane_says_so(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        assert pilot.app.screen.query_one("#recent-empty", Static)
+
+
+# ---------------------------------------------------------- authenticator
+
+
+async def test_browser_sso_disables_the_password_field(tmp_path) -> None:
+    """externalbrowser never sends a password; an enabled box would invite
+    typing one that is then silently discarded."""
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        assert pilot.app.screen.query_one("#password", Input).disabled is True
+
+
+async def test_choosing_password_auth_enables_the_password_field(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one(
+            "#authenticator", Select
+        ).value = USERNAME_PASSWORD_MFA
+        await pilot.pause()
+        assert pilot.app.screen.query_one("#password", Input).disabled is False
+
+
+# -------------------------------------------------------------- validation
+
+
+async def test_submitting_an_empty_form_names_what_is_missing(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.submit()
+        await pilot.pause()
+        status = pilot.app.screen.query_one("#connect-status", Static)
+        assert "Account and User required" in str(status.render())
+
+
+async def test_a_missing_user_is_named_on_its_own(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.submit()
+        await pilot.pause()
+        status = pilot.app.screen.query_one("#connect-status", Static)
+        assert "User required" in str(status.render())
+
+
+async def test_nothing_is_connected_when_validation_fails(tmp_path) -> None:
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.submit()
+        await settle(pilot)
+        assert connector.calls == []
+
+
+# ----------------------------------------------------------------- connect
+
+
+async def test_a_successful_connect_returns_a_pool_of_the_right_size(
+    tmp_path,
+) -> None:
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=3)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+    assert len(connector.calls) == 3
+    assert app.result is not None
+    assert app.result.size == 3
+
+
+async def test_a_successful_connect_is_recorded_as_recent(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+    stored = RecentConnections(tmp_path / "recent.json").load()
+    assert [e.account for e in stored] == ["ACME"]
+
+
+async def test_a_failed_connect_is_not_recorded(tmp_path) -> None:
+    """A connection that never worked is not one worth offering next time."""
+    app = make_app(tmp_path, connector=FakeConnector(fail_after=0))
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        assert RecentConnections(tmp_path / "recent.json").load() == []
+
+
+async def test_a_failed_connect_reports_why_and_re_enables_the_button(
+    tmp_path,
+) -> None:
+    app = make_app(tmp_path, connector=FakeConnector(fail_after=0))
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        status = str(pilot.app.screen.query_one("#connect-status", Static).render())
+        assert "Could not connect" in status
+        assert pilot.app.screen.query_one("#connect-go", Button).disabled is False
+
+
+async def test_progress_is_reported_while_connecting(tmp_path) -> None:
+    """Opening the pool is where every MFA prompt happens, so an unexplained
+    pause is exactly what this has to avoid."""
+    seen: list[str] = []
+    app = make_app(tmp_path, pool_size=3)
+
+    original = ConnectScreen._status
+
+    def spy(self, message: str) -> None:
+        seen.append(message)
+        original(self, message)
+
+    ConnectScreen._status = spy
+    try:
+        async with app.run_test(size=(120, 40)) as pilot:
+            pilot.app.screen.query_one("#account", Input).value = "ACME"
+            pilot.app.screen.query_one("#user", Input).value = "me"
+            pilot.app.screen.submit()
+            await settle(pilot)
+    finally:
+        ConnectScreen._status = original
+
+    assert any("1/3" in message for message in seen)
+    assert any("3/3" in message for message in seen)
+
+
+async def test_the_password_is_sent_only_for_password_auth(tmp_path) -> None:
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=1)
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen = pilot.app.screen
+        screen.query_one("#authenticator", Select).value = USERNAME_PASSWORD_MFA
+        await pilot.pause()
+        screen.query_one("#account", Input).value = "ACME"
+        screen.query_one("#user", Input).value = "me"
+        screen.query_one("#password", Input).value = "s3cret"
+        screen.submit()
+        await settle(pilot)
+    assert connector.calls[0]["password"] == "s3cret"
+
+
+# ----------------------------------------------------------------- recents
+
+
+async def test_recents_are_listed(tmp_path) -> None:
+    app = make_app(
+        tmp_path,
+        recent=[
+            RecentEntry(account="A", user="me", role="R"),
+            RecentEntry(account="B", user="you"),
+        ],
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        options = pilot.app.screen.query_one("#recent-list", RecentList)
+        assert options.option_count == 2
+
+
+async def test_the_form_is_prefilled_from_the_most_recent(tmp_path) -> None:
+    app = make_app(tmp_path, recent=[RecentEntry(account="A", user="me", role="R")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen = pilot.app.screen
+        assert screen.query_one("#account", Input).value == "A"
+        assert screen.query_one("#user", Input).value == "me"
+        assert screen.query_one("#role", Input).value == "R"
+
+
+async def test_selecting_a_browser_sso_recent_connects_immediately(tmp_path) -> None:
+    """A browser-SSO entry already has everything it needs, so a quick
+    browsing tool should not make you press Connect as well."""
+    connector = FakeConnector()
+    app = make_app(
+        tmp_path,
+        recent=[RecentEntry(account="B", user="you", authenticator=EXTERNAL_BROWSER)],
+        connector=connector,
+        pool_size=1,
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        options = pilot.app.screen.query_one("#recent-list", RecentList)
+        options.focus()
+        options.highlighted = 0
+        await pilot.press("enter")
+        await settle(pilot)
+    assert connector.calls
+    assert connector.calls[0]["account"] == "B"
+
+
+async def test_selecting_a_password_recent_waits_for_the_password(tmp_path) -> None:
+    connector = FakeConnector()
+    app = make_app(
+        tmp_path,
+        recent=[
+            RecentEntry(account="B", user="you", authenticator=USERNAME_PASSWORD_MFA)
+        ],
+        connector=connector,
+        pool_size=1,
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        options = pilot.app.screen.query_one("#recent-list", RecentList)
+        options.focus()
+        options.highlighted = 0
+        await pilot.press("enter")
+        await settle(pilot)
+        assert connector.calls == []
+        assert pilot.app.screen.query_one("#password", Input).has_focus
+
+
+async def test_deleting_a_recent_removes_it_from_the_list_and_the_file(
+    tmp_path,
+) -> None:
+    app = make_app(
+        tmp_path,
+        recent=[
+            RecentEntry(account="A", user="me"),
+            RecentEntry(account="B", user="me"),
+        ],
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        options = pilot.app.screen.query_one("#recent-list", RecentList)
+        options.focus()
+        options.highlighted = 0
+        await pilot.press("delete")
+        await pilot.pause()
+        assert options.option_count == 1
+    assert [e.account for e in RecentConnections(tmp_path / "recent.json").load()] == [
+        "B"
+    ]
+
+
+# --------------------------------------------------------------- quitting
+
+
+async def test_quitting_returns_no_pool(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("escape")
+        await pilot.pause()
+    assert app.result is None
