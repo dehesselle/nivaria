@@ -11,17 +11,21 @@ pane either (the same is already true of the database picker). Closing and
 reopening picks up whatever changed in between, which is the same cost a
 keystroke used to pay to notice a stale corpus.
 
-Loading is kicked off in `on_mount` but not awaited there, and reading the
-cache plus building a `Column`-shaped corpus is real work, not a formality --
-measured at ~77ms for 30k cached columns, which would otherwise delay the
-dialog's first paint by that much. `_run_query` does not wait for it either:
-a fast typist would feel that wait on every keystroke while it is still
-pending, so ranking proceeds against whatever corpus already exists --
-empty, or however far the load has gotten -- and once loading finishes it
-re-runs the last query itself, so the list corrects itself in place rather
-than a keystroke ever blocking on it. Enter is the one exception: choosing a
-result and closing the dialog is a commitment a still-partial corpus should
-not get to make, so that path alone waits for the load first.
+Loading is kicked off in `on_mount` as two independent tasks, neither awaited
+there, and both real work rather than a formality: the object corpus alone is
+cheap (~5ms even at 2000 objects), but the column corpus was measured at
+~55-75ms for 30k cached columns -- and fetching both together meant the cheap
+one waited on the expensive one every time, since a single call blocks on
+whichever finishes last. Split, name matches become available almost as soon
+as the dialog paints, with column matches joining in once their own load
+lands. `_run_query` does not wait for either: a fast typist would feel that
+wait on every keystroke while a load is still pending, so ranking proceeds
+against whatever corpus already exists -- empty, object-only, or however far
+along the column load has gotten -- and each load re-runs the last query once
+it lands, so the list corrects itself in place rather than a keystroke ever
+blocking on it. Enter is the one exception: choosing a result and closing the
+dialog is a commitment a still-partial corpus should not get to make, so that
+path alone waits for both loads first.
 """
 
 from __future__ import annotations
@@ -72,42 +76,51 @@ class SearchScreen(DialogScreen[ObjectRef]):
 
     def on_mount(self) -> None:
         self.query_one("#search-query", Input).focus()
-        # Not awaited here: reading both corpora is sqlite I/O plus building
-        # one Python object per row, which is cheap for the object corpus but
-        # measured at ~77ms for a column corpus of 30k rows (2000 tables x 15
-        # columns -- an unremarkable pre-warmed database). Awaiting it in
-        # on_mount would block this screen's first paint for exactly as long,
-        # which is the delay this fixes: the task starts immediately, so
-        # loading happens while the (empty) dialog is already visible and the
-        # input already focused, and only actual ranking waits on it.
-        self._loaded: asyncio.Task[None] = asyncio.create_task(self._load_corpus())
+        # Two independent loads, not one: the object corpus alone is cheap
+        # (~5ms even at 2000 objects) but was measured stuck for ~55-75ms
+        # behind the column corpus when fetched together, since a call that
+        # reads both blocks on whichever one is slower. Splitting them means
+        # name-only matches become available almost immediately, with column
+        # matches joining in a beat later, instead of both waiting on the
+        # slower one. Neither is awaited here -- see _load_corpus.
+        self._objects_loaded: asyncio.Task[None] = asyncio.create_task(
+            self._load_objects()
+        )
+        self._columns_loaded: asyncio.Task[None] = asyncio.create_task(
+            self._load_columns()
+        )
 
     def on_unmount(self) -> None:
         # Otherwise a slow load still in flight when the dialog closes would
         # resume after unmount and touch widgets that no longer exist.
-        self._loaded.cancel()
+        self._objects_loaded.cancel()
+        self._columns_loaded.cancel()
 
-    async def _load_corpus(self) -> None:
-        self._corpus, self._column_corpus = await asyncio.to_thread(self._read_corpus)
-        # A quick typist can have a query in the box before this finishes --
-        # _run_query never waits for it (see there), so whatever it showed
-        # was ranked against a partial or still-empty corpus. Re-running now
-        # replaces that with the real thing. A fresh keystroke arriving in
-        # between just makes this redundant, not wrong: _run_query's own
+    async def _load_objects(self) -> None:
+        self._corpus = await asyncio.to_thread(self._read_objects)
+        await self._refresh_if_typing()
+
+    async def _load_columns(self) -> None:
+        self._column_corpus = await asyncio.to_thread(self._read_columns)
+        await self._refresh_if_typing()
+
+    def _read_objects(self) -> list[tuple[str, ObjectRef]]:
+        """Pure: no widget access, so safe to call from a thread."""
+        return self.repo.search_corpus(self.database) if self.database else []
+
+    def _read_columns(self) -> list[tuple[ObjectRef, str]]:
+        """Pure: no widget access, so safe to call from a thread."""
+        return self.repo.search_column_corpus(self.database) if self.database else []
+
+    async def _refresh_if_typing(self) -> None:
+        # A quick typist can have a query in the box before either load
+        # finishes -- _run_query never waits for them (see there), so
+        # whatever it showed was ranked against a partial corpus. Re-running
+        # now replaces that with the fuller one. A fresh keystroke arriving
+        # in between just makes this redundant, not wrong: _run_query's own
         # stale-result check means only the most recent one actually renders.
         if self.query_one("#search-query", Input).value.strip():
             await self._run_query()
-
-    def _read_corpus(
-        self,
-    ) -> tuple[list[tuple[str, ObjectRef]], list[tuple[ObjectRef, str]]]:
-        """Pure: no widget access, so safe to call from a thread."""
-        if not self.database:
-            return [], []
-        return (
-            self.repo.search_corpus(self.database),
-            self.repo.search_column_corpus(self.database),
-        )
 
     # --------------------------------------------------------------- events
 
@@ -128,9 +141,10 @@ class SearchScreen(DialogScreen[ObjectRef]):
             self._timer = None
         # Enter commits to a choice and closes the dialog, unlike a plain
         # keystroke's list refresh -- so unlike _run_query's live-typing path,
-        # this one waits for the real corpus rather than risk picking (or
-        # closing on) a result ranked against one still partially empty.
-        await self._loaded
+        # this one waits for both loads rather than risk picking (or closing
+        # on) a result ranked against one still partially empty.
+        await self._objects_loaded
+        await self._columns_loaded
         await self._run_query()
         self._choose(0)
 
@@ -152,13 +166,13 @@ class SearchScreen(DialogScreen[ObjectRef]):
             self.query_one("#search-results", OptionList).clear_options()
             return
 
-        # Deliberately not waiting for the corpus load here: a fast typist
-        # who opens search and starts typing immediately would otherwise feel
-        # that wait on every keystroke while it is still pending. Ranking
+        # Deliberately not waiting for either load here: a fast typist who
+        # opens search and starts typing immediately would otherwise feel
+        # that wait on every keystroke while one is still pending. Ranking
         # proceeds against whatever self._corpus/_column_corpus currently are
-        # -- empty or partial before the load finishes -- and _load_corpus
-        # re-runs this once it completes, so the list corrects itself rather
-        # than the keystroke blocking on it.
+        # -- empty or partial before a load finishes -- and _refresh_if_typing
+        # re-runs this once each one completes, so the list corrects itself
+        # rather than the keystroke blocking on it.
         #
         # Ranking is CPU-bound, not I/O, so it would otherwise run on and
         # block the event loop for the duration -- fine at the sizes measured

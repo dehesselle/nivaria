@@ -380,7 +380,8 @@ async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopen
         # Loading is kicked off in on_mount but finishes on its own schedule
         # (see search.py) -- awaited explicitly here so the mutation below is
         # deterministically *after* the snapshot, not racing it.
-        await app.screen._loaded
+        await app.screen._objects_loaded
+        await app.screen._columns_loaded
         put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "CUSTOMERS")
         await type_query(pilot, app, "cust")
         assert shown(app) == []
@@ -426,7 +427,8 @@ async def test_the_list_corrects_itself_once_a_slow_load_lands(repo) -> None:
         await pilot.pause()
         await type_query(pilot, app, "ord")
         release.set()
-        await app.screen._loaded
+        await app.screen._objects_loaded
+        await app.screen._columns_loaded
         await pilot.pause()
         assert shown(app) == ["SALES.ORDERS"]
 
