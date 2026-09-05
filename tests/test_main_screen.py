@@ -27,6 +27,7 @@ class RecordingFetch:
     def __init__(self) -> None:
         self.requests: list[tuple[str, int]] = []
         self.cancelled: list[str] = []
+        self.busy: set[str] = set()
 
     def request(self, scope, priority) -> bool:
         self.requests.append((scope.key, int(priority)))
@@ -35,6 +36,9 @@ class RecordingFetch:
     def cancel_where(self, predicate) -> list:
         self.cancelled.append("called")
         return []
+
+    def is_busy(self, scope) -> bool:
+        return scope.key in self.busy
 
     @property
     def scopes(self) -> list[str]:

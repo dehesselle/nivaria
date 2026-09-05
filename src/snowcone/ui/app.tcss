@@ -114,3 +114,29 @@ PickerScreen > #dialog {
     height: auto;
     max-height: 20;
 }
+
+/* ---- status footer ---------------------------------------------------- */
+
+StatusFooter .footer-spacer {
+    width: 1fr;
+    height: 1;
+}
+
+StatusFooter #footer-countdown {
+    /* Fixed at three digits plus a cell of padding either side, so the
+       figures do not shift as the count drops from 3 digits to 2 to 1. */
+    width: 5;
+    height: 1;
+    padding: 0 1;
+    text-align: right;
+    color: $footer-description-foreground;
+    background: $footer-description-background;
+}
+
+StatusFooter #footer-pool {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    color: $footer-description-foreground;
+    background: $footer-description-background;
+}

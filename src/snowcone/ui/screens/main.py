@@ -7,6 +7,7 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
+from math import ceil
 from typing import ClassVar
 
 from textual import work
@@ -15,17 +16,29 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Header, Static
 
 from snowcone.cache.repository import Repository
-from snowcone.models import Scope, databases_scope, prime_scope
+from snowcone.gateway.pool import ConnectionPool
+from snowcone.models import Scope, databases_scope, prime_scope, schemas_scope
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import Priority
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.widgets.object_tree import ObjectTree
+from snowcone.ui.widgets.status_bar import StatusFooter
 
 NO_DATABASE = "(none)"
+
+#: How often the status indicators are recomputed. Fast enough that a burst of
+#: pool activity is visible rather than blinking past between ticks, and cheap
+#: enough to run on the event loop: an int read plus one indexed sqlite lookup.
+TICK = 0.2
+
+#: The background staleness sweep. Far slower than the tick because it walks
+#: every scope currently on screen, and nothing it finds is urgent by
+#: definition -- anything urgent was requested interactively.
+SWEEP = 5.0
 
 
 class CacheUpdated(Message):
@@ -48,11 +61,14 @@ class MainScreen(Screen):
         self,
         repo: Repository,
         fetch: FetchService | None = None,
+        pool: ConnectionPool | None = None,
     ) -> None:
         super().__init__()
         self.repo = repo
         self.fetch = fetch
+        self.pool = pool
         self.database: str | None = None
+        self._frame = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -62,10 +78,68 @@ class MainScreen(Screen):
         with Vertical(id="right"):
             yield Vertical(id="context")
             yield Vertical(id="detail")
-        yield Footer(show_command_palette=False)
+        yield StatusFooter(show_command_palette=False)
 
     def on_mount(self) -> None:
         self._request(databases_scope(), Priority.INTERACTIVE)
+        self.set_interval(TICK, self._tick)
+        self.set_interval(SWEEP, self._sweep)
+        self._tick()
+
+    @property
+    def footer(self) -> StatusFooter:
+        return self.query_one(StatusFooter)
+
+    # -------------------------------------------------------------- status
+
+    def focused_scope(self) -> Scope:
+        """The scope backing whatever the cursor is on.
+
+        Walks up from the cursor, because an object leaf owns no scope of its
+        own -- the interesting age is that of the list it came from.
+        """
+        node = self.tree.cursor_node
+        while node is not None:
+            if node.data is not None and node.data.scope is not None:
+                return node.data.scope
+            node = node.parent
+        if self.database is not None:
+            return schemas_scope(self.database)
+        return databases_scope()
+
+    def _tick(self) -> None:
+        footer = self.footer
+        self._frame += 1
+        footer.frame = self._frame
+
+        if self.pool is not None:
+            footer.in_use = self.pool.in_use
+            footer.pool_size = self.pool.size
+
+        # Read at the point of use, so changing it in settings takes effect
+        # without a restart.
+        ttl = config.get(CACHE_TTL)
+        footer.countdown_enabled = ttl > 0
+
+        scope = self.focused_scope()
+        footer.refreshing = self.fetch is not None and self.fetch.is_busy(scope)
+        if ttl <= 0:
+            footer.remaining = 0
+            return
+        age = self.repo.entry(scope).age()
+        # Never fetched reads as 0 rather than blank: it is maximally stale,
+        # and something is already on its way to fix that.
+        footer.remaining = 0 if age is None else max(0, ceil(ttl - age))
+
+    def _sweep(self) -> None:
+        """Refresh what is on screen and has gone stale, nothing else."""
+        if self.fetch is None:
+            return
+        ttl = config.get(CACHE_TTL)
+        if ttl <= 0:
+            return
+        for scope in self.repo.stale_scopes(ttl, self.tree.visible_scopes()):
+            self._request(scope, Priority.BACKGROUND)
 
     @property
     def tree(self) -> ObjectTree:

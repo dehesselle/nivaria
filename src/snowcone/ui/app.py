@@ -65,7 +65,7 @@ class SnowconeApp(App[None]):
         # push, not switch: push_screen_wait has already popped the connect
         # screen, so the stack top here is the default screen and switching
         # would try to pop a result callback it never had.
-        await self.push_screen(MainScreen(self.repo, self.fetch))
+        await self.push_screen(MainScreen(self.repo, self.fetch, pool))
 
     def _cache_updated(self, scope, complete: bool) -> None:
         """Called on a fetch worker thread; hop to the event loop.
