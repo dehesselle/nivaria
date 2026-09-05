@@ -376,6 +376,10 @@ async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopen
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         await pilot.pause()
+        # Loading is kicked off in on_mount but finishes on its own schedule
+        # (see search.py) -- awaited explicitly here so the mutation below is
+        # deterministically *after* the snapshot, not racing it.
+        await app.screen._loaded
         put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "CUSTOMERS")
         await type_query(pilot, app, "cust")
         assert shown(app) == []

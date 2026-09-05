@@ -10,6 +10,12 @@ dialog, not `MainScreen`, so a live update would not reach the tree/detail
 pane either (the same is already true of the database picker). Closing and
 reopening picks up whatever changed in between, which is the same cost a
 keystroke used to pay to notice a stale corpus.
+
+Loading is kicked off in `on_mount` but not awaited there, and reading the
+cache plus building a `Column`-shaped corpus is real work, not a formality --
+measured at ~77ms for 30k cached columns, which would otherwise delay the
+dialog's first paint by that much. `_run_query` awaits the same load before
+ranking, so correctness is unaffected either way.
 """
 
 from __future__ import annotations
@@ -59,11 +65,30 @@ class SearchScreen(DialogScreen[ObjectRef]):
             yield OptionList(id="search-results")
 
     def on_mount(self) -> None:
-        self._corpus = self.repo.search_corpus(self.database) if self.database else []
-        self._column_corpus = (
-            self.repo.search_column_corpus(self.database) if self.database else []
-        )
         self.query_one("#search-query", Input).focus()
+        # Not awaited here: reading both corpora is sqlite I/O plus building
+        # one Python object per row, which is cheap for the object corpus but
+        # measured at ~77ms for a column corpus of 30k rows (2000 tables x 15
+        # columns -- an unremarkable pre-warmed database). Awaiting it in
+        # on_mount would block this screen's first paint for exactly as long,
+        # which is the delay this fixes: the task starts immediately, so
+        # loading happens while the (empty) dialog is already visible and the
+        # input already focused, and only actual ranking waits on it.
+        self._loaded: asyncio.Task[None] = asyncio.create_task(self._load_corpus())
+
+    async def _load_corpus(self) -> None:
+        self._corpus, self._column_corpus = await asyncio.to_thread(self._read_corpus)
+
+    def _read_corpus(
+        self,
+    ) -> tuple[list[tuple[str, ObjectRef]], list[tuple[ObjectRef, str]]]:
+        """Pure: no widget access, so safe to call from a thread."""
+        if not self.database:
+            return [], []
+        return (
+            self.repo.search_corpus(self.database),
+            self.repo.search_column_corpus(self.database),
+        )
 
     # --------------------------------------------------------------- events
 
@@ -102,6 +127,13 @@ class SearchScreen(DialogScreen[ObjectRef]):
             self._shown = []
             self.query_one("#search-results", OptionList).clear_options()
             return
+
+        # The corpus load kicked off in on_mount usually finishes well before
+        # anyone can type a whole query, but it is not guaranteed to -- a
+        # fast-open, fast-type sequence could otherwise rank an incomplete or
+        # still-empty corpus. Waiting here costs nothing once it is already
+        # done, which is the overwhelmingly common case.
+        await self._loaded
 
         # Ranking is CPU-bound, not I/O, so it would otherwise run on and
         # block the event loop for the duration -- fine at the sizes measured
