@@ -33,7 +33,7 @@ class ConfirmScreen(DialogScreen[bool]):
             yield Static(self._message, id="confirm-message")
             with Horizontal(id="buttons"):
                 yield Button("Yes", variant="primary", id="confirm-yes")
-                yield Button("No", id="confirm-no")
+                yield Button("No", id="confirm-no", classes="button-gray")
 
     def on_mount(self) -> None:
         self.query_one("#confirm-yes", Button).focus()

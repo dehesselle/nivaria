@@ -150,7 +150,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
                 yield Static("", id="connect-status")
                 with Horizontal(id="connect-buttons"):
                     yield Button("Connect", variant="primary", id="connect-go")
-                    yield Button("Quit", id="connect-quit")
+                    yield Button("Quit", id="connect-quit", classes="button-gray")
             with Vertical(id="connect-recent"):
                 yield Label("Recent")
                 if self._recent:
