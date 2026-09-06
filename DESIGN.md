@@ -387,16 +387,30 @@ prompt**. The pool exists to make that a one-time event.
   an interactive/visible caller, retried once against the fresh connection;
   dropped and shrunk, with no retry, for a background one.
 
-Two authenticators are supported and chosen in the connect dialog: browser SSO
-(`externalbrowser`) and password + MFA (`username_password_mfa`). The password
-field is disabled for SSO, where the identity provider owns the credentials and
-a typed password would be silently discarded.
+Three authenticators are supported and chosen in the connect dialog: OAuth
+(`oauth_authorization_code`, the default), browser SSO (`externalbrowser`),
+and password + MFA (`username_password_mfa`). The password field is disabled
+for SSO and OAuth, where a browser popup owns the credential and a typed
+password would be silently discarded.
+
+OAuth here means the driver's own authorization-code (PKCE) flow, not the
+`oauth` authenticator that expects an already-obtained token pasted in --
+there is deliberately no token field in the dialog. With no client ID or
+authorization URL configured, the driver treats the Snowflake account itself
+as the identity provider: `connect_all` opens a browser to it, completes the
+exchange on a local redirect listener, and hands back an access token, the
+same shape of interaction as browser SSO. `oauth_enable_refresh_tokens` is
+set alongside it so the refresh token that comes back is cached (via the same
+`client_store_temporary_credential` flag SSO and password+MFA rely on) and
+spent silently on the next connection or session, instead of opening a
+browser every time the access token expires.
 
 **snowcone stores no password anywhere.** Recent connections keep account,
-user, authenticator, role and warehouse only. For SSO there is nothing to
-store; for password+MFA the driver's own token cache already means the password
-is typed once per machine rather than once per connection. Connections are
-recorded as "recent" only after they have actually worked.
+user, authenticator, role and warehouse only. For SSO and OAuth there is
+nothing to store -- the driver obtains and caches its own credential; for
+password+MFA the driver's own token cache already means the password is typed
+once per machine rather than once per connection. Connections are recorded as
+"recent" only after they have actually worked.
 
 ---
 

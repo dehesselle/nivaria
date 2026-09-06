@@ -24,8 +24,15 @@ from snowcone.gateway import queries
 
 EXTERNAL_BROWSER = "externalbrowser"
 USERNAME_PASSWORD_MFA = "username_password_mfa"
+# The driver's OAuth *authorization code* flow, not the "oauth" authenticator
+# that expects an already-obtained token: with no client_id/authorization_url
+# override, the driver treats Snowflake itself as the IdP and needs nothing
+# from us beyond this string -- it opens a browser and completes the exchange
+# on its own, the same shape of interaction as EXTERNAL_BROWSER rather than a
+# field the user has to fill in.
+OAUTH = "oauth_authorization_code"
 
-AUTHENTICATORS = (EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA)
+AUTHENTICATORS = (OAUTH, EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA)
 
 
 class ConnectionError_(SnowconeError):
@@ -73,6 +80,13 @@ class ConnectParams:
             kwargs["warehouse"] = self.warehouse
         if self.uses_password and self.password:
             kwargs["password"] = self.password
+        if self.authenticator == OAUTH:
+            # Lets `prepare()` exchange a cached refresh token for a fresh
+            # access token silently, instead of opening a browser again --
+            # `client_store_temporary_credential` above is what makes that
+            # refresh token (and the access token itself) persist between
+            # connections and sessions in the first place.
+            kwargs["oauth_enable_refresh_tokens"] = True
         return kwargs
 
 

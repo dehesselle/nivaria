@@ -7,6 +7,7 @@ import pytest
 
 from snowcone.gateway.pool import (
     EXTERNAL_BROWSER,
+    OAUTH,
     USERNAME_PASSWORD_MFA,
     ConnectionError_,
     ConnectionPool,
@@ -45,6 +46,27 @@ def test_password_mfa_sends_the_password() -> None:
         account="a", user="u", authenticator=USERNAME_PASSWORD_MFA, password="p"
     )
     assert params.to_connect_kwargs()["password"] == "p"
+
+
+def test_oauth_never_sends_a_password() -> None:
+    """OAuth obtains its own credential through a browser popup, same as
+    externalbrowser; forwarding a stale typed password would be useless."""
+    params = ConnectParams(account="a", user="u", authenticator=OAUTH, password="p")
+    assert "password" not in params.to_connect_kwargs()
+
+
+def test_oauth_asks_the_driver_for_a_cached_refresh_token() -> None:
+    """Without this, the authorization-code flow's access token expires and
+    every subsequent connection -- in this pool or a later session -- opens a
+    fresh browser popup instead of refreshing silently in the background."""
+    params = ConnectParams(account="a", user="u", authenticator=OAUTH)
+    assert params.to_connect_kwargs()["oauth_enable_refresh_tokens"] is True
+
+
+def test_non_oauth_authenticators_never_request_refresh_tokens() -> None:
+    for authenticator in (EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA):
+        params = ConnectParams(account="a", user="u", authenticator=authenticator)
+        assert "oauth_enable_refresh_tokens" not in params.to_connect_kwargs()
 
 
 def test_sessions_are_kept_alive_and_tokens_cached() -> None:

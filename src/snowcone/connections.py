@@ -1,7 +1,8 @@
 """Recently used connections.
 
 Deliberately holds no secret: account, user, authenticator, role and warehouse
-only. For `externalbrowser` there is no password to keep, and for
+only. For `externalbrowser` and `oauth` there is no password to keep -- the
+driver's own browser flow obtains and caches the credential itself, and for
 `username_password_mfa` the driver's own MFA-token cache already means the
 password is typed once per machine rather than once per connection -- so
 snowcone never has a reason to write one, and never does.

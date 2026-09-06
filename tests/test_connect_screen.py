@@ -9,7 +9,7 @@ from textual.widgets import Button, Input, Select, Static
 
 import snowcone.ui.app as app_module
 from snowcone.connections import RecentConnections, RecentEntry
-from snowcone.gateway.pool import EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA
+from snowcone.gateway.pool import EXTERNAL_BROWSER, OAUTH, USERNAME_PASSWORD_MFA
 from snowcone.ui.screens.confirm import ConfirmScreen
 from snowcone.ui.screens.connect import ConnectScreen, RecentList
 from snowcone.ui.screens.connecting import ConnectingScreen
@@ -104,6 +104,24 @@ async def test_choosing_password_auth_enables_the_password_field(tmp_path) -> No
         ).value = USERNAME_PASSWORD_MFA
         await pilot.pause()
         assert pilot.app.screen.query_one("#password", Input).disabled is False
+
+
+async def test_oauth_is_the_default_authenticator(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        assert pilot.app.screen.query_one("#authenticator", Select).value == OAUTH
+
+
+async def test_oauth_also_disables_the_password_field(tmp_path) -> None:
+    """OAuth's authorization-code flow obtains its own credential through a
+    browser popup, the same as externalbrowser -- there is no field for it to
+    fill in, so it must not leave the password box open to a stray typed
+    value either."""
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#authenticator", Select).value = OAUTH
+        await pilot.pause()
+        assert pilot.app.screen.query_one("#password", Input).disabled is True
 
 
 # -------------------------------------------------------------- validation
@@ -376,6 +394,22 @@ async def test_the_password_is_sent_only_for_password_auth(tmp_path) -> None:
     assert connector.calls[0]["password"] == "s3cret"
 
 
+async def test_oauth_submits_with_no_typed_secret(tmp_path) -> None:
+    """OAuth (the default) needs nothing beyond account/user -- the driver's
+    own browser flow supplies the credential, so there is no secret field
+    standing between a fresh account/user and Connect."""
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=1)
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen = pilot.app.screen
+        screen.query_one("#account", Input).value = "ACME"
+        screen.query_one("#user", Input).value = "me"
+        screen.submit()
+        await settle(pilot)
+    assert connector.calls[0]["authenticator"] == OAUTH
+    assert "password" not in connector.calls[0]
+
+
 # ----------------------------------------------------------------- recents
 
 
@@ -439,6 +473,26 @@ async def test_selecting_a_password_recent_waits_for_the_password(tmp_path) -> N
         await settle(pilot)
         assert connector.calls == []
         assert pilot.app.screen.query_one("#password", Input).has_focus
+
+
+async def test_selecting_an_oauth_recent_connects_immediately(tmp_path) -> None:
+    """Like browser SSO, an OAuth entry already has everything it needs -- the
+    driver obtains its own credential -- so it should not wait on a field."""
+    connector = FakeConnector()
+    app = make_app(
+        tmp_path,
+        recent=[RecentEntry(account="B", user="you", authenticator=OAUTH)],
+        connector=connector,
+        pool_size=1,
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        options = pilot.app.screen.query_one("#recent-list", RecentList)
+        options.focus()
+        options.highlighted = 0
+        await pilot.press("enter")
+        await settle(pilot)
+    assert connector.calls
+    assert connector.calls[0]["account"] == "B"
 
 
 async def test_deleting_a_recent_removes_it_from_the_list_and_the_file(

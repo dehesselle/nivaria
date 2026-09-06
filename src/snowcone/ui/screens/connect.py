@@ -33,6 +33,7 @@ from snowcone.connections import RecentConnections, RecentEntry
 from snowcone.gateway.pool import (
     AUTHENTICATORS,
     EXTERNAL_BROWSER,
+    OAUTH,
     USERNAME_PASSWORD_MFA,
     ConnectionPool,
     Connector,
@@ -41,7 +42,10 @@ from snowcone.gateway.pool import (
 from snowcone.ui.screens.confirm import ConfirmScreen
 from snowcone.ui.screens.connecting import ConnectingScreen
 
+# OAuth listed first: it is the dialog's default, ahead of the two
+# longer-standing methods.
 _AUTHENTICATOR_LABELS = {
+    OAUTH: "OAuth",
     EXTERNAL_BROWSER: "Browser SSO",
     USERNAME_PASSWORD_MFA: "Password + MFA",
 }
@@ -104,7 +108,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
                             (label, value)
                             for value, label in _AUTHENTICATOR_LABELS.items()
                         ],
-                        value=entry.authenticator if entry else EXTERNAL_BROWSER,
+                        value=entry.authenticator if entry else OAUTH,
                         allow_blank=False,
                         id="authenticator",
                     )
@@ -184,8 +188,9 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
             return
         entry = self._recent[int(event.option.id)]
         self._fill_from(entry)
-        # A browser-SSO entry has everything it needs already, so selecting it
-        # connects straight away; a password entry still needs the password.
+        # A browser-SSO or OAuth entry has everything it needs already -- the
+        # driver obtains its own credential -- so selecting one connects
+        # straight away; a password entry still needs the password typed in.
         if entry.authenticator == USERNAME_PASSWORD_MFA:
             self.query_one("#password", Input).focus()
         else:
@@ -198,10 +203,11 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     # --------------------------------------------------------------- state
 
     def _sync_password_enabled(self) -> None:
-        """Grey out the password when the IdP owns the credentials.
+        """Grey out the password when the driver owns the credential.
 
         Leaving it enabled would invite typing a password that is then silently
-        discarded, since externalbrowser never sends one.
+        discarded: externalbrowser and OAuth each obtain their own credential
+        through a browser popup, and never send one.
         """
         password = self.query_one("#password", Input)
         needs_password = self._authenticator == USERNAME_PASSWORD_MFA
@@ -213,7 +219,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     @property
     def _authenticator(self) -> str:
         value = self.query_one("#authenticator", Select).value
-        return str(value) if value in AUTHENTICATORS else EXTERNAL_BROWSER
+        return str(value) if value in AUTHENTICATORS else OAUTH
 
     def _value(self, field: str) -> str:
         return self.query_one(f"#{field}", Input).value.strip()
