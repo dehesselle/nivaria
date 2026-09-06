@@ -20,8 +20,21 @@ def connect_menu_items(app: SnowconeApp, screen: MainScreen) -> list[MenuEntry]:
     return [
         MenuItem("open", "Open...", app.open_connect, mnemonic="o"),
         MenuSeparator(),
-        MenuItem("warehouse", "Warehouse ...", screen.pick_warehouse, mnemonic="w"),
-        MenuItem("role", "Role ...", screen.pick_role, mnemonic="r"),
+        MenuItem(
+            "database",
+            "Database ...",
+            screen.pick_database,
+            mnemonic="d",
+            shortcut="Ctrl+D",
+        ),
+        MenuItem(
+            "warehouse",
+            "Warehouse ...",
+            screen.pick_warehouse,
+            mnemonic="w",
+            shortcut="Ctrl+W",
+        ),
+        MenuItem("role", "Role ...", screen.pick_role, mnemonic="r", shortcut="Ctrl+R"),
         MenuItem("prewarm", "Pre-warm cache", screen.prewarm_cache),
         MenuSeparator(),
         MenuItem("quit", "Quit", app.action_quit, shortcut="F10"),

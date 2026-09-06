@@ -77,10 +77,12 @@ SWEEP = 5.0
 class MainScreen(Screen):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("f9", "open_menu_bar", "Menu"),
-        Binding("ctrl+d", "pick_database", "Database"),
+        Binding("ctrl+d", "pick_database", "Database", show=False),
+        Binding("ctrl+r", "pick_role", "Role", show=False),
+        Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
         Binding("slash", "search", "Search"),
         Binding("r", "refresh", "Refresh"),
-        Binding("f10", "app.quit", "Quit"),
+        Binding("f10", "app.quit", "Quit", show=False),
     ]
 
     def __init__(
@@ -372,6 +374,15 @@ class MainScreen(Screen):
 
     @work
     async def _pick_database(self) -> None:
+        await self.pick_database()
+
+    async def pick_database(self) -> None:
+        """Open the database picker from the Connect menu.
+
+        Awaited directly rather than via `@work`: the menu already runs the
+        handler from inside a worker (see `_run_menu`), so a second one here
+        would buy nothing.
+        """
         cached = self.repo.databases(databases_scope())
         if cached.is_empty:
             # Nothing to choose from yet; ask, and let the user try again once
@@ -391,6 +402,13 @@ class MainScreen(Screen):
             self.set_database(chosen)
 
     # ------------------------------------------------------ warehouse / role
+
+    def action_pick_warehouse(self) -> None:
+        self._pick_warehouse()
+
+    @work
+    async def _pick_warehouse(self) -> None:
+        await self.pick_warehouse()
 
     async def pick_warehouse(self) -> None:
         """Open the warehouse picker from the Connect menu.
@@ -418,7 +436,20 @@ class MainScreen(Screen):
         if chosen is not None and chosen != current:
             self._switch_warehouse(chosen)
 
+    def action_pick_role(self) -> None:
+        self._pick_role()
+
+    @work
+    async def _pick_role(self) -> None:
+        await self.pick_role()
+
     async def pick_role(self) -> None:
+        """Open the role picker from the Connect menu.
+
+        Awaited directly rather than via `@work`: the menu already runs the
+        handler from inside a worker (see `_run_menu`), so a second one here
+        would buy nothing.
+        """
         if self.pool is None:
             return
         cached = self.repo.roles(roles_scope())

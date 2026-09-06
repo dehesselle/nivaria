@@ -123,6 +123,20 @@ async def test_clicking_the_title_opens_its_dropdown(repo) -> None:
         assert isinstance(app.screen, MenuDropdown)
 
 
+async def test_the_connect_menu_lists_the_database_item(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        labels = {
+            item.label for item in app.screen._items if isinstance(item, MenuItem)
+        }
+        assert "Database ..." in labels
+
+
 async def test_the_open_item_mnemonic_calls_back_into_the_app(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
@@ -198,7 +212,7 @@ async def test_the_separator_renders_as_a_rule_under_the_open_item(repo) -> None
         assert open_option._divider is True
 
 
-async def test_pressing_down_from_open_skips_the_separator_onto_warehouse(
+async def test_pressing_down_from_open_skips_the_separator_onto_database(
     repo,
 ) -> None:
     app = Harness(repo)
@@ -213,7 +227,7 @@ async def test_pressing_down_from_open_skips_the_separator_onto_warehouse(
         await pilot.press("down")
         await pilot.pause()
         highlighted = option_list.options[option_list.highlighted]
-        assert highlighted.id == "warehouse"
+        assert highlighted.id == "database"
 
 
 async def test_f10_quits_the_app(repo) -> None:
@@ -242,6 +256,54 @@ async def test_the_quit_item_has_no_mnemonic_and_shows_its_f10_shortcut(
         )
         assert quit_item.mnemonic is None
         assert quit_item.shortcut == "F10"
+
+
+async def test_the_database_item_shows_its_ctrl_d_shortcut(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        database_item = next(
+            entry
+            for entry in app.screen._items
+            if isinstance(entry, MenuItem) and entry.id == "database"
+        )
+        assert database_item.shortcut == "Ctrl+D"
+
+
+async def test_the_warehouse_item_shows_its_ctrl_w_shortcut(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        warehouse_item = next(
+            entry
+            for entry in app.screen._items
+            if isinstance(entry, MenuItem) and entry.id == "warehouse"
+        )
+        assert warehouse_item.shortcut == "Ctrl+W"
+
+
+async def test_the_role_item_shows_its_ctrl_r_shortcut(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        role_item = next(
+            entry
+            for entry in app.screen._items
+            if isinstance(entry, MenuItem) and entry.id == "role"
+        )
+        assert role_item.shortcut == "Ctrl+R"
 
 
 async def test_the_separator_renders_as_a_rule_under_the_prewarm_item(repo) -> None:

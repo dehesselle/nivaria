@@ -130,6 +130,33 @@ async def test_an_empty_warehouse_cache_requests_a_fetch_instead_of_a_dead_dialo
     assert "warehouses" in fetch.scopes
 
 
+async def test_ctrl_w_opens_the_warehouse_picker(repo) -> None:
+    """The key binding is hidden from the footer, but stays live -- see the
+    Connect menu's `Ctrl+W` shortcut label."""
+    put_warehouses(repo, "COMPUTE_WH", "ETL_WH")
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    app = Harness(repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+w")
+        await settle(pilot)
+        assert isinstance(app.screen, PickerScreen)
+
+
+async def test_ctrl_r_opens_the_role_picker(repo) -> None:
+    """Same as `ctrl+w`, but for `Ctrl+R` and the role picker."""
+    put_roles(repo, "SYSADMIN", "ACCOUNTADMIN")
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    app = Harness(repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+r")
+        await settle(pilot)
+        assert isinstance(app.screen, PickerScreen)
+
+
 # ------------------------------------------------------------------ switching
 
 
