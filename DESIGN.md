@@ -405,6 +405,37 @@ set alongside it so the refresh token that comes back is cached (via the same
 spent silently on the next connection or session, instead of opening a
 browser every time the access token expires.
 
+> **This is why `snowflake-connector-python[secure-local-storage]` (the
+> `keyring` extra) is a real dependency, not an optional nicety.** On Windows
+> and macOS the driver's token cache is backed by the OS keyring; without the
+> `keyring` package installed it silently falls back to a no-op cache that
+> never persists anything, and the symptom is exactly the bug this
+> architecture exists to avoid -- every connection in the pool, OAuth or SSO,
+> reopens a fresh browser prompt instead of the second connection onward
+> reusing what the first one just obtained. This was already latently true
+> for `externalbrowser`'s "connections 2..N usually do not prompt at all"
+> claim above; OAuth just made the gap loud enough to notice. Linux instead
+> falls back to a permissioned file under `~/.cache/snowflake/`, which needs
+> no extra dependency.
+>
+> On Windows, installing `keyring` is necessary but not sufficient: its
+> default backend (`WinVaultKeyring`) stores each token as a
+> `CRED_TYPE_GENERIC` Windows Credential, and that credential type is capped
+> by the OS at 2560 bytes regardless of how it is persisted. A Snowflake ID
+> or MFA token is a short opaque server-side reference and fits; an OAuth
+> access or refresh token is a real JWT and routinely does not, so
+> `CredWrite` fails with a raw Win32 error (1783, "the stub received bad
+> data") that neither `keyring` nor the driver's `KeyringTokenCache` catches
+> -- both only trap `keyring.errors.KeyringError` -- so it surfaces to the
+> connect dialog as a failed connection. `credential_cache.install()`
+> (`gateway/credential_cache.py`), called from `pool._real_connector` before
+> the driver ever touches its cache, swaps in a DPAPI-encrypted flat file as
+> the active `keyring` backend on Windows only: DPAPI ties the ciphertext to
+> the current Windows user profile the same way Credential Manager does, so
+> this is not a step down in secrecy, and a flat file has no comparable size
+> ceiling. macOS Keychain has no equivalent restriction, so this is
+> Windows-only.
+
 **snowcone stores no password anywhere.** Recent connections keep account,
 user, authenticator, role and warehouse only. For SSO and OAuth there is
 nothing to store -- the driver obtains and caches its own credential; for

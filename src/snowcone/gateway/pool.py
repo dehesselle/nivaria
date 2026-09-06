@@ -102,6 +102,12 @@ class Connector(Protocol):
 def _real_connector(**kwargs: Any) -> Any:
     import snowflake.connector
 
+    from snowcone.gateway import credential_cache
+
+    # Must happen before connect() ever touches the driver's token cache --
+    # see credential_cache.py for why Windows' default backend cannot hold an
+    # OAuth token in the first place.
+    credential_cache.install()
     return snowflake.connector.connect(**kwargs)
 
 

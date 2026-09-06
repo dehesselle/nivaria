@@ -25,6 +25,10 @@ def recent_file() -> Path:
     return config_dir() / "recent.json"
 
 
+def credential_cache_file() -> Path:
+    return config_dir() / "credential_cache.json"
+
+
 def cache_file(account: str, role: str | None) -> Path:
     """The sqlite cache file for one (account, role) identity.
 
