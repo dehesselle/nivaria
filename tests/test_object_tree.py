@@ -13,7 +13,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.ui.messages import ObjectSelected, ScopeNeeded
+from snowcone.ui.messages import CategorySelected, ObjectSelected, ScopeNeeded
 from snowcone.ui.widgets.object_tree import ObjectTree
 
 
@@ -420,14 +420,18 @@ async def test_highlighting_an_object_announces_it(repo) -> None:
     assert "MYDB.AAA.ORDERS" in seen
 
 
-async def test_a_category_node_announces_nothing(repo) -> None:
-    """Only leaf objects have a detail view; a category is navigation."""
+async def test_a_schema_node_announces_nothing(repo) -> None:
+    """A schema has no detail view of its own -- see SchemaRef -- so
+    highlighting one is pure navigation."""
     put_schemas(repo, "MYDB", "AAA")
     seen: list[str] = []
 
     class Listening(Harness):
         def on_object_selected(self, event: ObjectSelected) -> None:
             seen.append(event.ref.fqn)
+
+        def on_category_selected(self, event: CategorySelected) -> None:
+            seen.append(event.scope.key)
 
     app = Listening(repo)
     async with app.run_test(size=(80, 30)) as pilot:
@@ -437,6 +441,33 @@ async def test_a_category_node_announces_nothing(repo) -> None:
         tree.move_cursor(schemas_node(tree).children[0])
         await pilot.pause()
     assert seen == []
+
+
+async def test_highlighting_a_category_node_announces_its_scope(repo) -> None:
+    """The "Tables (n)" node under a schema carries the scope backing its own
+    children, which the detail pane can now show a list for."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    seen: list[str] = []
+
+    class Listening(Harness):
+        def on_category_selected(self, event: CategorySelected) -> None:
+            seen.append(event.scope.key)
+
+        def on_object_selected(self, event: ObjectSelected) -> None:
+            seen.append(event.ref.fqn)
+
+    app = Listening(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        schemas_node(tree).expand()
+        await pilot.pause()
+        schema = schemas_node(tree).children[0]
+        schema.expand()
+        await pilot.pause()
+        tree.move_cursor(schema.children[0])
+        await pilot.pause()
+    assert seen == ["tables:MYDB.AAA"]
 
 
 # ------------------------------------------------------------ db switching

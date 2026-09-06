@@ -29,31 +29,17 @@ from snowcone.models import ObjectKind, ObjectRef, Scope
 from snowcone.ui.messages import ScopeNeeded
 
 _registry: dict[ObjectKind, type[ObjectView]] = {}
+_category_registry: dict[ObjectKind, type[CategoryView]] = {}
 
 
-class ObjectView(Widget):
-    """One object kind's detail UI, mounted into the detail pane on demand."""
+class _ScopedView(Widget):
+    """What `ObjectView` and `CategoryView` share: repainting from the cache
+    and asking for what is missing or stale.
 
-    OBJECT_KIND: ClassVar[ObjectKind]
-
-    def __init__(self, repo: Repository, ref: ObjectRef) -> None:
-        super().__init__()
-        self.repo = repo
-        self.ref = ref
-
-    def on_mount(self) -> None:
-        self.update_content()
-
-    def show(self, ref: ObjectRef) -> None:
-        """Re-point an already mounted view at another object of its kind.
-
-        This is the path that makes moving between two tables cheap: the
-        widget, its columns and its scroll position all survive, so there is
-        no remount and no flicker.
-        """
-        self.ref = ref
-        if self.is_mounted:
-            self.update_content()
+    Split out because a category view (keyed by a `Scope`, no single object)
+    is not a rarer kind of `ObjectView` -- it has no `ref` and no `fqn` -- but
+    it needs the exact same freshness and cache-update plumbing.
+    """
 
     def cache_updated(self, scope: Scope) -> None:
         """Repaint if the scope that changed is one this view is showing."""
@@ -83,6 +69,54 @@ class ObjectView(Widget):
         return False
 
 
+class ObjectView(_ScopedView):
+    """One object kind's detail UI, mounted into the detail pane on demand."""
+
+    OBJECT_KIND: ClassVar[ObjectKind]
+
+    def __init__(self, repo: Repository, ref: ObjectRef) -> None:
+        super().__init__()
+        self.repo = repo
+        self.ref = ref
+
+    def on_mount(self) -> None:
+        self.update_content()
+
+    def show(self, ref: ObjectRef) -> None:
+        """Re-point an already mounted view at another object of its kind.
+
+        This is the path that makes moving between two tables cheap: the
+        widget, its columns and its scroll position all survive, so there is
+        no remount and no flicker.
+        """
+        self.ref = ref
+        if self.is_mounted:
+            self.update_content()
+
+
+class CategoryView(_ScopedView):
+    """One category's list UI (e.g. every table in a schema), mounted into
+    the detail pane on demand -- the group-node counterpart to `ObjectView`.
+    """
+
+    OBJECT_KIND: ClassVar[ObjectKind]
+
+    def __init__(self, repo: Repository, scope: Scope) -> None:
+        super().__init__()
+        self.repo = repo
+        self.scope = scope
+
+    def on_mount(self) -> None:
+        self.update_content()
+
+    def show(self, scope: Scope) -> None:
+        """Re-point an already mounted view at another category of the same
+        kind -- e.g. moving to another schema's Tables node."""
+        self.scope = scope
+        if self.is_mounted:
+            self.update_content()
+
+
 def register_view[T: type[ObjectView]](cls: T) -> T:
     """Register a view for its OBJECT_KIND."""
     kind = cls.OBJECT_KIND
@@ -98,3 +132,20 @@ def view_for(kind: ObjectKind) -> type[ObjectView] | None:
 
 def registered_kinds() -> frozenset[ObjectKind]:
     return frozenset(_registry)
+
+
+def register_category_view[T: type[CategoryView]](cls: T) -> T:
+    """Register a category (group-node) view for its OBJECT_KIND."""
+    kind = cls.OBJECT_KIND
+    if kind in _category_registry:
+        raise ValueError(f"a category view is already registered for {kind}")
+    _category_registry[kind] = cls
+    return cls
+
+
+def category_view_for(kind: ObjectKind) -> type[CategoryView] | None:
+    return _category_registry.get(kind)
+
+
+def registered_category_kinds() -> frozenset[ObjectKind]:
+    return frozenset(_category_registry)

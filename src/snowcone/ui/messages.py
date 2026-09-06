@@ -43,6 +43,14 @@ class ObjectSelected(Message):
         super().__init__()
 
 
+class CategorySelected(Message):
+    """A category node ("Tables (n)", "Views (n)", ...) is under the cursor."""
+
+    def __init__(self, scope: Scope) -> None:
+        self.scope = scope
+        super().__init__()
+
+
 class MenuTitleClicked(Message):
     """A menu bar title was clicked. Bubbles to the screen, which owns menu
     contents and dropdown behavior."""

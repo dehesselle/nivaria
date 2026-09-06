@@ -20,6 +20,7 @@ from snowcone.models import (
 from snowcone.ui.messages import ScopeNeeded
 from snowcone.ui.views.base import registered_kinds, view_for
 from snowcone.ui.views.pipe_view import PipeView
+from snowcone.ui.views.table_list_view import TableListView
 from snowcone.ui.views.table_view import TableView, ViewView
 from snowcone.ui.widgets.detail_pane import DetailPane
 
@@ -364,3 +365,90 @@ async def test_each_view_supplies_its_own_context(repo) -> None:
         await pilot.pause()
         assert "context-title" in table_context
         assert "stopped" in pipe_view._status()
+
+
+# --------------------------------------------------------------- table list
+
+
+async def test_selecting_a_tables_category_mounts_the_table_list_view(repo) -> None:
+    put_table(repo, "ORDERS")
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        assert isinstance(pane.view, TableListView)
+
+
+async def test_the_table_list_view_lists_every_cached_table(repo) -> None:
+    put_table(repo, "ORDERS", rows=42, bytes=8192, created_on="2026-01-01 00:00:00")
+    put_table(repo, "CUSTOMERS", rows=7, bytes=1024, created_on="2026-02-02 00:00:00")
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((0, 0)).plain == "CUSTOMERS"
+        assert table.get_cell_at((0, 1)).plain == "7"
+        assert table.get_cell_at((1, 0)).plain == "ORDERS"
+        assert table.get_cell_at((1, 3)).plain == "2026-01-01 00:00:00"
+
+
+async def test_moving_between_two_schemas_tables_reuses_the_list_view(repo) -> None:
+    put_table(repo, "ORDERS")
+    other_scope = objects_scope(ObjectKind.TABLE, "MYDB", "OTHER")
+    load(
+        repo,
+        other_scope,
+        [
+            {
+                "database_name": "MYDB",
+                "schema_name": "OTHER",
+                "name": "EVENTS",
+                "kind": "TABLE",
+                "comment": "",
+                "rows": 1,
+                "bytes": 1,
+            }
+        ],
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view_a = pane.show_category(objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC"))
+        await pilot.pause()
+        view_b = pane.show_category(other_scope)
+        await pilot.pause()
+        assert view_a is view_b
+        assert pane.query_one("#detail-table-list", DataTable).row_count == 1
+
+
+async def test_an_unregistered_category_kind_shows_a_placeholder(repo) -> None:
+    """Only Tables has a list view so far; the other category kinds fall back
+    to the same placeholder convention as an unregistered object kind."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        result = pane.show_category(objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC"))
+        await pilot.pause()
+        assert result is None
+        assert pane.query_one("#detail-placeholder", Static)
+
+
+async def test_a_category_cache_update_repaints_the_list(repo) -> None:
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        assert pane.query_one("#detail-table-list", DataTable).row_count == 0
+
+        put_table(repo, "ORDERS")
+        pane.cache_updated(scope)
+        await pilot.pause()
+        assert pane.query_one("#detail-table-list", DataTable).row_count == 1

@@ -37,6 +37,7 @@ from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.menus import connect_menu_items
 from snowcone.ui.messages import (
     CacheUpdated,
+    CategorySelected,
     MenuTitleClicked,
     ObjectSelected,
     ScopeNeeded,
@@ -50,7 +51,11 @@ from snowcone.ui.screens.menu_dropdown import (
 from snowcone.ui.screens.menu_select import MenuBarSelectScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.screens.search import SearchScreen
-from snowcone.ui.views import pipe_view, table_view  # noqa: F401 -- registers views
+from snowcone.ui.views import (  # noqa: F401 -- registers views
+    pipe_view,
+    table_list_view,
+    table_view,
+)
 from snowcone.ui.widgets.detail_pane import DetailPane
 from snowcone.ui.widgets.menubar import MENU_IDS, MenuBar
 from snowcone.ui.widgets.object_tree import ObjectTree
@@ -269,6 +274,17 @@ class MainScreen(Screen):
 
     def on_object_selected(self, event: ObjectSelected) -> None:
         self._select(event.ref)
+
+    def on_category_selected(self, event: CategorySelected) -> None:
+        self._select_category(event.scope)
+
+    def _select_category(self, scope: Scope) -> None:
+        # No tree.reveal(...) needed here, unlike _select: the cursor is
+        # already on the category node that was just highlighted.
+        view = self.detail.show_category(scope)
+        if view is not self._context_view:
+            self._context_view = view
+            self._rebuild_context(view)
 
     def _select(self, ref: ObjectRef) -> None:
         # A search hit leaves the tree somewhere you can keep browsing from,

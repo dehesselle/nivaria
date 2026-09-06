@@ -14,7 +14,12 @@ from textual.widgets import Static
 
 from snowcone.cache.repository import Repository
 from snowcone.models import ObjectRef, Scope
-from snowcone.ui.views.base import ObjectView, view_for
+from snowcone.ui.views.base import (
+    CategoryView,
+    ObjectView,
+    category_view_for,
+    view_for,
+)
 
 
 class DetailPane(Vertical):
@@ -23,16 +28,21 @@ class DetailPane(Vertical):
     def __init__(self, repo: Repository, **kwargs) -> None:
         super().__init__(**kwargs)
         self.repo = repo
-        self._view: ObjectView | None = None
+        self._view: ObjectView | CategoryView | None = None
         self._ref: ObjectRef | None = None
+        self._scope: Scope | None = None
 
     @property
-    def view(self) -> ObjectView | None:
+    def view(self) -> ObjectView | CategoryView | None:
         return self._view
 
     @property
     def ref(self) -> ObjectRef | None:
         return self._ref
+
+    @property
+    def scope(self) -> Scope | None:
+        return self._scope
 
     def show(self, ref: ObjectRef) -> ObjectView | None:
         """Point the pane at an object. Returns the view now showing it.
@@ -42,6 +52,7 @@ class DetailPane(Vertical):
         context is still correct.
         """
         self._ref = ref
+        self._scope = None
         view_class = view_for(ref.kind)
         if view_class is None:
             self._show_placeholder(f"No detail view for {ref.kind.value} yet.")
@@ -58,9 +69,36 @@ class DetailPane(Vertical):
         self.mount(view)
         return view
 
+    def show_category(self, scope: Scope) -> CategoryView | None:
+        """Point the pane at a category node ("Tables (n)", ...).
+
+        Same swap rule as `show`: same kind re-points the mounted view, a
+        different kind (or one with no registered view) replaces it.
+        """
+        self._ref = None
+        self._scope = scope
+        kind = scope.object_kind
+        view_class = category_view_for(kind) if kind is not None else None
+        if view_class is None:
+            label = kind.plural if kind is not None else "this"
+            self._show_placeholder(f"No list view for {label} yet.")
+            return None
+
+        current = self._view
+        if current is not None and type(current) is view_class:
+            current.show(scope)
+            return current
+
+        self.remove_children()
+        view = view_class(self.repo, scope)
+        self._view = view
+        self.mount(view)
+        return view
+
     def clear(self) -> None:
         self._view = None
         self._ref = None
+        self._scope = None
         self.remove_children()
 
     def set_repo(self, repo: Repository) -> None:

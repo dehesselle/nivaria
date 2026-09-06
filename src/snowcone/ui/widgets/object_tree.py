@@ -42,7 +42,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.ui.messages import ObjectSelected, ScopeNeeded
+from snowcone.ui.messages import CategorySelected, ObjectSelected, ScopeNeeded
 from snowcone.ui.widgets.plan import Child, plan_children
 
 #: Which object kinds get a category node under each schema, in display order.
@@ -212,8 +212,12 @@ class ObjectTree(Tree[NodeData]):
             # Mid-restructure; the cursor restore decides what is selected.
             return
         data = event.node.data
-        if data is not None and data.ref is not None:
+        if data is None:
+            return
+        if data.ref is not None:
             self.post_message(ObjectSelected(data.ref))
+        elif data.kind is NodeKind.CATEGORY and data.scope is not None:
+            self.post_message(CategorySelected(data.scope))
 
     # ------------------------------------------------------------ freshness
 
