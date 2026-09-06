@@ -780,10 +780,14 @@ Three things about it are worth knowing from inside snowcone:
 
 - **`tcw` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
   than in a stylesheet -- a library cannot rely on a consumer's `CSS_PATH`.
-  So the menu-bar and settings-dialog rules are no longer in `app.tcss`, and
-  neither is `Button.button-gray`, which moved onto `DialogScreen` where its
-  only users are. `app.tcss` still outranks `DEFAULT_CSS` regardless of
-  specificity, so anything there can still be overridden here.
+  So the menu-bar and settings-dialog *layout* rules are no longer in
+  `app.tcss`. Colour is not tcw's business, though: it ships no theming, so
+  `Button.button-gray` stays here, and the gray treatment for the buttons
+  inside tcw's own dialogs is applied by id (`#confirm-no`,
+  `#settings-apply`, `#settings-cancel`) rather than by a class, since there
+  is no call site here to hang one on. `app.tcss` outranks `DEFAULT_CSS`
+  regardless of specificity, so anything tcw does style can still be
+  overridden here.
 - **`MenuBar` installs its own `F9` binding** on whichever screen it is
   mounted on, which is why `MainScreen.BINDINGS` no longer carries one.
   Textual only consults the focus chain plus the screen and the app when

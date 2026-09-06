@@ -98,6 +98,50 @@ ConnectScreen {
     margin-top: 1;
 }
 
+/* ---- buttons ------------------------------------------------------------ */
+
+/* The unstyled (default) variant defaults to $surface, which sits so close
+   to the screen background and to $panel that it visually disappears next
+   to a -primary sibling. Bump it up the existing gray ramp instead of
+   introducing a new color.
+   Marked explicitly with a "button-gray" class from the call site rather
+   than matched by variant: a "default" variant Button's `variant` reactive
+   is declared with "default" as its initial value, and Textual only calls
+   watch_variant() on an actual change, so a button that is never given
+   another variant never gets a "-default" class added at all -- there is no
+   selector that means "whichever variant this is, it isn't -primary/
+   -success/-warning/-error" since Textual's CSS has no :not(), and any rule
+   here in app.tcss outranks Button's own DEFAULT_CSS regardless of
+   specificity, so a broad `Button.-style-default` selector clobbers those
+   variants' own background instead of leaving them alone.
+   Background only, no border override: a compact button (settings dialog's
+   Apply/Cancel) forces `border: none !important` in its own DEFAULT_CSS,
+   and since app.tcss rules outrank DEFAULT_CSS even through !important, a
+   border-top/border-bottom here would put a border back specifically on
+   compact gray buttons while their compact -primary sibling stays
+   borderless. Leaving border alone keeps both compact and non-compact
+   gray buttons consistent with their variant siblings' border handling. */
+Button.button-gray {
+    background: $surface-lighten-3;
+
+    &:hover {
+        background: $surface-lighten-1;
+    }
+}
+
+/* The same treatment, applied by id: tcw composes its own dialogs, so there
+   is no call site here to hang the class on. Theming is the app's job, not
+   the library's -- tcw ships layout and leaves colour alone. */
+ConfirmScreen #confirm-no,
+SettingsScreen #settings-apply,
+SettingsScreen #settings-cancel {
+    background: $surface-lighten-3;
+
+    &:hover {
+        background: $surface-lighten-1;
+    }
+}
+
 /* ---- picker modal ----------------------------------------------------- */
 
 PickerScreen > #dialog {
