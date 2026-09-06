@@ -206,3 +206,17 @@ class ObjectRef:
     @property
     def fqn(self) -> str:
         return f"{self.database}.{self.schema}.{self.name}"
+
+
+@dataclass(frozen=True)
+class SchemaRef:
+    """What the search modal hands back for a schema hit.
+
+    Deliberately not an ObjectRef with some placeholder kind: a schema has no
+    ObjectKind, no mirror row of its own to show, and no detail view -- the
+    tree can only reveal and expand it (see `ObjectTree.reveal_schema`),
+    never open it the way an object hit is opened.
+    """
+
+    database: str
+    name: str

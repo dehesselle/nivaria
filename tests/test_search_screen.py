@@ -13,7 +13,14 @@ from textual.widgets import Input, OptionList
 import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
-from snowcone.models import ObjectKind, ObjectRef, columns_scope, objects_scope
+from snowcone.models import (
+    ObjectKind,
+    ObjectRef,
+    SchemaRef,
+    columns_scope,
+    objects_scope,
+    schemas_scope,
+)
 from snowcone.ui.screens.search import SearchScreen
 
 
@@ -34,7 +41,7 @@ class Harness(App[None]):
         super().__init__()
         self._repo = repo
         self._database = database
-        self.selected: list[ObjectRef | None] = []
+        self.selected: list[ObjectRef | SchemaRef | None] = []
 
     def on_mount(self) -> None:
         self.push_screen(SearchScreen(self._repo, self._database), self.selected.append)
@@ -89,6 +96,14 @@ def put_columns(
     )
 
 
+def put_schemas(repo: Repository, *names: str, database="MYDB") -> None:
+    load(
+        repo,
+        schemas_scope(database),
+        [{"database_name": database, "name": name, "comment": ""} for name in names],
+    )
+
+
 async def type_query(pilot, app: Harness, text: str) -> None:
     app.screen.query_one("#search-query", Input).value = text
     for _ in range(4):
@@ -99,6 +114,15 @@ async def type_query(pilot, app: Harness, text: str) -> None:
 
 def shown(app: Harness) -> list[str]:
     return [f"{ref.schema}.{ref.name}" for ref in app.screen._shown]
+
+
+def shown_labels(app: Harness) -> list[str]:
+    """Like shown(), but also handles a SchemaRef hit, which has no schema
+    of its own to qualify it with."""
+    return [
+        ref.name if isinstance(ref, SchemaRef) else f"{ref.schema}.{ref.name}"
+        for ref in app.screen._shown
+    ]
 
 
 def option_text(app: Harness, index: int) -> str:
@@ -178,6 +202,31 @@ def test_the_column_corpus_is_scoped_to_one_database(repo) -> None:
 
 def test_an_unknown_database_has_an_empty_column_corpus(repo) -> None:
     assert repo.search_column_corpus("NOPE") == []
+
+
+# ------------------------------------------------------------ schema corpus
+
+
+def test_the_schema_corpus_lists_every_cached_schema(repo) -> None:
+    put_schemas(repo, "SALES", "RAW")
+    assert sorted(s.name for s in repo.search_schema_corpus("MYDB")) == ["RAW", "SALES"]
+
+
+def test_the_schema_corpus_carries_the_database(repo) -> None:
+    put_schemas(repo, "SALES")
+    (schema,) = repo.search_schema_corpus("MYDB")
+    assert schema.database == "MYDB"
+    assert schema.name == "SALES"
+
+
+def test_the_schema_corpus_is_scoped_to_one_database(repo) -> None:
+    put_schemas(repo, "SALES")
+    put_schemas(repo, "OTHER", database="OTHERDB")
+    assert [s.name for s in repo.search_schema_corpus("MYDB")] == ["SALES"]
+
+
+def test_an_unknown_database_has_an_empty_schema_corpus(repo) -> None:
+    assert repo.search_schema_corpus("NOPE") == []
 
 
 # ---------------------------------------------------------------- opening
@@ -321,6 +370,45 @@ async def test_a_name_match_outranks_a_column_match_when_both_hit(repo) -> None:
         assert "ORD_STATUS" not in option_text(app, 0)
 
 
+async def test_a_schema_name_surfaces_as_a_hit(repo) -> None:
+    put_schemas(repo, "STAGING")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "stag")
+        assert shown_labels(app) == ["STAGING"]
+
+
+async def test_a_schema_hit_is_labelled_as_a_schema(repo) -> None:
+    put_schemas(repo, "STAGING")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "stag")
+        assert "schema" in option_text(app, 0)
+
+
+async def test_choosing_a_schema_hit_dismisses_with_a_schemaref(repo) -> None:
+    put_schemas(repo, "STAGING")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "stag")
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.selected[0] == SchemaRef(database="MYDB", name="STAGING")
+
+
+async def test_a_schema_and_an_object_can_both_appear_for_the_same_query(repo) -> None:
+    put(repo, ObjectKind.TABLE, "STAGING", "STG_ORDERS")
+    put_schemas(repo, "STAGING")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "staging")
+        assert set(shown_labels(app)) == {"STAGING", "STAGING.STG_ORDERS"}
+
+
 async def test_searching_without_a_database_is_empty_not_an_error(repo) -> None:
     app = Harness(repo, database=None)
     async with app.run_test(size=(80, 30)) as pilot:
@@ -405,6 +493,7 @@ async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopen
         # deterministically *after* the snapshot, not racing it.
         await app.screen._objects_loaded
         await app.screen._columns_loaded
+        await app.screen._schemas_loaded
         put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "CUSTOMERS")
         await type_query(pilot, app, "cust")
         assert shown(app) == []
@@ -452,6 +541,7 @@ async def test_the_list_corrects_itself_once_a_slow_load_lands(repo) -> None:
         release.set()
         await app.screen._objects_loaded
         await app.screen._columns_loaded
+        await app.screen._schemas_loaded
         await pilot.pause()
         assert shown(app) == ["SALES.ORDERS"]
 

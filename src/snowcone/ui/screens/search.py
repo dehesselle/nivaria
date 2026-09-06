@@ -1,6 +1,6 @@
-"""The object search modal: find-as-you-type over every cached object -- and
-every cached column -- in the current database, given the room a modal can
-take instead of a sliver of the top pane.
+"""The object search modal: find-as-you-type over every cached object,
+column, and schema in the current database, given the room a modal can take
+instead of a sliver of the top pane.
 
 Both corpora are built once, when the dialog opens, from whatever is in the
 cache right then -- there is no long-lived widget for a background cache
@@ -47,8 +47,14 @@ from textual.widgets.option_list import Option
 
 from snowcone.cache.repository import Repository
 from snowcone.fuzzy import Match, highlight, rank, rank_qualified
-from snowcone.models import ObjectRef
+from snowcone.models import ObjectRef, SchemaRef
 from snowcone.ui.screens.dialog_base import DialogScreen
+
+#: What the modal hands back: an object, a column's owning object, or a
+#: schema. A schema is never an ObjectRef with some placeholder kind -- see
+#: SchemaRef -- so the two are kept as a plain union rather than forcing a
+#: schema to pretend to be a kind of object it is not.
+Hit = ObjectRef | SchemaRef
 
 #: Long enough that holding a key down does not rank once per character,
 #: short enough to feel immediate.
@@ -67,8 +73,8 @@ MAX_RESULTS = 200
 MIN_COLUMN_QUERY_LENGTH = 3
 
 
-class SearchScreen(DialogScreen[ObjectRef]):
-    """Pick one object by fuzzy name, or dismiss with None."""
+class SearchScreen(DialogScreen[Hit]):
+    """Pick one object or schema by fuzzy name, or dismiss with None."""
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("down", "to_results", "Results", show=False),
@@ -80,7 +86,8 @@ class SearchScreen(DialogScreen[ObjectRef]):
         self.database = database
         self._corpus: list[tuple[str, ObjectRef]] = []
         self._column_corpus: list[tuple[ObjectRef, str]] = []
-        self._shown: list[ObjectRef] = []
+        self._schema_corpus: list[SchemaRef] = []
+        self._shown: list[Hit] = []
         self._timer = None
 
     def compose(self) -> ComposeResult:
@@ -90,18 +97,22 @@ class SearchScreen(DialogScreen[ObjectRef]):
 
     def on_mount(self) -> None:
         self.query_one("#search-query", Input).focus()
-        # Two independent loads, not one: the object corpus alone is cheap
-        # (~5ms even at 2000 objects) but was measured stuck for ~55-75ms
-        # behind the column corpus when fetched together, since a call that
-        # reads both blocks on whichever one is slower. Splitting them means
-        # name-only matches become available almost immediately, with column
-        # matches joining in a beat later, instead of both waiting on the
-        # slower one. Neither is awaited here -- see _load_corpus.
+        # Three independent loads, not one: the object and schema corpora are
+        # both cheap (~5ms even at 2000 objects; a schema list is smaller
+        # still) but were measured stuck for ~55-75ms behind the column
+        # corpus when fetched together, since a call that reads all of them
+        # blocks on whichever is slowest. Splitting them means name and
+        # schema matches become available almost immediately, with column
+        # matches joining in a beat later, instead of all three waiting on
+        # the slowest one. None is awaited here -- see _load_objects et al.
         self._objects_loaded: asyncio.Task[None] = asyncio.create_task(
             self._load_objects()
         )
         self._columns_loaded: asyncio.Task[None] = asyncio.create_task(
             self._load_columns()
+        )
+        self._schemas_loaded: asyncio.Task[None] = asyncio.create_task(
+            self._load_schemas()
         )
 
     def on_unmount(self) -> None:
@@ -109,6 +120,7 @@ class SearchScreen(DialogScreen[ObjectRef]):
         # resume after unmount and touch widgets that no longer exist.
         self._objects_loaded.cancel()
         self._columns_loaded.cancel()
+        self._schemas_loaded.cancel()
 
     async def _load_objects(self) -> None:
         self._corpus = await asyncio.to_thread(self._read_objects)
@@ -118,6 +130,10 @@ class SearchScreen(DialogScreen[ObjectRef]):
         self._column_corpus = await asyncio.to_thread(self._read_columns)
         await self._refresh_if_typing()
 
+    async def _load_schemas(self) -> None:
+        self._schema_corpus = await asyncio.to_thread(self._read_schemas)
+        await self._refresh_if_typing()
+
     def _read_objects(self) -> list[tuple[str, ObjectRef]]:
         """Pure: no widget access, so safe to call from a thread."""
         return self.repo.search_corpus(self.database) if self.database else []
@@ -125,6 +141,10 @@ class SearchScreen(DialogScreen[ObjectRef]):
     def _read_columns(self) -> list[tuple[ObjectRef, str]]:
         """Pure: no widget access, so safe to call from a thread."""
         return self.repo.search_column_corpus(self.database) if self.database else []
+
+    def _read_schemas(self) -> list[SchemaRef]:
+        """Pure: no widget access, so safe to call from a thread."""
+        return self.repo.search_schema_corpus(self.database) if self.database else []
 
     async def _refresh_if_typing(self) -> None:
         # A quick typist can have a query in the box before either load
@@ -155,10 +175,11 @@ class SearchScreen(DialogScreen[ObjectRef]):
             self._timer = None
         # Enter commits to a choice and closes the dialog, unlike a plain
         # keystroke's list refresh -- so unlike _run_query's live-typing path,
-        # this one waits for both loads rather than risk picking (or closing
-        # on) a result ranked against one still partially empty.
+        # this one waits for all three loads rather than risk picking (or
+        # closing on) a result ranked against one still partially empty.
         await self._objects_loaded
         await self._columns_loaded
+        await self._schemas_loaded
         await self._run_query()
         self._choose(0)
 
@@ -200,32 +221,35 @@ class SearchScreen(DialogScreen[ObjectRef]):
             return
         self._apply_results(ranked)
 
-    def _rank(self, query: str) -> list[tuple[ObjectRef, Match, str | None]]:
-        """Best hit per object, from either its own name or a column's.
+    def _rank(self, query: str) -> list[tuple[Hit, Match, str | None]]:
+        """Best hit per object or schema, from a name, a column, or itself.
 
-        Pure and widget-free -- safe to call from a thread. `_corpus` and
-        `_column_corpus` do get reassigned once each, when the corresponding
-        background load in `_load_objects`/`_load_columns` finishes, but
-        never mutated in place, and a plain attribute reassignment is atomic
-        under the GIL -- so a read from this thread always sees one complete
-        corpus or the other, never a partial write (see the module docstring
-        for why this runs against a possibly-incomplete corpus at all).
+        Pure and widget-free -- safe to call from a thread. `_corpus`,
+        `_column_corpus` and `_schema_corpus` do get reassigned once each,
+        when the corresponding background load in `_load_objects`/
+        `_load_columns`/`_load_schemas` finishes, but never mutated in
+        place, and a plain attribute reassignment is atomic under the GIL --
+        so a read from this thread always sees one complete corpus or the
+        other, never a partial write (see the module docstring for why this
+        runs against a possibly-incomplete corpus at all).
         """
         search_columns = len(query) >= MIN_COLUMN_QUERY_LENGTH
 
         # `rank`/`rank_qualified` break score ties by corpus order, which is
-        # what keeps an empty query a plain passthrough; merging two ranked
-        # lists through a set would throw that away, so first appearance
-        # across either corpus is recorded up front and carried through the
-        # merge as the same kind of tie-break. Skipped for the column corpus
-        # below the length gate, same as the ranking itself -- otherwise a
-        # short query would still pay for walking all of it just for this.
-        order: dict[ObjectRef, int] = {}
+        # what keeps an empty query a plain passthrough; merging ranked lists
+        # through a set would throw that away, so first appearance across
+        # any corpus is recorded up front and carried through the merge as
+        # the same kind of tie-break. Skipped for the column corpus below the
+        # length gate, same as the ranking itself -- otherwise a short query
+        # would still pay for walking all of it just for this.
+        order: dict[Hit, int] = {}
         for _, ref in self._corpus:
             order.setdefault(ref, len(order))
         if search_columns:
             for ref, _ in self._column_corpus:
                 order.setdefault(ref, len(order))
+        for schema in self._schema_corpus:
+            order.setdefault(schema, len(order))
 
         object_hits: dict[ObjectRef, Match] = dict(
             rank_qualified(
@@ -234,10 +258,11 @@ class SearchScreen(DialogScreen[ObjectRef]):
                 limit=MAX_RESULTS,
             )
         )
-        # Plain `rank`, not `rank_qualified`: there is no schema/name-style
-        # qualification ambiguity to resolve for a column, so the simpler
-        # matcher is enough, and its positions are already relative to the
-        # bare column name, ready to highlight directly.
+        # Plain `rank`, not `rank_qualified`, for both of these: there is no
+        # schema/name-style qualification ambiguity to resolve for a bare
+        # column or schema name, so the simpler matcher is enough, and its
+        # positions are already relative to the name itself, ready to
+        # highlight directly.
         column_hits: dict[ObjectRef, tuple[str, Match]] = {}
         if search_columns:
             for (ref, column), hit in rank(
@@ -248,8 +273,15 @@ class SearchScreen(DialogScreen[ObjectRef]):
                 best = column_hits.get(ref)
                 if best is None or hit.score > best[1].score:
                     column_hits[ref] = (column, hit)
+        schema_hits: dict[SchemaRef, Match] = dict(
+            rank(
+                query,
+                ((schema.name, schema) for schema in self._schema_corpus),
+                limit=MAX_RESULTS,
+            )
+        )
 
-        merged: list[tuple[ObjectRef, Match, str | None]] = []
+        merged: list[tuple[Hit, Match, str | None]] = []
         for ref in object_hits.keys() | column_hits.keys():
             object_hit = object_hits.get(ref)
             column_name, column_hit = column_hits.get(ref, (None, None))
@@ -260,10 +292,15 @@ class SearchScreen(DialogScreen[ObjectRef]):
             else:
                 assert column_hit is not None
                 merged.append((ref, column_hit, column_name))
+        # Schemas never compete with objects/columns for the same Hit -- an
+        # ObjectRef and a SchemaRef are never equal -- so these just join the
+        # merge rather than needing a best-of comparison like the above.
+        for schema, hit in schema_hits.items():
+            merged.append((schema, hit, None))
         merged.sort(key=lambda item: (-item[1].score, order[item[0]]))
         return merged[:MAX_RESULTS]
 
-    def _apply_results(self, ranked: list[tuple[ObjectRef, Match, str | None]]) -> None:
+    def _apply_results(self, ranked: list[tuple[Hit, Match, str | None]]) -> None:
         results = self.query_one("#search-results", OptionList)
         self._shown = [ref for ref, _, _ in ranked]
         results.clear_options()
@@ -276,12 +313,19 @@ class SearchScreen(DialogScreen[ObjectRef]):
         if self._shown:
             results.highlighted = 0
 
-    def _option_text(self, ref: ObjectRef, hit: Match, column: str | None) -> Text:
+    def _option_text(self, ref: Hit, hit: Match, column: str | None) -> Text:
         # A Rich Text cannot reference a CSS variable, so the theme's accent
         # has to be resolved to a real colour here.
         accent = self.app.theme_variables.get("accent")
         style = f"bold {accent}" if accent else "bold"
         text = Text()
+        if isinstance(ref, SchemaRef):
+            # No prefix to qualify it with -- a schema search is already
+            # scoped to one database, so there is nothing else to show.
+            for run, matched in highlight(ref.name, hit.positions):
+                text.append(run, style=style if matched else "")
+            text.append("  schema", style="dim")
+            return text
         # A column-matched hit's positions are relative to the column name,
         # not "schema.name", so there is nothing to highlight there.
         name_positions = hit.positions if column is None else ()

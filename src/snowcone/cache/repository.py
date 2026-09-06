@@ -34,9 +34,11 @@ from snowcone.models import (
     Column,
     ObjectKind,
     ObjectRef,
+    SchemaRef,
     Scope,
     ScopeKind,
     SFObject,
+    schemas_scope,
 )
 from snowcone.models import Database as DatabaseRow
 from snowcone.models import Role as RoleRow
@@ -527,6 +529,20 @@ class Repository:
             if current_ref is not None:
                 corpus.append((current_ref, row["COLUMN_NAME"]))
         return corpus
+
+    def search_schema_corpus(self, database: str) -> list[SchemaRef]:
+        """Every cached schema in a database, for the search modal.
+
+        Schemas are already flat and singly-sourced (`show_schemas`), unlike
+        objects and columns, so this is a thin wrapper over `schemas()`
+        rather than its own query -- kept anyway, so the modal reads three
+        parallel `search_*_corpus` methods instead of building one of its
+        three corpora by hand.
+        """
+        return [
+            SchemaRef(database=database, name=row.name)
+            for row in self.schemas(schemas_scope(database)).rows
+        ]
 
     def child_count(self, scope: Scope) -> int:
         """The count behind a collapsed tree label, e.g. `Schemas (40)`."""

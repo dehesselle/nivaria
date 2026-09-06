@@ -22,6 +22,7 @@ from snowcone.gateway.pool import ConnectionPool
 from snowcone.models import (
     ObjectKind,
     ObjectRef,
+    SchemaRef,
     Scope,
     columns_prime_scope,
     databases_scope,
@@ -178,9 +179,16 @@ class MainScreen(Screen):
 
     @work
     async def action_search(self) -> None:
-        ref = await self.app.push_screen_wait(SearchScreen(self.repo, self.database))
-        if ref is not None:
-            self._select(ref)
+        hit = await self.app.push_screen_wait(SearchScreen(self.repo, self.database))
+        if hit is None:
+            return
+        if isinstance(hit, SchemaRef):
+            # A schema has no detail view to open (see SchemaRef) -- reveal
+            # and expand it in the tree, the same place _select leaves you
+            # for an object, and stop there.
+            self.tree.reveal_schema(hit)
+            return
+        self._select(hit)
 
     # ------------------------------------------------------------- menu bar
 

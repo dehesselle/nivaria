@@ -66,7 +66,7 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, **Warehouse ...** (`w`) and **Role ...** (`r`) to open the same fuzzy-picker pattern as the database picker over cached warehouses/roles, applying the choice session-wide (see below). |
+| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, **Warehouse ...** (`w`) and **Role ...** (`r`) to open the same fuzzy-picker pattern as the database picker over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (no mnemonic) to fill the current database's column cache in the background — see "Column cache priming". |
 | **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
 | **Top pane** | Holds the Context bar. |
 | **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |
@@ -265,6 +265,67 @@ settle.
 > schema, where names are unique, keyset paging is verified correct and is
 > used.
 
+### Column cache priming
+
+A table's columns are fetched lazily by default — one `SHOW COLUMNS IN TABLE`
+per table, only when that table's detail view is opened (see "The Object
+tree" and the registry section below). That leaves most tables in a database
+with no cached columns at all, which is fine for the detail pane but means
+column names are absent from search for anything nobody has personally
+opened.
+
+**Pre-warm cache** (Connect menu) fixes that on demand — there is no
+automatic trigger, since there was no good signal found for "the user wants
+this now" short of asking. Selecting it fires three background requests at
+once for the current database: the table and view object lists (via the
+existing `DATABASE_PRIME` mechanism above) and a `COLUMNS_PRIME` scope. The
+first two exist so the third has schema and table names to fall back to, not
+as an afterthought — see below.
+
+`COLUMNS_PRIME` mirrors `DATABASE_PRIME` one level deeper, in three tiers:
+
+1. **Whole database, one round trip**: `SHOW COLUMNS IN DATABASE`, capped at
+   the same 10 000-row `SHOW` limit.
+2. **Truncated → one round trip per schema**: `SHOW COLUMNS IN SCHEMA`. This
+   is the common case in practice, since columns multiply table count —
+   a database that fit under the cap for `DATABASE_PRIME` can easily blow it
+   here.
+3. **A single schema still truncated → one round trip per table**: the
+   already-existing lazy per-table fetch, just requested proactively instead
+   of on open.
+
+Unlike the object prime, a usable result needs no pre-seeding of empty
+scopes: a real table always has at least one column, so there is no
+"zero rows but still fetched" case to guard against the way an empty schema
+needs one.
+
+One cold-start edge case is handled directly rather than assumed away:
+priming may be the first request ever made against a database nobody has
+browsed this session, so the schema list the per-schema fallback needs to
+iterate can still be empty. Rather than requiring the `SCHEMAS` scope to have
+finished first — which would be the one dependency this architecture
+otherwise has none of (see "Scopes: the unit of everything") — that fallback
+asks Snowflake for the schema names directly when the cache has none, and
+separately requests the `SCHEMAS` scope so the tree benefits too. The deeper
+per-schema-truncated-too fallback is left depending on cache being warm by
+then, an accepted gap: it only matters for one schema large enough to
+overflow the cap by itself, and the menu action's own object-list priming is
+already running concurrently by the time it could matter.
+
+`SHOW COLUMNS IN DATABASE`/`IN SCHEMA` are unverified against a live account,
+same caveat as the paging note below — the reference account was not probed
+against a large enough number of columns to observe truncation or confirm
+the exact result shape at that scale.
+
+Priming always runs at **background** priority, the same tier as the
+staleness sweep: it can run for a while with nobody watching, so it must
+never jump ahead of interactive/visible work already queued, and it must
+never trigger an unattended reconnect (`allow_reconnect=False`, same rule as
+the sweep — see "The connection pool"). It draws on the same worker pool as
+ordinary browsing rather than a dedicated connection, so it competes for
+whatever is idle but can never grow the pool or lock out real interactive
+work.
+
 ### Verified and unverified paging
 
 `LIMIT n FROM 'name'` keyset paging was verified correct — same rows, same
@@ -450,38 +511,92 @@ widget in the top pane because search is the primary way to navigate a
 database of thousands of objects, and it earns the room only a modal can take
 without permanently stealing it from the tree and detail pane.
 
-Find-as-you-type over every cached object in the current database, ranked by
-subsequence matching so `stgord` finds `STG_CUSTOMER_ORDERS`. Substring search
-would not, which is the whole point; sqlite's full-text matching cannot express
-it either, so ranking happens in Python over an in-memory corpus.
+Find-as-you-type over every cached object, column, and schema in the current
+database, ranked by subsequence matching so `stgord` finds
+`STG_CUSTOMER_ORDERS`. Substring search would not, which is the whole point;
+sqlite's full-text matching cannot express it either, so ranking happens in
+Python over three in-memory corpora — object names, column names (paired with
+their owning object), and schema names.
 
-The corpus is built once, when the dialog opens, from whatever the cache holds
-right then — there is no lazy staleness tracking to rebuild it while the
-dialog is closed, because there is no widget left mounted for a cache update
-to mark stale. This is also why it needs none: `SnowconeApp` routes
-`CacheUpdated` to `self.screen`, which while the modal is open is the modal
-itself, not `MainScreen`, so a background update would not reach a live corpus
-here any more than it reaches the tree or detail pane while any other modal
-(the database picker, say) is on top. Closing and reopening the dialog picks
-up whatever changed in between, at the cost a keystroke used to pay to notice
-a stale corpus.
+A trigram/substring index (SQLite's FTS5) was considered as a way to push
+matching into SQL instead. Rejected: it cannot express subsequence matching
+either, and worse, cannot safely *pre-filter* for it — `STG_CUSTOMER_ORDERS`
+shares zero substrings of length ≥2 with the query `stgord`, so a substring
+prefilter would discard the exact match subsequence matching exists for,
+silently, on every query that relies on it. The two are different matching
+semantics, not one faster than the other for the same job.
 
-Matching scores **both `SCHEMA.NAME` and the bare name**, keeping whichever is
-better, with a small preference for the name. This is not gold-plating:
-Snowflake schemas repeat themselves in their objects' names — a `STAGING`
-schema full of `STG_` tables — and greedy left-to-right matching otherwise
-spends the query's leading characters inside the schema, leaving a poor
-alignment in the name. Without this, `stgord` ranks `STAGING.LOAD_ORDERS`
+### Loading: three corpora, independently
+
+Each corpus loads as its own background task, kicked off in `on_mount` but
+not awaited there — first paint is not delayed behind any of them. Object and
+schema lists are cheap (~5ms even at 2000 objects), but the column corpus is
+real work: measured at ~55-75ms for 30k cached columns, and ~700ms at 270k.
+Fetching all three together would mean the cheap ones wait on the slowest —
+splitting them means name and schema matches are usable almost immediately,
+with column matches joining in once their own load lands.
+
+Typing never waits on a load either: ranking proceeds against whatever
+corpus already exists — empty, partial, or complete — and each load re-runs
+the current query itself once it finishes, so the list corrects itself in
+place rather than a keystroke ever blocking on it. **Enter is the one
+exception**: choosing a result and closing the dialog is a commitment a
+still-partial corpus should not get to make, so that path alone waits for
+all three loads first.
+
+None of the three corpora carry live staleness tracking, for the same reason:
+there is no widget left mounted for a cache update to mark them stale while
+the dialog is open. `SnowconeApp` routes `CacheUpdated` to `self.screen`,
+which while the modal is open is the modal itself, not `MainScreen`, so a
+background update would not reach a live corpus here any more than it
+reaches the tree or detail pane while any other modal (the database picker,
+say) is on top. Closing and reopening the dialog picks up whatever changed in
+between, at the cost a keystroke used to pay to notice a stale corpus.
+
+### Matching and ranking
+
+Object matching scores **both `SCHEMA.NAME` and the bare name**, keeping
+whichever is better, with a small preference for the name. This is not
+gold-plating: Snowflake schemas repeat themselves in their objects' names —
+a `STAGING` schema full of `STG_` tables — and greedy left-to-right matching
+otherwise spends the query's leading characters inside the schema, leaving a
+poor alignment in the name. Without this, `stgord` ranks `STAGING.LOAD_ORDERS`
 *above* `STAGING.STG_CUSTOMER_ORDERS`.
 
-Choosing a hit **reveals it in the tree** as well as opening it, so search
-leaves you somewhere you can keep browsing from.
+Column and schema names are matched against the bare name only — there is no
+schema-repeats-in-object-name ambiguity to resolve for either, so the simpler
+matcher is enough. A table matched by both its own name and one of its
+columns keeps whichever scored higher; a schema hit never competes with an
+object/column hit for the same slot, since a schema is its own kind of thing
+(see `SchemaRef` below), not a rival reading of the same one.
 
-Ranking runs on the event loop. Measured cost for a whole corpus, worst query:
-2 k objects 3 ms, 10 k 14 ms, 50 k 70 ms, 100 k 150 ms. Comfortable at the
-sizes this targets, and the input is debounced on top. **Beyond roughly 20 k
-objects in one database this wants moving to a thread** — the matcher is a
-plain function precisely so that stays an easy change.
+Below `MIN_COLUMN_QUERY_LENGTH` characters (a plain module constant in
+`search.py`, not a Setting — a tuning knob for one machine's cache size, not
+a per-user preference), ranking skips the column corpus entirely; object and
+schema names are still matched at any length. A short, generic fragment
+scores against every cached column for little relevance benefit and, at a
+heavily pre-warmed scale, real per-keystroke latency: measured at 270k cached
+columns, ranking a single query ranged 73-450ms depending on how selective it
+was. Even so, this only skips queries shorter than the constant — a 4+
+character fragment still costs whatever ranking the full column corpus costs;
+the constant does not bound that.
+
+Ranking runs in a thread (`asyncio.to_thread`), not on the event loop.
+Measured cost for a whole corpus, worst query: 2k objects 3ms, 10k 14ms, 50k
+70ms, 100k 150ms — comfortable directly on the event loop at those sizes, and
+the input is debounced on top, which is how this ran until the column corpus
+routinely started outnumbering the object corpus 10-20x. The matcher was
+already a plain function precisely so this stayed an easy change.
+
+### Choosing a hit
+
+Choosing an object or column hit **reveals it in the tree** (`ObjectTree.
+reveal`) as well as opening it in the detail pane, so search leaves you
+somewhere you can keep browsing from. A **schema** hit has no detail view to
+open — `SchemaRef` carries only `database`/`name`, deliberately not an
+`ObjectRef` with some placeholder kind, since a schema has no `ObjectKind`
+and no mirror row of its own to show. Choosing one instead **reveals and
+expands it** in the tree (`ObjectTree.reveal_schema`) and stops there.
 
 ---
 
@@ -594,10 +709,18 @@ The ones that matter: **cache TTL** (`0` disables background refreshing),
 ## Known gaps
 
 - Paging is unverified for views, pipes, stages and tasks (see above).
+- `SHOW COLUMNS IN DATABASE`/`IN SCHEMA` (column cache priming) are likewise
+  unverified against a live account at scale.
 - Stages and tasks appear in the tree but have no Object view yet; they show a
   placeholder.
-- Schemas and databases are not themselves searchable — only objects within
-  them.
+- Databases are not themselves searchable — only schemas and objects within
+  them. Schemas became searchable once column search made the current
+  database's schema list worth surfacing on its own; databases were not
+  extended to match, since cross-database browsing is out of scope entirely
+  (see below).
+- There is no automatic trigger for column cache priming — no signal was
+  found for "the user wants this now" short of asking, so it is a manual
+  menu action rather than something that runs on its own.
 - Search covers the current database only, since that is what is cached.
 - Cross-database browsing is out of scope by design: the object counts make it
   impractical, which is why the database is a one-line selector rather than a

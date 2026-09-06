@@ -9,6 +9,7 @@ from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
     ObjectKind,
+    SchemaRef,
     objects_scope,
     schemas_scope,
 )
@@ -475,3 +476,37 @@ async def test_an_object_name_with_markup_is_not_interpreted(repo) -> None:
         tables.expand()
         await pilot.pause()
         assert tables.children[0].label.plain == "ORDERS[beta]"
+
+
+# ------------------------------------------------------------- reveal_schema
+
+
+async def test_reveal_schema_expands_it_and_moves_the_cursor(repo) -> None:
+    """A schema search hit has no object to descend into (see SchemaRef), so
+    unlike reveal() this expands the schema node itself."""
+    put_schemas(repo, "MYDB", "AAA", "BBB")
+    put_tables(repo, "MYDB", "BBB", "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        assert tree.reveal_schema(SchemaRef(database="MYDB", name="BBB"))
+        await pilot.pause()
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "BBB"
+        assert tree.cursor_node.is_expanded
+
+
+async def test_reveal_schema_fails_for_a_different_database(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        assert not tree.reveal_schema(SchemaRef(database="OTHERDB", name="AAA"))
+
+
+async def test_reveal_schema_fails_for_an_unknown_schema(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        assert not tree.reveal_schema(SchemaRef(database="MYDB", name="NOPE"))

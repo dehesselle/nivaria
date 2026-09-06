@@ -615,6 +615,32 @@ async def test_a_search_hit_reveals_in_the_tree_and_fills_the_detail(repo) -> No
         assert tree.cursor_node.data.key == "STG_CUSTOMER_ORDERS"
 
 
+async def test_a_schema_search_hit_reveals_and_expands_it_in_the_tree(repo) -> None:
+    """A schema has no detail view (see SchemaRef) -- selecting one reveals
+    and expands it in the tree instead of touching the detail pane."""
+    put_schemas(repo, "MYDB", "AAA", "STAGING")
+    put_tables(repo, "MYDB", "STAGING", "STG_CUSTOMER_ORDERS")
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_database("MYDB")
+        await settle(pilot)
+
+        await pilot.press("slash")
+        await settle(pilot)
+        app.screen.query_one("#search-query", Input).value = "staging"
+        await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
+
+        tree = screen.query_one(ObjectTree)
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "STAGING"
+        assert tree.cursor_node.is_expanded
+        assert screen.detail.ref is None
+
+
 async def test_escape_closes_the_search_modal_without_choosing(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")

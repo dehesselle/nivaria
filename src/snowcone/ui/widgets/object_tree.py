@@ -37,6 +37,7 @@ from snowcone.format import format_count
 from snowcone.models import (
     ObjectKind,
     ObjectRef,
+    SchemaRef,
     Scope,
     objects_scope,
     schemas_scope,
@@ -119,21 +120,17 @@ class ObjectTree(Tree[NodeData]):
         self._scoped[scope] = node
         self._ensure(scope, interactive=True)
 
-    def reveal(self, ref: ObjectRef) -> bool:
-        """Expand down to an object and put the cursor on it.
+    def _walk(self, path: tuple[str, ...]) -> TreeNode[NodeData] | None:
+        """Materialise and descend to the node at `path` from the root.
 
-        So a search hit leaves you somewhere you can keep browsing from,
-        rather than showing a detail pane with the tree still elsewhere.
-        Everything it walks is already cached -- expanding materialises from
-        sqlite -- so this stays synchronous.
+        Shared by `reveal` and `reveal_schema`: every level below the root
+        has to be expanded and materialised from the cache on the way down,
+        since a collapsed node's children were never fetched from sqlite.
+        Synchronous throughout -- everything walked is already cached, so
+        there is nothing here to wait on.
         """
-        if self.database != ref.database:
-            return False
-        path = (SCHEMAS_KEY, ref.schema, ref.kind.value, ref.name)
         node = self.root
         for key in path:
-            # The root is not expandable and holds the Schemas node already;
-            # every level below it has to be materialised on the way down.
             if node is not self.root:
                 node.expand()
                 self._apply(node, self._desired(node))
@@ -142,10 +139,41 @@ class ObjectTree(Tree[NodeData]):
                     node = child
                     break
             else:
-                return False
-        # Not an immediate move_cursor: the nodes just materialised on the way
-        # down still have _line == -1 until the next refresh, so the cursor
+                return None
+        return node
+
+    def reveal(self, ref: ObjectRef) -> bool:
+        """Expand down to an object and put the cursor on it.
+
+        So a search hit leaves you somewhere you can keep browsing from,
+        rather than showing a detail pane with the tree still elsewhere.
+        """
+        if self.database != ref.database:
+            return False
+        node = self._walk((SCHEMAS_KEY, ref.schema, ref.kind.value, ref.name))
+        if node is None:
+            return False
+        # Not an immediate move_cursor: the node just materialised on the way
+        # down still has _line == -1 until the next refresh, so the cursor
         # would silently land on line 0 instead of on the object.
+        self.call_after_refresh(self.move_cursor, node)
+        return True
+
+    def reveal_schema(self, ref: SchemaRef) -> bool:
+        """Expand down to a schema, expand it too, and put the cursor on it.
+
+        A schema search hit has no object to land on and no detail view to
+        open (see `SchemaRef`), so unlike `reveal` this stops one level
+        higher and expands the schema node itself -- materialising its
+        category children -- rather than descending into one of them.
+        """
+        if self.database != ref.database:
+            return False
+        node = self._walk((SCHEMAS_KEY, ref.name))
+        if node is None:
+            return False
+        node.expand()
+        self._apply(node, self._desired(node))
         self.call_after_refresh(self.move_cursor, node)
         return True
 
