@@ -1248,12 +1248,10 @@ wheels = [
 
 [[package]]
 name = "snowcone"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "platformdirs" },
     { name = "snowflake-connector-python", extra = ["secure-local-storage"] },
-    { name = "tcw" },
     { name = "textual" },
 ]
 
@@ -1261,6 +1259,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "tcw" },
     { name = "textual-dev" },
 ]
 
@@ -1268,7 +1267,6 @@ dev = [
 requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "snowflake-connector-python", extras = ["secure-local-storage"], specifier = ">=4.7.3" },
-    { name = "tcw", editable = "../tcw" },
     { name = "textual", specifier = ">=8.2.8" },
 ]
 
@@ -1276,6 +1274,7 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "tcw", editable = "../tcw" },
     { name = "textual-dev", specifier = ">=1.8.0" },
 ]
 
@@ -1342,7 +1341,6 @@ wheels = [
 
 [[package]]
 name = "tcw"
-version = "0.1.0"
 source = { editable = "../tcw" }
 dependencies = [
     { name = "platformdirs" },

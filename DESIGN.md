@@ -776,6 +776,20 @@ already started to drift.
 It is consumed as an editable path dependency (`[tool.uv.sources]` in
 `pyproject.toml`), so an edit there is live here with no reinstall.
 
+> **`tcw` must never appear in `[project.dependencies]`.** It is not published
+> anywhere, so a built snowcone wheel instead vendors a copy of its sources
+> directly (`hatch_build.py`, triggered as a custom build hook on both the
+> `sdist` and `wheel` targets — see the hook's own comments for how it locates
+> a source copy for each). `[tool.uv.sources]`'s path override only takes
+> effect inside this project's own `uv sync`/lock resolution; it does nothing
+> for a plain `pip install`/`uv pip install` of the built wheel elsewhere. If
+> `tcw` were listed as a real dependency, any such install would resolve it
+> against PyPI instead — where an unrelated, same-named package already
+> exists — silently shadowing the vendored copy with the wrong one. `tcw` is
+> therefore listed only under `[dependency-groups] dev`, which `uv sync`
+> honors for the local venv but which never becomes part of a built
+> distribution's metadata.
+
 Three things about it are worth knowing from inside snowcone:
 
 - **`tcw` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
@@ -808,8 +822,9 @@ Three things about it are worth knowing from inside snowcone:
 
 - **uv** manages the project and the virtualenv. Use `uv sync --all-groups` for
   dependencies and `uv add` to introduce one. The interpreter is the project
-  `.venv`. One dependency, `tcw`, is an editable checkout of a sibling
-  directory rather than a released package -- see "Shared widgets".
+  `.venv`. `tcw` is an editable checkout of a sibling directory rather than a
+  released package, and is deliberately not a real dependency of the built
+  package -- see "Shared widgets".
 - **ruff** formats and lints, on **default settings with no configuration** —
   there is deliberately no `[tool.ruff]` section. Run `ruff format` and
   `ruff check` after changes and let the formatter decide. ruff is installed

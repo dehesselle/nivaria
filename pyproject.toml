@@ -1,30 +1,37 @@
 [project]
 name = "snowcone"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A TUI for quickly browsing and searching Snowflake objects"
 readme = "README.md"
-authors = [
-    { name = "René de Hesselle", email = "dehesselle@web.de" }
-]
+authors = [{ name = "René de Hesselle", email = "dehesselle@web.de" }]
 requires-python = ">=3.12"
 dependencies = [
     "platformdirs>=4.11.0",
     "snowflake-connector-python[secure-local-storage]>=4.7.3",
-    "tcw>=0.1",
     "textual>=8.2.8",
 ]
 
 [tool.uv.sources]
-# Path override while tcw is still being tracked from source; swap for a
-# real index entry once it is published.
+# Not a real dependency: tcw is vendored into our own wheel by hatch_build.py
+# rather than installed from anywhere, so it must not appear in
+# [project.dependencies] (there's an unrelated package also named "tcw" on
+# PyPI, and any plain `pip install` would resolve to that one). Listed here
+# only so `uv sync`'s dev dependency group below can install it editable.
 tcw = { path = "../tcw", editable = true }
 
 [project.scripts]
 snowcone = "snowcone:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist.hooks.custom]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -33,8 +40,4 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
-dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "textual-dev>=1.8.0",
-]
+dev = ["pytest>=9.1.1", "pytest-asyncio>=1.4.0", "tcw", "textual-dev>=1.8.0"]
