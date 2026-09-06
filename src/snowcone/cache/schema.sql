@@ -202,7 +202,6 @@ CREATE TABLE IF NOT EXISTS cache_entry (
     scope       TEXT PRIMARY KEY,
     state       TEXT    NOT NULL,
     generation  INTEGER NOT NULL DEFAULT 0,
-    started_at  REAL,
     fetched_at  REAL,
     next_cursor TEXT,
     row_count   INTEGER NOT NULL DEFAULT 0,

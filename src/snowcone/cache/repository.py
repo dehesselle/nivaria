@@ -583,20 +583,18 @@ class Repository:
         this pass finishes, the age the status bar shows is still the age of
         the rows actually on screen.
         """
-        now = time.time()
         with self._db.connect() as connection:
             entry = self._entry(connection, scope)
             generation = entry.generation + 1
             connection.execute(
                 """
                 INSERT INTO cache_entry
-                    (scope, state, generation, started_at, fetched_at,
+                    (scope, state, generation, fetched_at,
                      next_cursor, row_count, error)
-                VALUES (?, ?, ?, ?, ?, NULL, 0, NULL)
+                VALUES (?, ?, ?, ?, NULL, 0, NULL)
                 ON CONFLICT(scope) DO UPDATE SET
                     state = excluded.state,
                     generation = excluded.generation,
-                    started_at = excluded.started_at,
                     next_cursor = NULL,
                     row_count = 0,
                     error = NULL
@@ -605,7 +603,6 @@ class Repository:
                     scope.key,
                     CacheState.PARTIAL.value,
                     generation,
-                    now,
                     entry.fetched_at,
                 ),
             )

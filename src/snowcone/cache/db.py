@@ -20,16 +20,12 @@ from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
 
-#: Index i takes the database from user_version i to i + 1, so the current
-#: version is just the length. Keep each one idempotent: a crash between the
-#: schema change and the version bump would otherwise leave a file that can
-#: never be opened again.
-_MIGRATIONS: tuple[str, ...] = tuple(
+#: Every statement in these is CREATE TABLE/VIEW/INDEX IF NOT EXISTS, so
+#: applying all of them on every prepare() is as safe as applying them once.
+_SCHEMA_SCRIPTS: tuple[str, ...] = tuple(
     files("snowcone.cache").joinpath(name).read_text()
     for name in ("schema.sql", "search.sql", "roles_warehouses.sql")
 )
-
-SCHEMA_VERSION = len(_MIGRATIONS)
 
 
 class Database:
@@ -38,12 +34,13 @@ class Database:
         self._usable = False
 
     def prepare(self) -> bool:
-        """Create or migrate the file. Returns whether the cache is usable."""
+        """Create the file's schema. Returns whether the cache is usable."""
         try:
             if isinstance(self.path, Path):
                 self.path.parent.mkdir(parents=True, exist_ok=True)
             with self._raw() as connection:
-                self._migrate(connection)
+                for script in _SCHEMA_SCRIPTS:
+                    connection.executescript(script)
             self._usable = True
         except (sqlite3.Error, OSError):
             self._usable = False
@@ -52,14 +49,6 @@ class Database:
     @property
     def usable(self) -> bool:
         return self._usable
-
-    @staticmethod
-    def _migrate(connection: sqlite3.Connection) -> None:
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
-        for index in range(version, len(_MIGRATIONS)):
-            connection.executescript(_MIGRATIONS[index])
-            # PRAGMA does not accept a bound parameter.
-            connection.execute(f"PRAGMA user_version = {index + 1}")
 
     @contextmanager
     def _raw(self) -> Iterator[sqlite3.Connection]:

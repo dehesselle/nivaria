@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from snowcone.cache.db import SCHEMA_VERSION, Database
+from snowcone.cache.db import Database
 
 
 def test_prepare_creates_the_file_and_its_parent_directory(tmp_path) -> None:
@@ -12,16 +12,9 @@ def test_prepare_creates_the_file_and_its_parent_directory(tmp_path) -> None:
     assert path.exists()
 
 
-def test_prepare_stamps_the_schema_version(tmp_path) -> None:
-    database = Database(tmp_path / "cache.db")
-    database.prepare()
-    with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-
-
 def test_preparing_twice_is_harmless(tmp_path) -> None:
-    """Every migration has to be idempotent: a crash between applying one and
-    bumping user_version would otherwise leave a file that never opens again."""
+    """Every schema script is CREATE ... IF NOT EXISTS, so applying them again
+    on a reopened file must not fail or disturb what is already there."""
     path = tmp_path / "cache.db"
     assert Database(path).prepare()
     assert Database(path).prepare()
