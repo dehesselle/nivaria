@@ -39,6 +39,7 @@ from snowcone.gateway.pool import (
     ConnectParams,
 )
 from snowcone.ui.screens.confirm import ConfirmScreen
+from snowcone.ui.screens.connecting import ConnectingScreen
 
 _AUTHENTICATOR_LABELS = {
     EXTERNAL_BROWSER: "Browser SSO",
@@ -85,6 +86,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         self._connector = connector
         self._prefill = prefill or (self._recent[0] if self._recent else None)
         self._connecting = False
+        self._connecting_screen: ConnectingScreen | None = None
 
     # -------------------------------------------------------------- compose
 
@@ -269,8 +271,9 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         params = self.params()
         if params is None:
             return
+        self._status("")
         self._set_busy(True)
-        self._status("Connecting ...")
+        self._show_connecting(1)
         self._connect(params)
 
     @work(thread=True, exclusive=True, group="connect")
@@ -290,6 +293,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         self.app.call_from_thread(self._connected, params, pool)
 
     def _connected(self, params: ConnectParams, pool: ConnectionPool) -> None:
+        self._hide_connecting()
         additional = self._pool_size - pool.size
         if additional < 1:
             self._finish(params, pool)
@@ -300,16 +304,16 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     async def _offer_growth(
         self, params: ConnectParams, pool: ConnectionPool, additional: int
     ) -> None:
-        noun = "connection" if additional == 1 else "connections"
         confirmed = await self.app.push_screen_wait(
             ConfirmScreen(
-                f"Open {additional} additional {noun}?",
+                f"Do you want to expand the connection pool to {self._pool_size}?",
                 title="Connection pool",
             )
         )
         if not confirmed:
             self._finish(params, pool)
             return
+        self._show_connecting(pool.size + 1)
         try:
             # to_thread, not another @work(thread=True): this coroutine is
             # already the one awaiting the confirm dialog, and splitting the
@@ -321,17 +325,36 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
             message = str(error) or error.__class__.__name__
             self._failed(message)
             return
+        self._hide_connecting()
         self._finish(params, pool)
 
     def _on_progress(self, done: int, total: int) -> None:
-        """Called from a worker thread, so it has to marshal back."""
-        self.app.call_from_thread(
-            self._status, f"Connecting {done}/{total} ... (approve any MFA prompt)"
-        )
+        """Called from a worker thread, so it has to marshal back.
+
+        `total` (the size of whichever `connect_all`/`grow` call is under way)
+        is ignored in favour of `self._pool_size`, the pool's eventual target
+        -- so the dialog reads the same "(i/N)" whether it is showing the lone
+        up-front connection or growth confirmed afterwards.
+        """
+        self.app.call_from_thread(self._update_connecting, done)
+
+    def _show_connecting(self, index: int) -> None:
+        self._connecting_screen = ConnectingScreen(index, self._pool_size)
+        self.app.push_screen(self._connecting_screen)
+
+    def _update_connecting(self, index: int) -> None:
+        if self._connecting_screen is not None:
+            self._connecting_screen.update_progress(index, self._pool_size)
+
+    def _hide_connecting(self) -> None:
+        if self._connecting_screen is not None:
+            self._connecting_screen.dismiss()
+            self._connecting_screen = None
 
     def _failed(self, message: str) -> None:
         self._set_busy(False)
-        self._status(f"Could not connect: {message}")
+        self._hide_connecting()
+        self.notify(f"Could not connect: {message}", severity="error", timeout=8)
         self.app.bell()
 
     def _finish(self, params: ConnectParams, pool: ConnectionPool) -> None:

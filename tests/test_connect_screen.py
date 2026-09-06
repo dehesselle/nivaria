@@ -12,6 +12,7 @@ from snowcone.connections import RecentConnections, RecentEntry
 from snowcone.gateway.pool import EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA
 from snowcone.ui.screens.confirm import ConfirmScreen
 from snowcone.ui.screens.connect import ConnectScreen, RecentList
+from snowcone.ui.screens.connecting import ConnectingScreen
 from tests.fakes import FakeConnector
 
 
@@ -139,6 +140,48 @@ async def test_nothing_is_connected_when_validation_fails(tmp_path) -> None:
 # ----------------------------------------------------------------- connect
 
 
+async def test_submitting_shows_a_small_connecting_dialog(tmp_path) -> None:
+    """The inline "Connecting ..." status text was easy to miss; a modal that
+    covers the form is not."""
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        assert isinstance(pilot.app.screen, ConnectingScreen)
+        await settle(pilot)
+
+
+def test_the_connecting_dialog_blocks_the_cancel_action() -> None:
+    """There is nothing a cancel could actually stop -- the blocking connect
+    call cannot be interrupted -- so escape must not dismiss it."""
+    assert ConnectingScreen(1, 1).check_action("cancel", ()) is False
+
+
+def test_the_connecting_message_counts_against_the_pool_target() -> None:
+    """The first, up-front connection and any confirmed growth share the same
+    "(i/N)" wording, counted against the pool's eventual target -- not
+    whatever `connect_all`/`grow` call happens to be in flight."""
+    assert ConnectingScreen.message(1, 3) == "Connecting (1/3) ..."
+    assert ConnectingScreen.message(2, 3) == "Connecting (2/3) ..."
+
+
+async def test_the_connecting_dialog_shows_the_mfa_hint() -> None:
+    """Mounted standalone rather than via a real submit(): the fake connector
+    can finish -- and the dialog dismiss itself -- before a test gets to look
+    at it."""
+
+    class DialogHarness(App[None]):
+        def on_mount(self) -> None:
+            self.push_screen(ConnectingScreen(1, 3))
+
+    app = DialogHarness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        hint = str(app.screen.query_one("#connecting-hint", Static).render())
+        assert "approve any MFA prompt" in hint
+
+
 async def test_a_successful_connect_opens_only_one_connection_up_front(
     tmp_path,
 ) -> None:
@@ -153,6 +196,27 @@ async def test_a_successful_connect_opens_only_one_connection_up_front(
         await settle(pilot)
         assert len(connector.calls) == 1
         assert isinstance(pilot.app.screen, ConfirmScreen)
+
+
+async def test_the_growth_confirmation_names_the_pools_target_size(
+    tmp_path,
+) -> None:
+    """N is the pool's configured target -- not the number of additional
+    connections that would open -- so it reads the same number the "(i/N)"
+    connecting dialogs count against."""
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=3)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        screen = pilot.app.screen
+        assert isinstance(screen, ConfirmScreen)
+        message = str(screen.query_one("#confirm-message", Static).render())
+        assert "3" in message
+        await pilot.press("tab", "enter")
+        await settle(pilot)
 
 
 async def test_confirming_growth_returns_a_pool_of_the_configured_size(
@@ -225,7 +289,7 @@ async def test_a_failed_connect_is_not_recorded(tmp_path) -> None:
         assert RecentConnections(tmp_path / "recent.json").load() == []
 
 
-async def test_a_failed_connect_reports_why_and_re_enables_the_button(
+async def test_a_failed_connect_reports_why_as_a_toast_and_re_enables_the_button(
     tmp_path,
 ) -> None:
     app = make_app(tmp_path, connector=FakeConnector(fail_after=0))
@@ -234,26 +298,38 @@ async def test_a_failed_connect_reports_why_and_re_enables_the_button(
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
         await settle(pilot)
-        status = str(pilot.app.screen.query_one("#connect-status", Static).render())
-        assert "Could not connect" in status
+        messages = [toast.message for toast in pilot.app._notifications]
+        assert any("Could not connect" in message for message in messages)
         assert pilot.app.screen.query_one("#connect-go", Button).disabled is False
 
 
-async def test_progress_is_reported_for_the_additional_connections(tmp_path) -> None:
+async def test_a_failed_connect_dismisses_the_connecting_dialog(tmp_path) -> None:
+    """The little "connecting" modal must not outlive the attempt it reports
+    on -- that would strand the user behind an un-cancellable dialog."""
+    app = make_app(tmp_path, connector=FakeConnector(fail_after=0))
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        assert isinstance(pilot.app.screen, ConnectScreen)
+
+
+async def test_progress_is_reported_against_the_pool_target(tmp_path) -> None:
     """Opening the pool is where every MFA prompt happens, so an unexplained
-    pause is exactly what this has to avoid. The first connection reports
-    1/1 -- the eventual total is not known to be worth prompting for until
-    after it succeeds -- and the confirmed growth reports the rest."""
-    seen: list[str] = []
+    pause is exactly what this has to avoid. The first, up-front connection
+    and any confirmed growth are numbered against the same target throughout
+    -- not however many connections that particular step happens to open."""
+    seen: list[int] = []
     app = make_app(tmp_path, pool_size=3)
 
-    original = ConnectScreen._status
+    original = ConnectScreen._update_connecting
 
-    def spy(self, message: str) -> None:
-        seen.append(message)
-        original(self, message)
+    def spy(self, index: int) -> None:
+        seen.append(index)
+        original(self, index)
 
-    ConnectScreen._status = spy
+    ConnectScreen._update_connecting = spy
     try:
         async with app.run_test(size=(120, 40)) as pilot:
             pilot.app.screen.query_one("#account", Input).value = "ACME"
@@ -263,11 +339,9 @@ async def test_progress_is_reported_for_the_additional_connections(tmp_path) -> 
             await pilot.press("enter")
             await settle(pilot)
     finally:
-        ConnectScreen._status = original
+        ConnectScreen._update_connecting = original
 
-    assert any("1/1" in message for message in seen)
-    assert any("2/3" in message for message in seen)
-    assert any("3/3" in message for message in seen)
+    assert seen == [1, 2, 3]
 
 
 async def test_the_password_is_sent_only_for_password_auth(tmp_path) -> None:

@@ -139,12 +139,18 @@ class ConnectionPool:
             return self._in_use
 
     def connect_all(self, progress: Callable[[int, int], None] | None = None) -> None:
-        """Open every connection, one at a time, reporting (opened, total).
+        """Open every connection, one at a time, reporting (attempting, total).
+
+        `progress` fires *before* each connection is attempted, not after --
+        a caller showing "Connecting 2/3" wants that number up for the whole
+        MFA wait the attempt can involve, not just the instant it succeeds.
 
         Called from a worker thread; `progress` is invoked from that thread, so
         a UI caller must marshal it back to the event loop itself.
         """
         for index in range(self.size):
+            if progress is not None:
+                progress(index + 1, self.size)
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             # The driver raises many unrelated exception types; the caller
@@ -153,8 +159,6 @@ class ConnectionPool:
                 raise ConnectionError_(str(error)) from error
             self._all.append(connection)
             self._free.put(connection)
-            if progress is not None:
-                progress(index + 1, self.size)
         self._adopt_resolved_session()
         self._notify_usage()
 
@@ -189,12 +193,18 @@ class ConnectionPool:
         opened up front, and those prompts must not all land at once either.
         `size` grows as each connection lands, so a caller reading it mid-grow
         (the pool gauge, say) sees the true count rather than the eventual one.
+
+        `progress`, like `connect_all`'s, fires before each attempt rather
+        than after, so it stays current for the whole wait an attempt can
+        involve.
         """
         if additional < 1:
             raise ValueError("additional must be at least 1")
         target = self.size + additional
         self._target_size = target
         for _ in range(additional):
+            if progress is not None:
+                progress(self.size + 1, target)
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             except Exception as error:
@@ -202,8 +212,6 @@ class ConnectionPool:
             self._all.append(connection)
             self._free.put(connection)
             self.size += 1
-            if progress is not None:
-                progress(self.size, target)
         self._notify_usage()
 
     @contextlib.contextmanager

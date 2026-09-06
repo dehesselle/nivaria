@@ -155,6 +155,19 @@ ConfirmScreen > #dialog {
     margin: 1 0;
 }
 
+/* ---- connecting modal --------------------------------------------------- */
+
+ConnectingScreen > #dialog {
+    width: 46;
+    max-width: 100%;
+}
+
+#connecting-hint {
+    width: 100%;
+    content-align: center middle;
+    color: $text-muted;
+}
+
 /* ---- status footer ---------------------------------------------------- */
 
 StatusFooter .footer-spacer {

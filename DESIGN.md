@@ -345,13 +345,18 @@ prompt**. The pool exists to make that a one-time event.
   no point asking about the rest before knowing that one even works, and a
   failed first connection is the common case the retry loop exists for.
 - If the configured pool size is more than one, success is followed by a
-  confirmation dialog spelling out how many *additional* connections that
-  means, with plain **OK** / **Cancel** options. Declining leaves the pool at
-  size one rather than failing or silently upgrading — which is also what
-  keeps a pool size of one always reachable on demand, handy under test and
-  for a quick look that would rather not field extra MFA prompts.
+  confirmation dialog ("Do you want to expand the connection pool to N?",
+  where N is the configured pool size), with plain **OK** / **Cancel**
+  options. Declining leaves the pool at size one rather than failing or
+  silently upgrading — which is also what keeps a pool size of one always
+  reachable on demand, handy under test and for a quick look that would
+  rather not field extra MFA prompts.
 - Confirmed growth, like the first connection, is opened **eagerly**, with
-  progress reported as `Connecting 2/5 …`.
+  progress reported as `Connecting (2/5) ...` / `(approve any MFA prompt)` —
+  the same two lines whether it is the lone up-front connection or growth
+  confirmed afterwards, and always counted against the pool's eventual target
+  size rather than however many connections that particular step happens to
+  be opening.
 - Every connection — the first and any confirmed growth — is opened
   **sequentially**. Opening them in parallel would fan out N browser windows or
   push notifications simultaneously — exactly the disruption this design
