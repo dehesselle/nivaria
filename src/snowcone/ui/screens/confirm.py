@@ -17,7 +17,7 @@ from snowcone.ui.screens.dialog_base import DialogScreen
 
 
 class ConfirmScreen(DialogScreen[bool]):
-    """Ask a yes/no question. Dismisses `True` for OK, `False` for Cancel or
+    """Ask a yes/no question. Dismisses `True` for Yes, `False` for No or
     escape."""
 
     CANCEL_RESULT: ClassVar[bool] = False
@@ -32,12 +32,12 @@ class ConfirmScreen(DialogScreen[bool]):
             yield Label(self._title, id="title")
             yield Static(self._message, id="confirm-message")
             with Horizontal(id="buttons"):
-                yield Button("OK", variant="primary", id="confirm-ok")
-                yield Button("Cancel", id="confirm-cancel")
+                yield Button("Yes", variant="primary", id="confirm-yes")
+                yield Button("No", id="confirm-no")
 
     def on_mount(self) -> None:
-        self.query_one("#confirm-ok", Button).focus()
+        self.query_one("#confirm-yes", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
-        self.dismiss(event.button.id == "confirm-ok")
+        self.dismiss(event.button.id == "confirm-yes")

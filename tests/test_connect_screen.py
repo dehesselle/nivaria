@@ -198,6 +198,23 @@ async def test_a_successful_connect_opens_only_one_connection_up_front(
         assert isinstance(pilot.app.screen, ConfirmScreen)
 
 
+async def test_the_growth_confirmation_offers_yes_and_no(tmp_path) -> None:
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=3)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        screen = pilot.app.screen
+        assert isinstance(screen, ConfirmScreen)
+        yes_button = screen.query_one("#confirm-yes", Button)
+        no_button = screen.query_one("#confirm-no", Button)
+        assert str(yes_button.label) == "Yes"
+        assert str(no_button.label) == "No"
+        assert yes_button.has_focus
+
+
 async def test_the_growth_confirmation_names_the_pools_target_size(
     tmp_path,
 ) -> None:

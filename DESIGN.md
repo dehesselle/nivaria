@@ -346,7 +346,7 @@ prompt**. The pool exists to make that a one-time event.
   failed first connection is the common case the retry loop exists for.
 - If the configured pool size is more than one, success is followed by a
   confirmation dialog ("Do you want to expand the connection pool to N?",
-  where N is the configured pool size), with plain **OK** / **Cancel**
+  where N is the configured pool size), with plain **Yes** / **No**
   options. Declining leaves the pool at size one rather than failing or
   silently upgrading — which is also what keeps a pool size of one always
   reachable on demand, handy under test and for a quick look that would
