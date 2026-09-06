@@ -66,7 +66,7 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Database ...** (`d`, `Ctrl+D` shown right-aligned) to open the same fuzzy-picker pattern described below over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to do the same over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (no mnemonic) to fill the current database's column cache in the background — see "Column cache priming"; then another separator and **Quit** (no mnemonic, `F10` shown right-aligned) to exit the app — the same action as the `F10` key binding, given a menu entry for discoverability. A menu entry can be a `MenuSeparator` instead of a `MenuItem`: a non-selectable divider rule that cursor navigation skips over, built on `OptionList`'s own `None`-as-divider convention rather than a fake disabled row. A `MenuItem` can also carry a `shortcut` string, shown dimmed and right-aligned to advertise a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection, not display of an outside key). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) — the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Database ...** (`d`, `Ctrl+D` shown right-aligned) to open the same fuzzy-picker pattern described below over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to do the same over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the current database's column cache in the background — see "Column cache priming"; then another separator, **Settings ...** (`s`) to open the settings dialog — see "Settings" below; then another separator and **Quit** (`q`, `F10` shown right-aligned) to exit the app — the same action as the `F10` key binding, given a menu entry for discoverability. A menu entry can be a `MenuSeparator` instead of a `MenuItem`: a non-selectable divider rule that cursor navigation skips over, built on `OptionList`'s own `None`-as-divider convention rather than a fake disabled row. A `MenuItem` can also carry a `shortcut` string, shown dimmed and right-aligned to advertise a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection, not display of an outside key). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) — the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
 | **Top pane** | Holds the Context bar. |
 | **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |
@@ -741,6 +741,20 @@ without a restart.
 
 The ones that matter: **cache TTL** (`0` disables background refreshing),
 **pool size**, **fetch page size**.
+
+**Settings ...** (Connect menu) opens a modal listing every registered
+`Setting`, grouped under a heading per `Setting.group`, each editable in
+place — a `Switch` for a boolean default, an `Input` (pre-filled with the
+current value, placeholder showing the default) for anything else. **OK**
+validates and writes, then closes; **Apply** does the same but leaves the
+dialog open; **Cancel**/escape discard, confirming first if anything was
+typed that differs from what was last saved — the same "unsaved changes"
+guard `ConnectScreen` uses. Clearing a field's text and confirming is how a
+setting is reset to its default, consistent with `ConfigStore.set` already
+treating "equal to default" as "absent from the file". A value that fails to
+parse (`ValueError`) blocks OK/Apply with an inline warning rather than
+silently discarding it or falling back to the default — that fallback exists
+for a hand-edited settings.json, not for a mistake made in the dialog itself.
 
 ---
 

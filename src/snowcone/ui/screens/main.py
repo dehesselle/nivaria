@@ -51,6 +51,7 @@ from snowcone.ui.screens.menu_dropdown import (
 from snowcone.ui.screens.menu_select import MenuBarSelectScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.screens.search import SearchScreen
+from snowcone.ui.screens.settings_dialog import SettingsScreen
 from snowcone.ui.views import (  # noqa: F401 -- registers views
     pipe_view,
     table_list_view,
@@ -489,6 +490,15 @@ class MainScreen(Screen):
         self._request(prime_scope(ObjectKind.VIEW, database), Priority.BACKGROUND)
         self._request(columns_prime_scope(database), Priority.BACKGROUND)
         self.notify(f"Pre-warming cache for {database}...", timeout=3)
+
+    async def open_settings(self) -> None:
+        """Open the settings dialog from the Connect menu.
+
+        Awaited directly rather than via `@work`: the menu already runs the
+        handler from inside a worker (see `_run_menu`), so a second one here
+        would buy nothing.
+        """
+        await self.app.push_screen_wait(SettingsScreen())
 
     @work(thread=True)
     def _switch_warehouse(self, warehouse: str) -> None:

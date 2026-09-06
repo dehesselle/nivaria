@@ -14,6 +14,7 @@ from snowcone.cache.repository import Repository
 from snowcone.ui.screens.main import MainScreen
 from snowcone.ui.screens.menu_dropdown import MenuDropdown, MenuItem
 from snowcone.ui.screens.menu_select import MenuBarSelectScreen
+from snowcone.ui.screens.settings_dialog import SettingsScreen
 from snowcone.ui.widgets.menubar import MenuBar
 from snowcone.version import VERSION
 
@@ -239,7 +240,7 @@ async def test_f10_quits_the_app(repo) -> None:
         assert app._exit is True
 
 
-async def test_the_quit_item_has_no_mnemonic_and_shows_its_f10_shortcut(
+async def test_the_quit_item_has_a_mnemonic_and_shows_its_f10_shortcut(
     repo,
 ) -> None:
     app = Harness(repo)
@@ -254,7 +255,7 @@ async def test_the_quit_item_has_no_mnemonic_and_shows_its_f10_shortcut(
             for entry in app.screen._items
             if isinstance(entry, MenuItem) and entry.id == "quit"
         )
-        assert quit_item.mnemonic is None
+        assert quit_item.mnemonic == "q"
         assert quit_item.shortcut == "F10"
 
 
@@ -317,6 +318,23 @@ async def test_the_separator_renders_as_a_rule_under_the_prewarm_item(repo) -> N
         option_list = app.screen.query_one(OptionList)
         prewarm_option = option_list.get_option("prewarm")
         assert prewarm_option._divider is True
+
+
+async def test_selecting_settings_from_the_menu_opens_the_settings_dialog(
+    repo,
+) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        option_list.highlighted = option_list.get_option_index("settings")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsScreen)
 
 
 async def test_selecting_quit_from_the_menu_exits_the_app(repo) -> None:

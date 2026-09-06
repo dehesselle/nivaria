@@ -37,5 +37,7 @@ def connect_menu_items(app: SnowconeApp, screen: MainScreen) -> list[MenuEntry]:
         MenuItem("role", "Role ...", screen.pick_role, mnemonic="r", shortcut="Ctrl+R"),
         MenuItem("prewarm", "Pre-warm cache", screen.prewarm_cache, mnemonic="p"),
         MenuSeparator(),
+        MenuItem("settings", "Settings ...", screen.open_settings, mnemonic="s"),
+        MenuSeparator(),
         MenuItem("quit", "Quit", app.action_quit, mnemonic="q", shortcut="F10"),
     ]
