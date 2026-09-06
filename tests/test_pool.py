@@ -79,6 +79,37 @@ def test_connect_all_reports_progress_one_at_a_time() -> None:
     assert seen == [(1, 3), (2, 3), (3, 3)]
 
 
+def test_connect_all_adopts_the_role_and_warehouse_snowflake_actually_assumed() -> None:
+    """A session always gets some role -- and often a default warehouse -- even
+    when neither was requested; the footer should show that, not "none"."""
+    connector = FakeConnector(resolved_role="PUBLIC", resolved_warehouse="COMPUTE_WH")
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 2, connector=connector)
+    pool.connect_all()
+    assert pool.params.role == "PUBLIC"
+    assert pool.params.warehouse == "COMPUTE_WH"
+
+
+def test_connect_all_keeps_no_warehouse_as_a_genuine_answer() -> None:
+    """Unlike role, a session can genuinely have no active warehouse -- the
+    adoption must not invent one where the driver reports none."""
+    connector = FakeConnector(resolved_role="PUBLIC", resolved_warehouse=None)
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    assert pool.params.warehouse is None
+
+
+def test_connect_all_never_overrides_an_explicit_role_or_warehouse() -> None:
+    connector = FakeConnector(resolved_role="PUBLIC", resolved_warehouse="COMPUTE_WH")
+    pool = ConnectionPool(
+        ConnectParams(account="a", user="u", role="SYSADMIN", warehouse="ETL_WH"),
+        1,
+        connector=connector,
+    )
+    pool.connect_all()
+    assert pool.params.role == "SYSADMIN"
+    assert pool.params.warehouse == "ETL_WH"
+
+
 def test_a_failure_to_connect_is_reported_as_a_snowcone_error() -> None:
     connector = FakeConnector(fail_after=1)
     pool = ConnectionPool(ConnectParams(account="a", user="u"), 3, connector=connector)

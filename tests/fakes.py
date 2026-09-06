@@ -30,11 +30,17 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self) -> None:
+    def __init__(
+        self, *, role: str | None = None, warehouse: str | None = None
+    ) -> None:
         self.closed = False
         #: Every statement run via cursor(), so a test can prove exactly which
         #: connections a pool-wide change like set_role reached.
         self.executed: list[str] = []
+        #: What the real driver would report from the login response's
+        #: sessionInfo, for tests of ConnectionPool._adopt_resolved_session.
+        self.role = role
+        self.warehouse = warehouse
 
     def is_closed(self) -> bool:
         return self.closed
@@ -53,9 +59,19 @@ class FakeConnector:
     exactly N connections and never silently opened an extra one.
     """
 
-    def __init__(self, *, fail_after: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_after: int | None = None,
+        resolved_role: str | None = None,
+        resolved_warehouse: str | None = None,
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.fail_after = fail_after
+        #: What every connection this produces reports as its role/warehouse,
+        #: standing in for what Snowflake's login response would resolve.
+        self.resolved_role = resolved_role
+        self.resolved_warehouse = resolved_warehouse
         self._lock = threading.Lock()
 
     def __call__(self, **kwargs: Any) -> FakeConnection:
@@ -63,7 +79,9 @@ class FakeConnector:
             if self.fail_after is not None and len(self.calls) >= self.fail_after:
                 raise RuntimeError("simulated connection failure")
             self.calls.append(kwargs)
-        return FakeConnection()
+        return FakeConnection(
+            role=self.resolved_role, warehouse=self.resolved_warehouse
+        )
 
 
 def make_pool(size: int = 2, **kwargs: Any) -> tuple[ConnectionPool, FakeConnector]:

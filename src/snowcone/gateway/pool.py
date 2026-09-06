@@ -155,7 +155,29 @@ class ConnectionPool:
             self._free.put(connection)
             if progress is not None:
                 progress(index + 1, self.size)
+        self._adopt_resolved_session()
         self._notify_usage()
+
+    def _adopt_resolved_session(self) -> None:
+        """Fill in whatever role/warehouse was left blank with what Snowflake
+        actually assumed.
+
+        The driver already knows this for free: its login response carries
+        the server-resolved role/warehouse (`sessionInfo.roleName` /
+        `.warehouseName`), which `snowflake.connector` exposes as
+        `connection.role` / `.warehouse` -- no extra query needed. A session
+        always gets *some* role (the user's default, or `PUBLIC`), so "none"
+        is never a true answer there; a warehouse can genuinely be absent, so
+        this only ever adopts what the connector reports, never invents one.
+        An explicitly requested role/warehouse is left untouched.
+        """
+        if not self._all:
+            return
+        connection = self._all[0]
+        role = self.params.role or getattr(connection, "role", None)
+        warehouse = self.params.warehouse or getattr(connection, "warehouse", None)
+        if role != self.params.role or warehouse != self.params.warehouse:
+            self.params = replace(self.params, role=role, warehouse=warehouse)
 
     def grow(
         self, additional: int, progress: Callable[[int, int], None] | None = None

@@ -607,8 +607,18 @@ suppressed so the corner is available; the footer is otherwise Textual's, so
 key bindings keep working without being re-implemented.
 
 - **Role** / **Warehouse** — the pool's current role and warehouse, read
-  straight off the pool's connect params each tick; each reads `none` until
-  one has ever been set. Picked from **Connect > Role ...** / **Warehouse
+  straight off the pool's connect params each tick. Leaving either field blank
+  in the connect dialog does not mean "none" is shown forever: Snowflake
+  always activates *some* role for a session (the user's default, or
+  `PUBLIC`), and the driver already learns what it resolved from the login
+  response (`sessionInfo.roleName` / `.warehouseName`, exposed as
+  `connection.role` / `.warehouse`) — no extra query needed. `connect_all`
+  adopts whichever of the two was left blank from that
+  (`ConnectionPool._adopt_resolved_session`), so the footer shows the real
+  session state rather than an unfilled form field. Warehouse can genuinely
+  read `none` even after this — a session can have no active warehouse at all
+  (see "`SHOW`, because it needs no warehouse" above) — but role never
+  legitimately does. Picked from **Connect > Role ...** / **Warehouse
   ...**, the same fuzzy-picker-over-cached-rows pattern as the database
   picker, backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
   — small, flat, unpaged lists, unlike the object mirrors), requested
