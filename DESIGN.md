@@ -352,7 +352,7 @@ prompt**. The pool exists to make that a one-time event.
   reachable on demand, handy under test and for a quick look that would
   rather not field extra MFA prompts.
 - Confirmed growth, like the first connection, is opened **eagerly**, with
-  progress reported as `Connecting (2/5) ...` / `(approve any MFA prompt)` —
+  progress reported as `Connecting (2/5) ...` / `(approve browser or MFA)` —
   the same two lines whether it is the lone up-front connection or growth
   confirmed afterwards, and always counted against the pool's eventual target
   size rather than however many connections that particular step happens to

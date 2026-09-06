@@ -9,7 +9,7 @@ scrolls it out of view).
 Every connection this dialog reports on -- the first, up-front one and any
 confirmed growth -- can equally involve an MFA prompt, so the two lines shown
 here never differ beyond the `(i/N)` count: a bold "Connecting (i/N) ..." and,
-underneath it, the same "(approve any MFA prompt)" hint every time. `N` is
+underneath it, the same "(approve browser or MFA)" hint every time. `N` is
 always the pool's eventual target size, not however many this particular
 `ConnectionPool.connect_all`/`grow` call happens to be opening, so it reads
 the same whether it is showing the lone up-front connection or growth
@@ -32,7 +32,7 @@ from textual.widgets import Label, Static
 
 from snowcone.ui.screens.dialog_base import DialogScreen
 
-MFA_HINT = "(approve any MFA prompt)"
+MFA_HINT = "(approve browser or MFA)"
 
 
 class ConnectingScreen(DialogScreen[None]):

@@ -14,6 +14,12 @@ extra MFA prompts). The pool still opens connections one at a time, so the
 prompts arrive one at a time too; `_on_progress` is what turns that into
 "Connecting 2/5" instead of an unexplained pause with browser windows
 appearing.
+
+OAuth is the one exception to the confirmation above: its access/refresh
+token is cached and reused for every connection the pool opens (see
+`gateway/credential_cache.py`), so growing the pool no longer means N-1 more
+browser prompts -- there is nothing left for the user to weigh in on, and
+`_offer_growth` skips straight to growing it.
 """
 
 from __future__ import annotations
@@ -310,15 +316,19 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     async def _offer_growth(
         self, params: ConnectParams, pool: ConnectionPool, additional: int
     ) -> None:
-        confirmed = await self.app.push_screen_wait(
-            ConfirmScreen(
-                f"Do you want to expand the connection pool to {self._pool_size}?",
-                title="Connection pool",
+        # OAuth's cached access/refresh token is reused for every connection
+        # the pool opens (see gateway/credential_cache.py), so growing it no
+        # longer means N-1 more browser prompts -- nothing left to ask about.
+        if params.authenticator != OAUTH:
+            confirmed = await self.app.push_screen_wait(
+                ConfirmScreen(
+                    f"Do you want to expand the connection pool to {self._pool_size}?",
+                    title="Connection pool",
+                )
             )
-        )
-        if not confirmed:
-            self._finish(params, pool)
-            return
+            if not confirmed:
+                self._finish(params, pool)
+                return
         self._show_connecting(pool.size + 1)
         try:
             # to_thread, not another @work(thread=True): this coroutine is

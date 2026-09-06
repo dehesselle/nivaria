@@ -184,7 +184,7 @@ def test_the_connecting_message_counts_against_the_pool_target() -> None:
     assert ConnectingScreen.message(2, 3) == "Connecting (2/3) ..."
 
 
-async def test_the_connecting_dialog_shows_the_mfa_hint() -> None:
+async def test_the_connecting_dialog_shows_the_approval_hint() -> None:
     """Mounted standalone rather than via a real submit(): the fake connector
     can finish -- and the dialog dismiss itself -- before a test gets to look
     at it."""
@@ -197,7 +197,7 @@ async def test_the_connecting_dialog_shows_the_mfa_hint() -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         hint = str(app.screen.query_one("#connecting-hint", Static).render())
-        assert "approve any MFA prompt" in hint
+        assert "approve browser or MFA" in hint
 
 
 async def test_a_successful_connect_opens_only_one_connection_up_front(
@@ -208,6 +208,8 @@ async def test_a_successful_connect_opens_only_one_connection_up_front(
     connector = FakeConnector()
     app = make_app(tmp_path, connector=connector, pool_size=3)
     async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#authenticator", Select).value = EXTERNAL_BROWSER
+        await pilot.pause()
         pilot.app.screen.query_one("#account", Input).value = "ACME"
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
@@ -220,6 +222,8 @@ async def test_the_growth_confirmation_offers_yes_and_no(tmp_path) -> None:
     connector = FakeConnector()
     app = make_app(tmp_path, connector=connector, pool_size=3)
     async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#authenticator", Select).value = EXTERNAL_BROWSER
+        await pilot.pause()
         pilot.app.screen.query_one("#account", Input).value = "ACME"
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
@@ -242,6 +246,8 @@ async def test_the_growth_confirmation_names_the_pools_target_size(
     connector = FakeConnector()
     app = make_app(tmp_path, connector=connector, pool_size=3)
     async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#authenticator", Select).value = EXTERNAL_BROWSER
+        await pilot.pause()
         pilot.app.screen.query_one("#account", Input).value = "ACME"
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
@@ -260,6 +266,8 @@ async def test_confirming_growth_returns_a_pool_of_the_configured_size(
     connector = FakeConnector()
     app = make_app(tmp_path, connector=connector, pool_size=3)
     async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#authenticator", Select).value = EXTERNAL_BROWSER
+        await pilot.pause()
         pilot.app.screen.query_one("#account", Input).value = "ACME"
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
@@ -278,6 +286,8 @@ async def test_declining_growth_returns_a_pool_of_just_the_one_connection(
     connector = FakeConnector()
     app = make_app(tmp_path, connector=connector, pool_size=3)
     async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#authenticator", Select).value = EXTERNAL_BROWSER
+        await pilot.pause()
         pilot.app.screen.query_one("#account", Input).value = "ACME"
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
@@ -287,6 +297,23 @@ async def test_declining_growth_returns_a_pool_of_just_the_one_connection(
     assert len(connector.calls) == 1
     assert app.result is not None
     assert app.result.size == 1
+
+
+async def test_oauth_growth_skips_the_confirmation_dialog(tmp_path) -> None:
+    """OAuth's cached access/refresh token is reused for every connection the
+    pool opens, so growing it no longer means N-1 more browser prompts --
+    there is nothing left to confirm, unlike browser SSO and password+MFA
+    above."""
+    connector = FakeConnector()
+    app = make_app(tmp_path, connector=connector, pool_size=3)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+    assert len(connector.calls) == 3
+    assert app.result is not None
+    assert app.result.size == 3
 
 
 async def test_a_pool_of_exactly_one_is_never_asked_about(tmp_path) -> None:
@@ -367,6 +394,10 @@ async def test_progress_is_reported_against_the_pool_target(tmp_path) -> None:
     ConnectScreen._update_connecting = spy
     try:
         async with app.run_test(size=(120, 40)) as pilot:
+            pilot.app.screen.query_one(
+                "#authenticator", Select
+            ).value = EXTERNAL_BROWSER
+            await pilot.pause()
             pilot.app.screen.query_one("#account", Input).value = "ACME"
             pilot.app.screen.query_one("#user", Input).value = "me"
             pilot.app.screen.submit()
