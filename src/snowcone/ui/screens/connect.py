@@ -139,12 +139,12 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
                     with Horizontal(id="connect-optional"):
                         yield Input(
                             value=entry.role if entry else "",
-                            placeholder="role (optional)",
+                            placeholder="role",
                             id="role",
                         )
                         yield Input(
                             value=entry.warehouse if entry else "",
-                            placeholder="warehouse (optional)",
+                            placeholder="warehouse",
                             id="warehouse",
                         )
                 yield Static("", id="connect-status")
