@@ -10,8 +10,14 @@ requires-python = ">=3.12"
 dependencies = [
     "platformdirs>=4.11.0",
     "snowflake-connector-python[secure-local-storage]>=4.7.3",
+    "tcw>=0.1",
     "textual>=8.2.8",
 ]
+
+[tool.uv.sources]
+# Path override while tcw is still being tracked from source; swap for a
+# real index entry once it is published.
+tcw = { path = "../tcw", editable = true }
 
 [project.scripts]
 snowcone = "snowcone:main"

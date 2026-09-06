@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tcw.widgets import MenuItem
 from textual.app import App
 from textual.widgets import Input
 
@@ -16,7 +17,6 @@ from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import databases_scope, roles_scope, warehouses_scope
 from snowcone.ui.screens.main import MainScreen
-from snowcone.ui.screens.menu_dropdown import MenuItem
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.widgets.status_bar import StatusFooter
 from tests.fakes import make_pool
@@ -51,8 +51,8 @@ class Harness(App[None]):
         self.push_screen(MainScreen(self.repo, self.fetch, self._pool))
 
     async def open_connect(self) -> None:
-        """Never exercised here, but connect_menu_items always builds this
-        item, so the menu dropdown needs it to resolve."""
+        """Never exercised here, but the Connect menu always declares the
+        item that calls it."""
 
     def restart_fetch(self, pool) -> None:
         self.fetch = RecordingFetch()
@@ -92,13 +92,10 @@ async def test_the_connect_menu_lists_warehouse_and_role(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        labels = {
-            item.label for item in app.screen._items if isinstance(item, MenuItem)
-        }
+        # Read the declarations off the DOM rather than the open dropdown:
+        # the menu is composed, so this is the same list the dropdown builds
+        # from, without reaching into it.
+        labels = {item.label for item in app.screen.query(MenuItem)}
         assert "Warehouse ..." in labels
         assert "Role ..." in labels
 

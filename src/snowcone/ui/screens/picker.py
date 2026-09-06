@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from rich.text import Text
+from tcw.screens import DialogScreen
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -18,7 +19,6 @@ from textual.widgets import Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from snowcone.fuzzy import highlight, rank
-from snowcone.ui.screens.dialog_base import DialogScreen
 
 #: More than a screenful is wasted ranking; the query narrows it anyway.
 MAX_RESULTS = 200

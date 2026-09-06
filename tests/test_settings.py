@@ -1,46 +1,48 @@
+"""snowcone's own settings declarations.
+
+The registry, the store and the dialog are `tcw`'s and are tested there; what
+matters here is that snowcone declares what it says it declares, and that the
+store is pointed at snowcone's config file.
+"""
+
 from __future__ import annotations
 
-import json
+from tcw.paths import settings_file as tcw_settings_file
+from tcw.settings import all_settings, config, configure
 
-from snowcone.settings import CACHE_TTL, POOL_SIZE, ConfigStore, all_settings
-
-
-def test_defaults_are_returned_when_nothing_is_stored(tmp_path) -> None:
-    store = ConfigStore(tmp_path / "settings.json")
-    assert store.get(CACHE_TTL) == CACHE_TTL.default
+from snowcone.paths import APP_NAME
+from snowcone.settings import CACHE_TTL, PAGE_SIZE, POOL_SIZE
 
 
-def test_setting_a_value_persists_it(tmp_path) -> None:
-    path = tmp_path / "settings.json"
-    store = ConfigStore(path)
-    store.set(CACHE_TTL, 60)
-    assert ConfigStore(path).get(CACHE_TTL) == 60
-
-
-def test_a_value_equal_to_the_default_is_not_written(tmp_path) -> None:
-    """A setting nobody meaningfully changed stays absent from the file, so a
-    future release can change its default without a stale override winning."""
-    path = tmp_path / "settings.json"
-    store = ConfigStore(path)
-    store.set(CACHE_TTL, 60)
-    store.set(CACHE_TTL, CACHE_TTL.default)
-    assert json.loads(path.read_text()) == {}
-
-
-def test_a_wrong_type_in_the_file_falls_back_to_the_default(tmp_path) -> None:
-    """A hand-edited settings.json must not surface as a TypeError deep inside
-    a worker thread hours later."""
-    path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"cache_ttl": "not a number"}))
-    assert ConfigStore(path).get(CACHE_TTL) == CACHE_TTL.default
-
-
-def test_a_corrupt_file_degrades_to_defaults(tmp_path) -> None:
-    path = tmp_path / "settings.json"
-    path.write_text("{ not json")
-    assert ConfigStore(path).get(POOL_SIZE) == POOL_SIZE.default
-
-
-def test_declaring_a_setting_registers_it() -> None:
-    keys = {setting.key for setting in all_settings()}
+def test_the_three_settings_are_registered() -> None:
+    keys = {entry.key for entry in all_settings()}
     assert {"cache_ttl", "pool_size", "page_size"} <= keys
+
+
+def test_they_are_grouped_the_way_the_dialog_renders_them() -> None:
+    assert (CACHE_TTL.group, PAGE_SIZE.group) == ("Cache", "Cache")
+    assert POOL_SIZE.group == "Connection"
+
+
+def test_their_defaults_are_the_documented_ones() -> None:
+    assert CACHE_TTL.default == 900
+    assert POOL_SIZE.default == 3
+    assert PAGE_SIZE.default == 1000
+
+
+def test_a_ttl_of_zero_round_trips() -> None:
+    """0 is the value that disables the staleness sweep, and it is not the
+    default, so it must actually reach the file rather than being pruned."""
+    config.set(CACHE_TTL, 0)
+    assert config.get(CACHE_TTL) == 0
+
+
+def test_the_store_is_pointed_at_snowcones_own_config_file() -> None:
+    """The conftest fixture re-points the store at tmp_path, so this asks the
+    same question the other way round: configuring for snowcone lands on
+    snowcone's config file. Resolving a path touches nothing on disk, and the
+    fixture restores isolation afterwards.
+    """
+    configure(APP_NAME)
+    assert config.path == tcw_settings_file(APP_NAME)
+    assert config.path.parent.name == APP_NAME

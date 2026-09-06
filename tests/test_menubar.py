@@ -1,10 +1,18 @@
-"""The menu bar: auto-hide, the staged bar/dropdown flow, and mnemonics."""
+"""snowcone's Connect menu.
+
+The bar itself -- auto-hide, the staged bar/dropdown flow, mnemonics,
+separators, the F9 binding -- belongs to `tcw` and is tested there. What is
+snowcone's is *what the menu offers* and what each entry actually does.
+"""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
+from tcw.screens import SettingsScreen
+from tcw.widgets import Menu, MenuBar, MenuItem
 from textual.app import App
 from textual.widgets import OptionList, Static
 
@@ -12,10 +20,6 @@ import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.ui.screens.main import MainScreen
-from snowcone.ui.screens.menu_dropdown import MenuDropdown, MenuItem
-from snowcone.ui.screens.menu_select import MenuBarSelectScreen
-from snowcone.ui.screens.settings_dialog import SettingsScreen
-from snowcone.ui.widgets.menubar import MenuBar
 from snowcone.version import VERSION
 
 
@@ -48,305 +52,148 @@ def repo(tmp_path) -> Repository:
 # was explicitly pushed.
 
 
-async def test_the_bar_is_hidden_until_a_menu_is_opened(repo) -> None:
+async def settle(pilot, rounds: int = 3) -> None:
+    for _ in range(rounds):
+        await pilot.pause()
+        await asyncio.sleep(0.02)
+
+
+async def open_menu(pilot) -> None:
+    """F9, then enter the armed Connect menu."""
+    await pilot.press("f9")
+    await settle(pilot)
+    await pilot.press("enter")
+    await settle(pilot)
+
+
+# ------------------------------------------------------------------ contents
+
+
+async def test_there_is_one_menu_called_connect(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        screen = app.screen
-        assert screen.query_one(MenuBar).display is False
+        titles = [menu.title_text for menu in app.screen.query(Menu)]
+        assert titles == ["Connect"]
 
 
-async def test_f9_reveals_the_bar_in_its_bar_only_stage(repo) -> None:
+async def test_the_connect_menu_offers_the_documented_entries(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        screen = app.screen
-        await pilot.press("f9")
-        await pilot.pause()
-        assert screen.query_one(MenuBar).display is True
-        assert isinstance(app.screen, MenuBarSelectScreen)
-        assert screen.query_one("#menu-connect").armed is True
+        labels = [item.label for item in app.screen.query(MenuItem)]
+        assert labels == [
+            "Open...",
+            "Database ...",
+            "Warehouse ...",
+            "Role ...",
+            "Pre-warm cache",
+            "Settings ...",
+            "Quit",
+        ]
 
 
-async def test_escape_closes_the_bar_only_stage_and_conceals_the_bar_again(
-    repo,
-) -> None:
+async def test_the_hidden_key_bindings_are_advertised_as_shortcuts(repo) -> None:
+    """Ctrl+D/W/R and F10 are `show=False` in the footer, so the menu's
+    shortcut column is the only place they are advertised."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        screen = app.screen
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("escape")
-        await pilot.pause()
-        assert app.screen is screen
-        assert screen.query_one(MenuBar).display is False
+        shortcuts = {item.id: item.shortcut for item in app.screen.query(MenuItem)}
+        assert shortcuts["database"] == "Ctrl+D"
+        assert shortcuts["warehouse"] == "Ctrl+W"
+        assert shortcuts["role"] == "Ctrl+R"
+        assert shortcuts["quit"] == "F10"
 
 
-async def test_enter_drops_the_armed_menu(repo) -> None:
+async def test_the_separators_group_the_entries(repo) -> None:
+    """Three dividers: connect, then session/cache actions, then settings,
+    then quit."""
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await open_menu(pilot)
+        option_list = app.screen.query_one(OptionList)
+        assert [option.id for option in option_list.options] == [
+            "open",
+            "database",
+            "warehouse",
+            "role",
+            "prewarm",
+            "settings",
+            "quit",
+        ]
+
+
+async def test_the_bar_lays_out_as_a_title_plus_the_snowcone_version(repo) -> None:
+    """Geometry, not just content: a menu id is a CSS id, so a clash with a
+    rule in app.tcss silently resizes the title and the bar turns into a row
+    of scrollbar blocks. `#connect` was exactly that clash once.
+    """
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("f9")
+        bar = app.screen.query_one(MenuBar)
+        bar.auto_hide = False
         await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        assert isinstance(app.screen, MenuDropdown)
-        labels = {
-            item.label for item in app.screen._items if isinstance(item, MenuItem)
-        }
-        assert "Open..." in labels
+        title = app.screen.query_one(Menu)
+        # "Connect" plus the 2-cell padding either side, on the bar's one row.
+        assert (title.region.width, title.region.height) == (11, 1)
+        trailing = app.screen.query_one("#menubar-trailing", Static)
+        assert trailing.region.x == title.region.right
+        assert trailing.region.right == 120
+        assert trailing.region.height == 1
+        assert VERSION in str(trailing.render())
 
 
-async def test_the_menus_own_mnemonic_drops_it_directly_from_the_bar_stage(
-    repo,
-) -> None:
+# ------------------------------------------------------------------ behaviour
+
+
+async def test_open_reopens_the_connect_dialog(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("c")  # "Connect" menu's own mnemonic
-        await pilot.pause()
-        assert isinstance(app.screen, MenuDropdown)
-
-
-async def test_clicking_the_title_opens_its_dropdown(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        # Auto-hidden by default -- nothing to click until it's shown.
-        screen.query_one(MenuBar).auto_hide = False
-        await pilot.pause()
-        await pilot.click("#menu-connect")
-        await pilot.pause()
-        assert isinstance(app.screen, MenuDropdown)
-
-
-async def test_the_connect_menu_lists_the_database_item(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        labels = {
-            item.label for item in app.screen._items if isinstance(item, MenuItem)
-        }
-        assert "Database ..." in labels
-
-
-async def test_the_open_item_mnemonic_calls_back_into_the_app(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        await pilot.press("o")  # "Open..." item's mnemonic
-        await pilot.pause()
-        assert app.open_connect_calls == 1
-        # The dropdown closes and the bar conceals itself again afterwards.
-        assert app.screen is screen
-        assert screen.query_one(MenuBar).display is False
-
-
-async def test_disabling_auto_hide_keeps_the_bar_visible_after_the_menu_closes(
-    repo,
-) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        screen.query_one(MenuBar).auto_hide = False
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
+        await open_menu(pilot)
         await pilot.press("o")
-        await pilot.pause()
-        assert screen.query_one(MenuBar).display is True
+        await settle(pilot)
+        assert app.open_connect_calls == 1
 
 
-async def test_the_bar_shows_one_menu_title(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)):
-        assert app.screen.query_one(MenuBar).query_one("#menu-connect")
-
-
-async def test_the_bar_shows_the_version_right_aligned(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)):
-        version_label = app.screen.query_one("#menubar-version", Static)
-        assert VERSION in str(version_label.render())
-
-
-async def test_the_separator_after_open_draws_no_row_of_its_own(repo) -> None:
+async def test_settings_opens_the_settings_dialog(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        option_list = app.screen.query_one(OptionList)
-        item_count = sum(
-            1 for entry in app.screen._items if isinstance(entry, MenuItem)
+        await open_menu(pilot)
+        await pilot.press("s")
+        await settle(pilot)
+        assert isinstance(app.screen, SettingsScreen)
+
+
+async def test_prewarm_without_a_database_says_so_instead_of_priming(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await open_menu(pilot)
+        await pilot.press("p")
+        await settle(pilot)
+        assert isinstance(app.screen, MainScreen)
+        assert any(
+            "Select a database" in notification.message
+            for notification in app._notifications
         )
-        assert option_list.option_count == item_count
 
 
-async def test_the_separator_renders_as_a_rule_under_the_open_item(repo) -> None:
+async def test_quit_exits_the_app(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        option_list = app.screen.query_one(OptionList)
-        open_option = option_list.get_option("open")
-        assert open_option._divider is True
+        await open_menu(pilot)
+        await pilot.press("q")
+        await settle(pilot)
+    assert app.is_running is False
 
 
-async def test_pressing_down_from_open_skips_the_separator_onto_database(
-    repo,
-) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        option_list = app.screen.query_one(OptionList)
-        option_list.highlighted = 0  # "Open..."
-        await pilot.press("down")
-        await pilot.pause()
-        highlighted = option_list.options[option_list.highlighted]
-        assert highlighted.id == "database"
-
-
-async def test_f10_quits_the_app(repo) -> None:
+async def test_f10_quits_too(repo) -> None:
+    """The same action as the menu's Quit entry, kept as a binding for the
+    people who never open the menu."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         await pilot.press("f10")
-        await pilot.pause()
-        assert app._exit is True
-
-
-async def test_the_quit_item_has_a_mnemonic_and_shows_its_f10_shortcut(
-    repo,
-) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        quit_item = next(
-            entry
-            for entry in app.screen._items
-            if isinstance(entry, MenuItem) and entry.id == "quit"
-        )
-        assert quit_item.mnemonic == "q"
-        assert quit_item.shortcut == "F10"
-
-
-async def test_the_database_item_shows_its_ctrl_d_shortcut(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        database_item = next(
-            entry
-            for entry in app.screen._items
-            if isinstance(entry, MenuItem) and entry.id == "database"
-        )
-        assert database_item.shortcut == "Ctrl+D"
-
-
-async def test_the_warehouse_item_shows_its_ctrl_w_shortcut(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        warehouse_item = next(
-            entry
-            for entry in app.screen._items
-            if isinstance(entry, MenuItem) and entry.id == "warehouse"
-        )
-        assert warehouse_item.shortcut == "Ctrl+W"
-
-
-async def test_the_role_item_shows_its_ctrl_r_shortcut(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        role_item = next(
-            entry
-            for entry in app.screen._items
-            if isinstance(entry, MenuItem) and entry.id == "role"
-        )
-        assert role_item.shortcut == "Ctrl+R"
-
-
-async def test_the_separator_renders_as_a_rule_under_the_prewarm_item(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        option_list = app.screen.query_one(OptionList)
-        prewarm_option = option_list.get_option("prewarm")
-        assert prewarm_option._divider is True
-
-
-async def test_selecting_settings_from_the_menu_opens_the_settings_dialog(
-    repo,
-) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        option_list = app.screen.query_one(OptionList)
-        option_list.highlighted = option_list.get_option_index("settings")
-        await pilot.press("enter")
-        await pilot.pause()
-        assert isinstance(app.screen, SettingsScreen)
-
-
-async def test_selecting_quit_from_the_menu_exits_the_app(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-        option_list = app.screen.query_one(OptionList)
-        option_list.highlighted = option_list.get_option_index("quit")
-        await pilot.press("enter")
-        await pilot.pause()
-        assert app._exit is True
+        await settle(pilot)
+    assert app.is_running is False

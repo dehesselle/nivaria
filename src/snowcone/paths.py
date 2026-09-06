@@ -1,24 +1,44 @@
+"""Where snowcone keeps its files.
+
+The generic parts -- per-app config/cache directories and the JSON read/write
+helpers -- come from `tcw.paths`; what stays here is the Snowflake-specific
+part, above all the per-identity cache file.
+"""
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 
-import platformdirs
+from tcw.paths import cache_dir as _cache_dir
+from tcw.paths import config_dir as _config_dir
+from tcw.paths import read_json, write_json_atomic
+from tcw.paths import settings_file as _settings_file
 
 APP_NAME = "snowcone"
 
+__all__ = [
+    "APP_NAME",
+    "cache_dir",
+    "cache_file",
+    "config_dir",
+    "credential_cache_file",
+    "read_json",
+    "recent_file",
+    "settings_file",
+    "write_json_atomic",
+]
+
 
 def config_dir() -> Path:
-    return Path(platformdirs.user_config_dir(APP_NAME, appauthor=False))
+    return _config_dir(APP_NAME)
 
 
 def cache_dir() -> Path:
-    return Path(platformdirs.user_cache_dir(APP_NAME, appauthor=False))
+    return _cache_dir(APP_NAME)
 
 
 def settings_file() -> Path:
-    return config_dir() / "settings.json"
+    return _settings_file(APP_NAME)
 
 
 def recent_file() -> Path:
@@ -52,27 +72,3 @@ def _slug(value: str | None) -> str:
     text = value or "default"
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in text)
     return safe or "default"
-
-
-def write_json_atomic(path: Path, data: Any) -> None:
-    """Create the parent dir, write to .tmp, then replace.
-
-    Shared by settings.py and connections.py so a crash or a concurrent read
-    never sees a half-written file.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
-    tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp_path.replace(path)
-
-
-def read_json(path: Path, default: Any) -> Any:
-    """Read JSON, degrading to `default` on anything going wrong.
-
-    Every store in snowcone is an optimisation, never a dependency: an absent,
-    unreadable or corrupt file means "no data", not a crash on startup.
-    """
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return default

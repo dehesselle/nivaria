@@ -7,11 +7,11 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
-import asyncio
 from math import ceil
 from typing import ClassVar
 
-from textual import work
+from tcw.widgets import Menu, MenuBar, MenuItem, MenuSeparator, SettingsMenuItem
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -34,33 +34,23 @@ from snowcone.models import (
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import Priority
 from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.menus import connect_menu_items
 from snowcone.ui.messages import (
     CacheUpdated,
     CategorySelected,
-    MenuTitleClicked,
     ObjectSelected,
     ScopeNeeded,
 )
-from snowcone.ui.screens.menu_dropdown import (
-    MenuDropdown,
-    MenuEntry,
-    MenuItem,
-    OpenNeighbor,
-)
-from snowcone.ui.screens.menu_select import MenuBarSelectScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.screens.search import SearchScreen
-from snowcone.ui.screens.settings_dialog import SettingsScreen
 from snowcone.ui.views import (  # noqa: F401 -- registers views
     pipe_view,
     table_list_view,
     table_view,
 )
 from snowcone.ui.widgets.detail_pane import DetailPane
-from snowcone.ui.widgets.menubar import MENU_IDS, MenuBar
 from snowcone.ui.widgets.object_tree import ObjectTree
 from snowcone.ui.widgets.status_bar import StatusFooter
+from snowcone.version import VERSION
 
 NO_DATABASE = "(none)"
 
@@ -76,8 +66,9 @@ SWEEP = 5.0
 
 
 class MainScreen(Screen):
+    # No F9 here: `MenuBar` installs its own binding on whichever screen it
+    # is mounted on, so the key and its footer entry come with the widget.
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("f9", "open_menu_bar", "Menu"),
         Binding("ctrl+d", "pick_database", "Database", show=False),
         Binding("ctrl+r", "pick_role", "Role", show=False),
         Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
@@ -101,7 +92,29 @@ class MainScreen(Screen):
         self._context_view = None
 
     def compose(self) -> ComposeResult:
-        yield MenuBar()
+        # The nesting is the DOM structure, not style: a Menu is a child of
+        # the bar, and collapsing the two into one `with` would stop reading
+        # that way the moment a second menu is added.
+        with MenuBar(trailing=f"snowcone {VERSION}"):  # noqa: SIM117
+            # "connect-menu", not "connect": a Menu id is a CSS id too,
+            # and app.tcss already styles #connect (the connect dialog).
+            with Menu("Connect", id="connect-menu"):
+                yield MenuItem("Open...", id="open", mnemonic="o")
+                yield MenuSeparator()
+                yield MenuItem(
+                    "Database ...", id="database", mnemonic="d", shortcut="Ctrl+D"
+                )
+                yield MenuItem(
+                    "Warehouse ...", id="warehouse", mnemonic="w", shortcut="Ctrl+W"
+                )
+                yield MenuItem("Role ...", id="role", mnemonic="r", shortcut="Ctrl+R")
+                yield MenuItem("Pre-warm cache", id="prewarm", mnemonic="p")
+                yield MenuSeparator()
+                yield SettingsMenuItem()
+                yield MenuSeparator()
+                yield MenuItem(
+                    "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
+                )
         with Vertical(id="left"):
             tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
             tree.border_title = NO_DATABASE
@@ -205,66 +218,34 @@ class MainScreen(Screen):
 
     # ------------------------------------------------------------- menu bar
 
-    def on_menu_title_clicked(self, event: MenuTitleClicked) -> None:
-        self.action_open_menu(event.menu_id)
+    # The bar drives itself (F9, the staged bar/dropdown flow, mnemonics);
+    # all that is left here is what each item means. Every handler hands off
+    # to the same `@work` wrapper its key binding uses, because a plain
+    # message handler has no worker context and `push_screen_wait` needs one.
+
+    @on(MenuItem.Pressed, "#open")
+    def _menu_open_connect(self) -> None:
+        self._open_connect()
 
     @work
-    async def action_open_menu(self, menu_id: str) -> None:
-        await self._open_menu(menu_id)
+    async def _open_connect(self) -> None:
+        await self.app.open_connect()
 
-    @work
-    async def action_open_menu_bar(self) -> None:
-        await self._open_menu(None)
+    @on(MenuItem.Pressed, "#database")
+    def _menu_database(self) -> None:
+        self._pick_database()
 
-    async def _open_menu(self, menu_id: str | None) -> None:
-        menubar = self.query_one(MenuBar)
-        menubar.reveal()
-        if menubar.auto_hide:
-            # Reappearing changes layout (the panes give back its row), so
-            # the title's region -- needed to position the dropdown under it
-            # -- isn't valid again until after that reflow happens.
-            await self._wait_for_layout()
-        try:
-            if menu_id is None:
-                # Bar-only stage first, Midnight-Commander style: highlight a
-                # title without showing its items yet, so a mnemonic letter
-                # can never be ambiguous between "pick a top-level menu" and
-                # "pick an item" the way it would be if a dropdown were
-                # already open.
-                menu_id = await self.app.push_screen_wait(
-                    MenuBarSelectScreen(MENU_IDS[0], menubar)
-                )
-                if menu_id is None:
-                    return
-            await self._run_menu(menu_id)
-        finally:
-            menubar.set_armed(None)
-            menubar.conceal()
+    @on(MenuItem.Pressed, "#warehouse")
+    def _menu_warehouse(self) -> None:
+        self._pick_warehouse()
 
-    async def _run_menu(self, menu_id: str) -> None:
-        menubar = self.query_one(MenuBar)
-        menubar.set_armed(menu_id)
-        items = self._menu_items_for(menu_id)
-        title = self.query_one(f"#menu-{menu_id}")
-        result = await self.app.push_screen_wait(
-            MenuDropdown(items, x_offset=title.region.x, menu_id=menu_id)
-        )
-        if isinstance(result, OpenNeighbor):
-            index = MENU_IDS.index(menu_id)
-            next_id = MENU_IDS[(index + result.direction) % len(MENU_IDS)]
-            await self._run_menu(next_id)
-        elif isinstance(result, MenuItem) and result.enabled:
-            await result.handler()
+    @on(MenuItem.Pressed, "#role")
+    def _menu_role(self) -> None:
+        self._pick_role()
 
-    async def _wait_for_layout(self) -> None:
-        layout_done = asyncio.Event()
-        self.call_after_refresh(layout_done.set)
-        await layout_done.wait()
-
-    def _menu_items_for(self, menu_id: str) -> list[MenuEntry]:
-        if menu_id == "connect":
-            return connect_menu_items(self.app, self)
-        raise ValueError(f"unknown menu: {menu_id!r}")
+    @on(MenuItem.Pressed, "#prewarm")
+    def _menu_prewarm(self) -> None:
+        self.prewarm_cache()
 
     # --------------------------------------------------------------- routing
 
@@ -378,11 +359,11 @@ class MainScreen(Screen):
         await self.pick_database()
 
     async def pick_database(self) -> None:
-        """Open the database picker from the Connect menu.
+        """Open the database picker.
 
-        Awaited directly rather than via `@work`: the menu already runs the
-        handler from inside a worker (see `_run_menu`), so a second one here
-        would buy nothing.
+        Not decorated itself: both callers -- the `ctrl+d` binding and the
+        menu item -- already wrap it in `_pick_database`, and
+        `push_screen_wait` needs exactly one worker context, not two.
         """
         cached = self.repo.databases(databases_scope())
         if cached.is_empty:
@@ -412,12 +393,8 @@ class MainScreen(Screen):
         await self.pick_warehouse()
 
     async def pick_warehouse(self) -> None:
-        """Open the warehouse picker from the Connect menu.
-
-        Awaited directly rather than via `@work`: the menu already runs the
-        handler from inside a worker (see `_run_menu`), so a second one here
-        would buy nothing.
-        """
+        """Open the warehouse picker. See `pick_database` for why this is
+        not itself a worker."""
         if self.pool is None:
             return
         cached = self.repo.warehouses(warehouses_scope())
@@ -445,12 +422,8 @@ class MainScreen(Screen):
         await self.pick_role()
 
     async def pick_role(self) -> None:
-        """Open the role picker from the Connect menu.
-
-        Awaited directly rather than via `@work`: the menu already runs the
-        handler from inside a worker (see `_run_menu`), so a second one here
-        would buy nothing.
-        """
+        """Open the role picker. See `pick_database` for why this is not
+        itself a worker."""
         if self.pool is None:
             return
         cached = self.repo.roles(roles_scope())
@@ -470,8 +443,8 @@ class MainScreen(Screen):
         if chosen is not None and chosen != current:
             self._switch_role(chosen)
 
-    async def prewarm_cache(self) -> None:
-        """Warm columns for the current database from the Connect menu.
+    def prewarm_cache(self) -> None:
+        """Warm columns for the current database, from the Connect menu.
 
         Fires the table/view object primes alongside the columns prime,
         rather than the columns prime alone: the columns-prime fallback tiers
@@ -490,15 +463,6 @@ class MainScreen(Screen):
         self._request(prime_scope(ObjectKind.VIEW, database), Priority.BACKGROUND)
         self._request(columns_prime_scope(database), Priority.BACKGROUND)
         self.notify(f"Pre-warming cache for {database}...", timeout=3)
-
-    async def open_settings(self) -> None:
-        """Open the settings dialog from the Connect menu.
-
-        Awaited directly rather than via `@work`: the menu already runs the
-        handler from inside a worker (see `_run_menu`), so a second one here
-        would buy nothing.
-        """
-        await self.app.push_screen_wait(SettingsScreen())
 
     @work(thread=True)
     def _switch_warehouse(self, warehouse: str) -> None:

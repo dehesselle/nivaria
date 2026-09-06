@@ -49,12 +49,3 @@ class CategorySelected(Message):
     def __init__(self, scope: Scope) -> None:
         self.scope = scope
         super().__init__()
-
-
-class MenuTitleClicked(Message):
-    """A menu bar title was clicked. Bubbles to the screen, which owns menu
-    contents and dropdown behavior."""
-
-    def __init__(self, menu_id: str) -> None:
-        self.menu_id = menu_id
-        super().__init__()

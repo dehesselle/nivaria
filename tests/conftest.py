@@ -18,12 +18,13 @@ def colour_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Point every store at tmp_path so tests never touch the real config.
 
-    `config` is a module-level singleton imported by name, so patching its
-    attributes in place -- rather than reassigning snowcone.settings.config --
-    is what the modules that already imported it actually see.
+    Settings need no monkeypatching any more: `tcw`'s store resolves its path
+    lazily, so `configure(path=...)` is enough and it takes effect for every
+    module that already imported `config` by name.
     """
+    from tcw.settings import configure
+
     from snowcone import paths
-    from snowcone.settings import config
 
     monkeypatch.setattr(paths, "config_dir", lambda: tmp_path / "config")
     monkeypatch.setattr(paths, "cache_dir", lambda: tmp_path / "cache")
@@ -37,6 +38,8 @@ def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # its own implementation already builds on cache_dir(), patched above, so
     # isolating that one function is enough to keep it under tmp_path too.
 
-    monkeypatch.setattr(config, "path", tmp_path / "config" / "settings.json")
-    monkeypatch.setattr(config, "_values", {})
-    monkeypatch.setattr(config, "_loaded", True)
+    configure(path=tmp_path / "config" / "settings.json")
+    yield
+    # Put the real app config back, so a later non-test import of
+    # snowcone.settings is not left pointing at a deleted tmp_path.
+    configure(paths.APP_NAME)

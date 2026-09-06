@@ -66,7 +66,7 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Database ...** (`d`, `Ctrl+D` shown right-aligned) to open the same fuzzy-picker pattern described below over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to do the same over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the current database's column cache in the background — see "Column cache priming"; then another separator, **Settings ...** (`s`) to open the settings dialog — see "Settings" below; then another separator and **Quit** (`q`, `F10` shown right-aligned) to exit the app — the same action as the `F10` key binding, given a menu entry for discoverability. A menu entry can be a `MenuSeparator` instead of a `MenuItem`: a non-selectable divider rule that cursor navigation skips over, built on `OptionList`'s own `None`-as-divider convention rather than a fake disabled row. A `MenuItem` can also carry a `shortcut` string, shown dimmed and right-aligned to advertise a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection, not display of an outside key). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) — the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Database ...** (`d`, `Ctrl+D` shown right-aligned) to open the fuzzy-picker pattern described below over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to do the same over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the current database's column cache in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
 | **Top pane** | Holds the Context bar. |
 | **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |
@@ -734,27 +734,69 @@ consults no warehouse, so nothing about the cache needs to change when it does.
 
 Settings are declared once and self-register, so a settings UI can enumerate
 them with no per-setting wiring. Only values that differ from their default are
-persisted — a setting nobody has touched stays absent from the file, so a
+persisted -- a setting nobody has touched stays absent from the file, so a
 future release can change its default without a stale override shadowing it.
 Values are read **at the point of use**, never cached, so a change takes effect
 without a restart.
+
+All of that machinery -- `Setting`, the registry, `ConfigStore`, the dialog --
+is `tcw`'s (see "Shared widgets" below). `snowcone/settings.py` is only the
+declarations plus the one `configure("snowcone")` call that tells the shared
+store which app's config file to use; the store resolves that path lazily, on
+first read, so importing the module touches no disk.
 
 The ones that matter: **cache TTL** (`0` disables background refreshing),
 **pool size**, **fetch page size**.
 
 **Settings ...** (Connect menu) opens a modal listing every registered
 `Setting`, grouped under a heading per `Setting.group`, each editable in
-place — a `Switch` for a boolean default, an `Input` (pre-filled with the
-current value, placeholder showing the default) for anything else. **OK**
-validates and writes, then closes; **Apply** does the same but leaves the
-dialog open; **Cancel**/escape discard, confirming first if anything was
-typed that differs from what was last saved — the same "unsaved changes"
-guard `ConnectScreen` uses. Clearing a field's text and confirming is how a
-setting is reset to its default, consistent with `ConfigStore.set` already
-treating "equal to default" as "absent from the file". A value that fails to
-parse (`ValueError`) blocks OK/Apply with an inline warning rather than
-silently discarding it or falling back to the default — that fallback exists
-for a hand-edited settings.json, not for a mistake made in the dialog itself.
+place. **OK** validates and writes, then closes; **Apply** does the same but
+leaves the dialog open; **Cancel**/escape discard, confirming first if
+anything was typed that differs from what was last saved -- the same "unsaved
+changes" guard `ConnectScreen` uses. Clearing a field's text and confirming is
+how a setting is reset to its default. A value that fails to parse
+(`ValueError`) blocks OK/Apply with an inline warning rather than silently
+discarding it or falling back to the default -- that fallback exists for a
+hand-edited settings.json, not for a mistake made in the dialog itself.
+
+`tcw`'s dialog also supports per-instance settings and callback-only action
+rows, which snowcone declares none of; they exist for the sibling app the
+dialog originally came from.
+
+---
+
+## Shared widgets
+
+The menu bar, the settings system, and the dialog chrome underneath both
+(`DialogScreen`, `ConfirmScreen`) live in **`tcw`** ("Textual Common
+Widgets"), a sibling project shared with `snakecam` and `vc`. They were
+extracted because the same code had been copied into three apps and had
+already started to drift.
+
+It is consumed as an editable path dependency (`[tool.uv.sources]` in
+`pyproject.toml`), so an edit there is live here with no reinstall.
+
+Three things about it are worth knowing from inside snowcone:
+
+- **`tcw` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
+  than in a stylesheet -- a library cannot rely on a consumer's `CSS_PATH`.
+  So the menu-bar and settings-dialog rules are no longer in `app.tcss`, and
+  neither is `Button.button-gray`, which moved onto `DialogScreen` where its
+  only users are. `app.tcss` still outranks `DEFAULT_CSS` regardless of
+  specificity, so anything there can still be overridden here.
+- **`MenuBar` installs its own `F9` binding** on whichever screen it is
+  mounted on, which is why `MainScreen.BINDINGS` no longer carries one.
+  Textual only consults the focus chain plus the screen and the app when
+  resolving a key, so a bar that is never focused cannot own the binding
+  itself.
+- **A `Menu`/`MenuItem` id is also a CSS id.** Textual only requires it to be
+  unique among one menu's own children, but any `app.tcss` rule of the same
+  name styles it too -- and for a widget inside a one-row bar that does not
+  show up as a wrong colour, it shows up as a garbled row of scrollbar
+  blocks. The Connect menu is `#connect-menu` rather than `#connect` for
+  exactly this reason: `#connect` is the connect dialog's container.
+  `test_menubar.py` asserts the title's *geometry*, not just its text, so a
+  future clash fails a test instead of only looking wrong.
 
 ---
 
@@ -762,7 +804,8 @@ for a hand-edited settings.json, not for a mistake made in the dialog itself.
 
 - **uv** manages the project and the virtualenv. Use `uv sync --all-groups` for
   dependencies and `uv add` to introduce one. The interpreter is the project
-  `.venv`.
+  `.venv`. One dependency, `tcw`, is an editable checkout of a sibling
+  directory rather than a released package -- see "Shared widgets".
 - **ruff** formats and lints, on **default settings with no configuration** —
   there is deliberately no `[tool.ruff]` section. Run `ruff format` and
   `ruff check` after changes and let the formatter decide. ruff is installed

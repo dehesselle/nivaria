@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 from typing import ClassVar
 
+from tcw.screens import ConfirmScreen
 from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -45,7 +46,6 @@ from snowcone.gateway.pool import (
     Connector,
     ConnectParams,
 )
-from snowcone.ui.screens.confirm import ConfirmScreen
 from snowcone.ui.screens.connecting import ConnectingScreen
 
 # OAuth listed first: it is the dialog's default, ahead of the two

@@ -4,13 +4,13 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from tcw.screens import ConfirmScreen
 from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 
 import snowcone.ui.app as app_module
 from snowcone.connections import RecentConnections, RecentEntry
 from snowcone.gateway.pool import EXTERNAL_BROWSER, OAUTH, USERNAME_PASSWORD_MFA
-from snowcone.ui.screens.confirm import ConfirmScreen
 from snowcone.ui.screens.connect import ConnectScreen, RecentList
 from snowcone.ui.screens.connecting import ConnectingScreen
 from tests.fakes import FakeConnector

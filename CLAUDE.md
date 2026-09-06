@@ -11,6 +11,9 @@ that a change can silently break.
 - Python 3.12, managed with **uv**. Use the project `.venv` to run anything:
   `.venv/Scripts/python -m pytest`.
 - `uv sync --all-groups` for dependencies, `uv add` to introduce one.
+- The menu bar, settings and dialog chrome come from **`tcw`** (`../tcw`),
+  a shared library consumed as an editable path dependency. Changing them
+  means editing that checkout, and `../snakecam` and `../vc` use it too.
 - **ruff** is installed globally and runs on **default settings** — there is
   deliberately no `[tool.ruff]` configuration. Run `ruff format` and
   `ruff check` after changes and let the formatter decide.

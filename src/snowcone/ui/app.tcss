@@ -1,33 +1,3 @@
-/* ---- menu bar ----------------------------------------------------------- */
-
-MenuBar {
-    dock: top;
-    height: 1;
-    layout: horizontal;
-    background: $panel;
-}
-
-MenuBar > .menubar--title {
-    width: auto;
-    padding: 0 2;
-    color: $text;
-}
-
-MenuBar > .menubar--title:hover {
-    background: $boost;
-}
-
-MenuBar > .menubar--title.-armed {
-    background: $boost;
-}
-
-MenuBar > #menubar-version {
-    width: 1fr;
-    padding: 0 2;
-    color: $text-disabled;
-    content-align: right middle;
-}
-
 /* ---- main screen: 25% tree / 75% detail, split 25/75 vertically ------- */
 
 MainScreen {
@@ -144,48 +114,6 @@ PickerScreen > #dialog {
     max-height: 20;
 }
 
-/* ---- buttons ------------------------------------------------------------ */
-
-/* The unstyled (default) variant defaults to $surface, which sits so close
-   to the screen background and to $panel that it visually disappears next
-   to a -primary sibling. Bump it up the existing gray ramp instead of
-   introducing a new color.
-   Marked explicitly with a "button-gray" class from the call site rather
-   than matched by variant: a "default" variant Button's `variant` reactive
-   is declared with "default" as its initial value, and Textual only calls
-   watch_variant() on an actual change, so a button that is never given
-   another variant never gets a "-default" class added at all -- there is no
-   selector that means "whichever variant this is, it isn't -primary/
-   -success/-warning/-error" since Textual's CSS has no :not(), and any rule
-   here in app.tcss outranks Button's own DEFAULT_CSS regardless of
-   specificity, so a broad `Button.-style-default` selector clobbers those
-   variants' own background instead of leaving them alone.
-   Background only, no border override: a compact button (settings dialog's
-   Apply/Cancel) forces `border: none !important` in its own DEFAULT_CSS,
-   and since app.tcss rules outrank DEFAULT_CSS even through !important, a
-   border-top/border-bottom here would put a border back specifically on
-   compact gray buttons while their compact -primary sibling stays
-   borderless. Leaving border alone keeps both compact and non-compact
-   gray buttons consistent with their variant siblings' border handling. */
-Button.button-gray {
-    background: $surface-lighten-3;
-
-    &:hover {
-        background: $surface-lighten-1;
-    }
-}
-
-/* ---- confirm modal ----------------------------------------------------- */
-
-ConfirmScreen > #dialog {
-    width: 60;
-    max-width: 100%;
-}
-
-#confirm-message {
-    margin: 1 0;
-}
-
 /* ---- connecting modal --------------------------------------------------- */
 
 ConnectingScreen > #dialog {
@@ -286,64 +214,6 @@ StatusFooter #footer-pool {
     padding: 0 1;
     color: $text-muted;
 }
-
-/* ---- settings modal: tree of groups left, selected group's settings right */
-
-SettingsScreen > #dialog {
-    width: 90%;
-    height: 80%;
-}
-
-#settings-body {
-    height: 1fr;
-}
-
-#settings-tree {
-    width: 1fr;
-    border-right: solid $panel;
-    padding: 0 1;
-}
-
-#settings-content {
-    width: 3fr;
-    padding: 1 2;
-}
-
-#settings-placeholder,
-.settings-empty {
-    color: $text-muted;
-}
-
-.settings-item {
-    height: auto;
-}
-
-.settings-item-description {
-    width: 1fr;
-    margin-bottom: 1;
-}
-
-/* Separates entries; its own default margin (1 0) is the only spacing
-   between one entry and the next. */
-#settings-content Rule {
-    color: $panel;
-}
-
-.settings-item-field {
-    height: auto;
-}
-
-.settings-item-field Label {
-    width: auto;
-    margin: 1 1 0 0;
-}
-
-.settings-item-field Input {
-    width: 1fr;
-}
-
-/* Input/Switch are both 3 cells tall (bordered), so the label's top margin
-   above lines it up with their middle row. */
 
 /* ---- search modal: 90% of the screen, room for a lot of matches -------- */
 

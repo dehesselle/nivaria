@@ -26,11 +26,10 @@ unbound (see `DialogScreen`).
 
 from __future__ import annotations
 
+from tcw.screens import DialogScreen
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Label, Static
-
-from snowcone.ui.screens.dialog_base import DialogScreen
 
 MFA_HINT = "(approve browser or MFA)"
 

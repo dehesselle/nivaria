@@ -39,6 +39,7 @@ import asyncio
 from typing import ClassVar
 
 from rich.text import Text
+from tcw.screens import DialogScreen
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -48,7 +49,6 @@ from textual.widgets.option_list import Option
 from snowcone.cache.repository import Repository
 from snowcone.fuzzy import Match, highlight, rank, rank_qualified
 from snowcone.models import ObjectRef, SchemaRef
-from snowcone.ui.screens.dialog_base import DialogScreen
 
 #: What the modal hands back: an object, a column's owning object, or a
 #: schema. A schema is never an ObjectRef with some placeholder kind -- see
