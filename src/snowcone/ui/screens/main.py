@@ -75,7 +75,7 @@ class MainScreen(Screen):
         Binding("ctrl+d", "pick_database", "Database"),
         Binding("slash", "search", "Search"),
         Binding("r", "refresh", "Refresh"),
-        Binding("q", "app.quit", "Quit"),
+        Binding("f10", "app.quit", "Quit"),
     ]
 
     def __init__(

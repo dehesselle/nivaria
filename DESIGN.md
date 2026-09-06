@@ -44,7 +44,7 @@ Use these names when discussing changes.
 │ │                 ││        (hosts exactly one Object view)              │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ ^d Database  / Search  r Refresh  q Quit  Role  Warehouse  Countdown  (2/5)│
+│ ^d Database  / Search  r Refresh  F10 Quit  Role  Warehouse  Countdown  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
@@ -66,7 +66,7 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Warehouse ...** (`w`) and **Role ...** (`r`) to open the same fuzzy-picker pattern as the database picker over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (no mnemonic) to fill the current database's column cache in the background — see "Column cache priming". A menu entry can be a `MenuSeparator` instead of a `MenuItem`: a non-selectable divider rule that cursor navigation skips over, built on `OptionList`'s own `None`-as-divider convention rather than a fake disabled row. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use. `F9` (or clicking a title) opens it in a bar-only stage that arrows/mnemonics move between titles without showing items yet, then `enter`/mnemonic drops that title's menu; escape backs out a stage at a time. Mnemonics are the theme's accent color rather than underlined. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Warehouse ...** (`w`) and **Role ...** (`r`) to open the same fuzzy-picker pattern as the database picker over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (no mnemonic) to fill the current database's column cache in the background — see "Column cache priming"; then another separator and **Quit** (no mnemonic, `F10` shown right-aligned) to exit the app — the same action as the `F10` key binding, given a menu entry for discoverability. A menu entry can be a `MenuSeparator` instead of a `MenuItem`: a non-selectable divider rule that cursor navigation skips over, built on `OptionList`'s own `None`-as-divider convention rather than a fake disabled row. A `MenuItem` can also carry a `shortcut` string, shown dimmed and right-aligned to advertise a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection, not display of an outside key). |
 | **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
 | **Top pane** | Holds the Context bar. |
 | **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |

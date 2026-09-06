@@ -214,3 +214,59 @@ async def test_pressing_down_from_open_skips_the_separator_onto_warehouse(
         await pilot.pause()
         highlighted = option_list.options[option_list.highlighted]
         assert highlighted.id == "warehouse"
+
+
+async def test_f10_quits_the_app(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f10")
+        await pilot.pause()
+        assert app._exit is True
+
+
+async def test_the_quit_item_has_no_mnemonic_and_shows_its_f10_shortcut(
+    repo,
+) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        quit_item = next(
+            entry
+            for entry in app.screen._items
+            if isinstance(entry, MenuItem) and entry.id == "quit"
+        )
+        assert quit_item.mnemonic is None
+        assert quit_item.shortcut == "F10"
+
+
+async def test_the_separator_renders_as_a_rule_under_the_prewarm_item(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        prewarm_option = option_list.get_option("prewarm")
+        assert prewarm_option._divider is True
+
+
+async def test_selecting_quit_from_the_menu_exits_the_app(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        option_list.highlighted = option_list.get_option_index("quit")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app._exit is True
