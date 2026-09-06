@@ -265,6 +265,56 @@ def test_columns_keep_information_schemas_own_shape(repo) -> None:
     assert column.comment == "pk"
 
 
+def test_columns_carry_precision_fields_through_the_cache(repo) -> None:
+    scope = columns_scope("MYDB", "PUBLIC", "ORDERS")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "TABLE_CATALOG": "MYDB",
+                "TABLE_SCHEMA": "PUBLIC",
+                "TABLE_NAME": "ORDERS",
+                "COLUMN_NAME": "TOTAL",
+                "ORDINAL_POSITION": 1,
+                "DATA_TYPE": "FIXED",
+                "IS_NULLABLE": "NO",
+                "NUMERIC_PRECISION": 38,
+                "NUMERIC_SCALE": 0,
+            }
+        ],
+    )
+    column = repo.columns(scope).rows[0]
+    assert column.numeric_precision == 38
+    assert column.numeric_scale == 0
+
+
+def test_columns_leave_precision_fields_none_when_absent(repo) -> None:
+    """0 is a real scale (e.g. NUMBER(38,0)); an absent field must come back
+    as None, not be coalesced into a value that looks like a real one."""
+    scope = columns_scope("MYDB", "PUBLIC", "ORDERS")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "TABLE_CATALOG": "MYDB",
+                "TABLE_SCHEMA": "PUBLIC",
+                "TABLE_NAME": "ORDERS",
+                "COLUMN_NAME": "ID",
+                "ORDINAL_POSITION": 1,
+                "DATA_TYPE": "TEXT",
+                "IS_NULLABLE": "NO",
+            }
+        ],
+    )
+    column = repo.columns(scope).rows[0]
+    assert column.character_maximum_length is None
+    assert column.numeric_precision is None
+    assert column.numeric_scale is None
+    assert column.datetime_precision is None
+
+
 def test_columns_are_ordered_by_position_not_name(repo) -> None:
     """A table's columns read in declaration order; alphabetising them would
     make a wide table unreadable against the real DDL."""

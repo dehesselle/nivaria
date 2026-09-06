@@ -208,6 +208,18 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         if nullable is None:
             nullable = "Y" if fields.get("nullable", True) else "N"
 
+        category = fields.get("type", "UNKNOWN")
+        # The JSON blob reports the same "precision"/"scale" keys for FIXED's
+        # decimal scale and for a timestamp/time's fractional-seconds count;
+        # INFORMATION_SCHEMA keeps those concepts in separate columns, so the
+        # mirror gates each source key to the category it actually describes.
+        is_datetime = category in {
+            "TIMESTAMP_LTZ",
+            "TIMESTAMP_NTZ",
+            "TIMESTAMP_TZ",
+            "TIME",
+        }
+
         mapped.append(
             {
                 "TABLE_CATALOG": catalog,
@@ -215,14 +227,17 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                 "TABLE_NAME": table,
                 "COLUMN_NAME": row.get("column_name"),
                 "ORDINAL_POSITION": position[key],
-                "DATA_TYPE": fields.get("type", "UNKNOWN"),
+                "DATA_TYPE": category,
                 "IS_NULLABLE": "YES"
                 if str(nullable).upper() in {"Y", "YES", "TRUE"}
                 else "NO",
                 "COLUMN_DEFAULT": row.get("default"),
                 "CHARACTER_MAXIMUM_LENGTH": fields.get("length"),
-                "NUMERIC_PRECISION": fields.get("precision"),
-                "NUMERIC_SCALE": fields.get("scale"),
+                "NUMERIC_PRECISION": fields.get("precision")
+                if category == "FIXED"
+                else None,
+                "NUMERIC_SCALE": fields.get("scale") if category == "FIXED" else None,
+                "DATETIME_PRECISION": fields.get("scale") if is_datetime else None,
                 "COMMENT": row.get("comment"),
             }
         )

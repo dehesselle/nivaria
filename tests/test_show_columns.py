@@ -67,6 +67,23 @@ def test_text_length_lands_in_character_maximum_length() -> None:
     assert mapped["NUMERIC_PRECISION"] is None
 
 
+def test_timestamp_scale_lands_in_datetime_precision_not_numeric_scale() -> None:
+    """TIMESTAMP_LTZ's JSON reuses the "precision"/"scale" keys FIXED uses for
+    its decimal scale, but INFORMATION_SCHEMA keeps the two concepts apart."""
+    mapped = map_show_columns(
+        [
+            raw(
+                data_type='{"type":"TIMESTAMP_LTZ","precision":0,"scale":9,'
+                '"nullable":true}'
+            )
+        ]
+    )[0]
+    assert mapped["DATA_TYPE"] == "TIMESTAMP_LTZ"
+    assert mapped["DATETIME_PRECISION"] == 9
+    assert mapped["NUMERIC_PRECISION"] is None
+    assert mapped["NUMERIC_SCALE"] is None
+
+
 def test_nullability_comes_from_the_null_question_mark_column() -> None:
     assert map_show_columns([raw(**{"null?": "Y"})])[0]["IS_NULLABLE"] == "YES"
     assert map_show_columns([raw(**{"null?": "N"})])[0]["IS_NULLABLE"] == "NO"

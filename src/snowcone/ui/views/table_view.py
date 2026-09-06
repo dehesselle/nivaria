@@ -8,7 +8,7 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Label, Static
 
-from snowcone.format import format_bytes
+from snowcone.format import format_bytes, format_data_type
 from snowcone.models import ObjectKind, Scope, columns_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.views.base import ObjectView, register_view
@@ -49,7 +49,15 @@ class ColumnsView(ObjectView):
         for column in cached.rows:
             table.add_row(
                 Text(column.column_name),
-                Text(column.data_type),
+                Text(
+                    format_data_type(
+                        column.data_type,
+                        character_maximum_length=column.character_maximum_length,
+                        numeric_precision=column.numeric_precision,
+                        numeric_scale=column.numeric_scale,
+                        datetime_precision=column.datetime_precision,
+                    )
+                ),
                 Text("" if column.is_nullable else "NOT NULL"),
                 Text(column.default or ""),
                 Text(column.comment or ""),

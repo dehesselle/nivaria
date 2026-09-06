@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from snowcone.format import format_age, format_bytes, format_count, truncate_middle
+from snowcone.format import (
+    format_age,
+    format_bytes,
+    format_count,
+    format_data_type,
+    truncate_middle,
+)
 
 
 @pytest.mark.parametrize(
@@ -45,6 +51,70 @@ def test_format_count_is_parenthesised() -> None:
 )
 def test_format_bytes(size, expected) -> None:
     assert format_bytes(size) == expected
+
+
+def test_format_data_type_renders_text_as_varchar_with_length() -> None:
+    assert (
+        format_data_type("TEXT", character_maximum_length=16777216)
+        == "VARCHAR(16777216)"
+    )
+
+
+def test_format_data_type_renders_fixed_as_number_with_precision_and_scale() -> None:
+    assert (
+        format_data_type("FIXED", numeric_precision=38, numeric_scale=0)
+        == "NUMBER(38,0)"
+    )
+
+
+def test_format_data_type_renders_binary_with_length() -> None:
+    assert (
+        format_data_type("BINARY", character_maximum_length=8388608)
+        == "BINARY(8388608)"
+    )
+
+
+@pytest.mark.parametrize(
+    "data_type", ["TIMESTAMP_LTZ", "TIMESTAMP_NTZ", "TIMESTAMP_TZ", "TIME"]
+)
+def test_format_data_type_appends_scale_to_timestamp_and_time_variants(
+    data_type,
+) -> None:
+    assert format_data_type(data_type, datetime_precision=9) == f"{data_type}(9)"
+
+
+@pytest.mark.parametrize(
+    "data_type",
+    [
+        "BOOLEAN",
+        "DATE",
+        "VARIANT",
+        "OBJECT",
+        "ARRAY",
+        "GEOGRAPHY",
+        "GEOMETRY",
+        "REAL",
+        "UNKNOWN",
+    ],
+)
+def test_format_data_type_leaves_categories_without_precision_unchanged(
+    data_type,
+) -> None:
+    assert format_data_type(data_type) == data_type
+
+
+def test_format_data_type_omits_parens_when_length_is_missing() -> None:
+    assert format_data_type("TEXT") == "VARCHAR"
+
+
+def test_format_data_type_omits_parens_when_scale_is_missing_for_fixed() -> None:
+    """FIXED always reports both precision and scale together; a partial
+    result would produce a malformed NUMBER(38) rather than the real type."""
+    assert format_data_type("FIXED", numeric_precision=38) == "NUMBER"
+
+
+def test_format_data_type_omits_parens_when_datetime_precision_is_missing() -> None:
+    assert format_data_type("TIMESTAMP_LTZ") == "TIMESTAMP_LTZ"
 
 
 def test_truncate_middle_keeps_both_ends() -> None:

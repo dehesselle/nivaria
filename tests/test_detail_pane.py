@@ -76,25 +76,27 @@ def put_table(repo: Repository, name: str, **extra) -> ObjectRef:
     return ObjectRef(ObjectKind.TABLE, "MYDB", "PUBLIC", name)
 
 
-def put_columns(repo: Repository, table: str, *columns: tuple[str, str]) -> None:
-    load(
-        repo,
-        columns_scope("MYDB", "PUBLIC", table),
-        [
-            {
-                "TABLE_CATALOG": "MYDB",
-                "TABLE_SCHEMA": "PUBLIC",
-                "TABLE_NAME": table,
-                "COLUMN_NAME": name,
-                "ORDINAL_POSITION": position,
-                "DATA_TYPE": data_type,
-                "IS_NULLABLE": "YES",
-                "COLUMN_DEFAULT": None,
-                "COMMENT": "",
-            }
-            for position, (name, data_type) in enumerate(columns, start=1)
-        ],
-    )
+def put_columns(repo: Repository, table: str, *columns: tuple) -> None:
+    """Each column is (name, data_type) or (name, data_type, extra), where
+    extra is a dict of additional INFORMATION_SCHEMA fields, e.g. precision."""
+    rows = []
+    for position, column in enumerate(columns, start=1):
+        name, data_type, *rest = column
+        row = {
+            "TABLE_CATALOG": "MYDB",
+            "TABLE_SCHEMA": "PUBLIC",
+            "TABLE_NAME": table,
+            "COLUMN_NAME": name,
+            "ORDINAL_POSITION": position,
+            "DATA_TYPE": data_type,
+            "IS_NULLABLE": "YES",
+            "COLUMN_DEFAULT": None,
+            "COMMENT": "",
+        }
+        if rest:
+            row.update(rest[0])
+        rows.append(row)
+    load(repo, columns_scope("MYDB", "PUBLIC", table), rows)
 
 
 def put_pipe(repo: Repository, name: str, **extra) -> ObjectRef:
@@ -226,6 +228,24 @@ async def test_the_table_view_lists_cached_columns(repo) -> None:
         assert table.row_count == 2
         assert table.get_cell_at((0, 0)).plain == "ID"
         assert table.get_cell_at((1, 1)).plain == "FLOAT"
+
+
+async def test_the_table_view_renders_full_ddl_style_type_names(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(
+        repo,
+        "ORDERS",
+        ("TOTAL", "FIXED", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
+        ("CREATED_AT", "TIMESTAMP_LTZ", {"DATETIME_PRECISION": 9}),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-columns", DataTable)
+        assert table.get_cell_at((0, 1)).plain == "NUMBER(38,0)"
+        assert table.get_cell_at((1, 1)).plain == "TIMESTAMP_LTZ(9)"
 
 
 async def test_the_table_view_summarises_rows_and_size(repo) -> None:

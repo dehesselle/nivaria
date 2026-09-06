@@ -190,6 +190,10 @@ class Column:
     ordinal_position: int
     data_type: str
     is_nullable: bool
+    character_maximum_length: int | None = None
+    numeric_precision: int | None = None
+    numeric_scale: int | None = None
+    datetime_precision: int | None = None
     default: str = ""
     comment: str = ""
 

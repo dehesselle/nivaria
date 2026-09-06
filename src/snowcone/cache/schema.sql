@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS information_schema_columns (
     CHARACTER_MAXIMUM_LENGTH INTEGER,
     NUMERIC_PRECISION        INTEGER,
     NUMERIC_SCALE            INTEGER,
+    DATETIME_PRECISION       INTEGER,
     COMMENT                  TEXT,
     _scope                   TEXT    NOT NULL,
     _generation              INTEGER NOT NULL,
