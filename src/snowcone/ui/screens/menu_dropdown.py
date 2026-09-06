@@ -29,6 +29,14 @@ class MenuItem:
     mnemonic: str | None = None
 
 
+@dataclass(frozen=True)
+class MenuSeparator:
+    """A non-selectable dividing line between menu items."""
+
+
+MenuEntry = MenuItem | MenuSeparator
+
+
 def _label_text(item: MenuItem, app: App) -> Text:
     """Render an item's label, coloring its mnemonic letter if it has one."""
     if item.mnemonic is None:
@@ -82,21 +90,26 @@ class MenuDropdown(ModalScreen[MenuDropdownResult]):
         Binding("right", "neighbor(1)", "Next menu", show=False),
     ]
 
-    def __init__(self, items: list[MenuItem], *, x_offset: int, menu_id: str) -> None:
+    def __init__(self, items: list[MenuEntry], *, x_offset: int, menu_id: str) -> None:
         super().__init__()
         self._items = items
         self._x_offset = x_offset
         self._menu_id = menu_id
 
     def compose(self) -> ComposeResult:
-        option_list = OptionList(
-            *(
-                Option(
-                    _item_prompt(item, self.app), id=item.id, disabled=not item.enabled
-                )
-                for item in self._items
+        # `None` is Textual's own way of asking for a divider rule under the
+        # previously added option, rather than a selectable row of its own --
+        # reusing it is what makes separators skip over for free during
+        # cursor navigation, with no extra logic here.
+        content = [
+            None
+            if isinstance(entry, MenuSeparator)
+            else Option(
+                _item_prompt(entry, self.app), id=entry.id, disabled=not entry.enabled
             )
-        )
+            for entry in self._items
+        ]
+        option_list = OptionList(*content)
         option_list.styles.offset = (self._x_offset, 1)
         yield option_list
 
@@ -104,7 +117,14 @@ class MenuDropdown(ModalScreen[MenuDropdownResult]):
         self.query_one(OptionList).focus()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        item = next((i for i in self._items if i.id == event.option_id), None)
+        item = next(
+            (
+                i
+                for i in self._items
+                if isinstance(i, MenuItem) and i.id == event.option_id
+            ),
+            None,
+        )
         self.dismiss(item)
 
     def action_dismiss_none(self) -> None:
@@ -120,7 +140,8 @@ class MenuDropdown(ModalScreen[MenuDropdownResult]):
         letter = character.lower()
         for item in self._items:
             if (
-                item.enabled
+                isinstance(item, MenuItem)
+                and item.enabled
                 and item.mnemonic is not None
                 and item.mnemonic.lower() == letter
             ):

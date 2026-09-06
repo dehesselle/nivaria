@@ -16,6 +16,7 @@ from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import databases_scope, roles_scope, warehouses_scope
 from snowcone.ui.screens.main import MainScreen
+from snowcone.ui.screens.menu_dropdown import MenuItem
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.widgets.status_bar import StatusFooter
 from tests.fakes import make_pool
@@ -95,7 +96,9 @@ async def test_the_connect_menu_lists_warehouse_and_role(repo) -> None:
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        labels = {item.label for item in app.screen._items}
+        labels = {
+            item.label for item in app.screen._items if isinstance(item, MenuItem)
+        }
         assert "Warehouse ..." in labels
         assert "Role ..." in labels
 

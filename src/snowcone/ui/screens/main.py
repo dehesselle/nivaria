@@ -41,7 +41,12 @@ from snowcone.ui.messages import (
     ObjectSelected,
     ScopeNeeded,
 )
-from snowcone.ui.screens.menu_dropdown import MenuDropdown, MenuItem, OpenNeighbor
+from snowcone.ui.screens.menu_dropdown import (
+    MenuDropdown,
+    MenuEntry,
+    MenuItem,
+    OpenNeighbor,
+)
 from snowcone.ui.screens.menu_select import MenuBarSelectScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.screens.search import SearchScreen
@@ -248,7 +253,7 @@ class MainScreen(Screen):
         self.call_after_refresh(layout_done.set)
         await layout_done.wait()
 
-    def _menu_items_for(self, menu_id: str) -> list[MenuItem]:
+    def _menu_items_for(self, menu_id: str) -> list[MenuEntry]:
         if menu_id == "connect":
             return connect_menu_items(self.app, self)
         raise ValueError(f"unknown menu: {menu_id!r}")

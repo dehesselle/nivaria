@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 from textual.app import App
-from textual.widgets import Static
+from textual.widgets import OptionList, Static
 
 import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.ui.screens.main import MainScreen
-from snowcone.ui.screens.menu_dropdown import MenuDropdown
+from snowcone.ui.screens.menu_dropdown import MenuDropdown, MenuItem
 from snowcone.ui.screens.menu_select import MenuBarSelectScreen
 from snowcone.ui.widgets.menubar import MenuBar
 from snowcone.version import VERSION
@@ -91,7 +91,9 @@ async def test_enter_drops_the_armed_menu(repo) -> None:
         await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, MenuDropdown)
-        labels = {item.label for item in app.screen._items}
+        labels = {
+            item.label for item in app.screen._items if isinstance(item, MenuItem)
+        }
         assert "Open..." in labels
 
 
@@ -166,3 +168,49 @@ async def test_the_bar_shows_the_version_right_aligned(repo) -> None:
     async with app.run_test(size=(120, 40)):
         version_label = app.screen.query_one("#menubar-version", Static)
         assert VERSION in str(version_label.render())
+
+
+async def test_the_separator_after_open_draws_no_row_of_its_own(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        item_count = sum(
+            1 for entry in app.screen._items if isinstance(entry, MenuItem)
+        )
+        assert option_list.option_count == item_count
+
+
+async def test_the_separator_renders_as_a_rule_under_the_open_item(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        open_option = option_list.get_option("open")
+        assert open_option._divider is True
+
+
+async def test_pressing_down_from_open_skips_the_separator_onto_warehouse(
+    repo,
+) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        option_list.highlighted = 0  # "Open..."
+        await pilot.press("down")
+        await pilot.pause()
+        highlighted = option_list.options[option_list.highlighted]
+        assert highlighted.id == "warehouse"

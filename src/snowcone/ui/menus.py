@@ -9,16 +9,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from snowcone.ui.screens.menu_dropdown import MenuItem
+from snowcone.ui.screens.menu_dropdown import MenuEntry, MenuItem, MenuSeparator
 
 if TYPE_CHECKING:
     from snowcone.ui.app import SnowconeApp
     from snowcone.ui.screens.main import MainScreen
 
 
-def connect_menu_items(app: SnowconeApp, screen: MainScreen) -> list[MenuItem]:
+def connect_menu_items(app: SnowconeApp, screen: MainScreen) -> list[MenuEntry]:
     return [
         MenuItem("open", "Open...", app.open_connect, mnemonic="o"),
+        MenuSeparator(),
         MenuItem("warehouse", "Warehouse ...", screen.pick_warehouse, mnemonic="w"),
         MenuItem("role", "Role ...", screen.pick_role, mnemonic="r"),
         MenuItem("prewarm", "Pre-warm cache", screen.prewarm_cache),
