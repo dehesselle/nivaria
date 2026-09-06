@@ -8,24 +8,24 @@ from hatchling.builders.sdist import SdistBuilder
 # wheel-from-sdist build phase has something to pull from once the sibling
 # checkout below is no longer around (sdists must be self-contained). Placed
 # next to src/snowcone, matching this project's own src layout.
-_VENDORED_TCW = "src/tcw"
+_TCW_IN_SDIST = "src/tcw"
 
 
 class CustomBuildHook(BuildHookInterface):
     def initialize(self, version, build_data):
         sibling_tcw = Path(self.root).parent / "tcw"
-        vendored_tcw = Path(self.root) / _VENDORED_TCW
+        tcw_in_sdist = Path(self.root) / _TCW_IN_SDIST
 
         if sibling_tcw.is_dir():
             _regenerate_version(sibling_tcw)
             source = sibling_tcw / "src" / "tcw"
-        elif vendored_tcw.is_dir():
-            source = vendored_tcw
+        elif tcw_in_sdist.is_dir():
+            source = tcw_in_sdist
         else:
             return
 
         # The wheel installs packages flat, same as src/snowcone -> snowcone.
-        target = _VENDORED_TCW if self.target_name == "sdist" else "tcw"
+        target = _TCW_IN_SDIST if self.target_name == "sdist" else "tcw"
         build_data.setdefault("force_include", {})[str(source)] = target
 
 

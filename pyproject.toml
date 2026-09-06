@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# Not a real dependency: tcw is vendored into our own wheel by hatch_build.py
-# rather than installed from anywhere, so it must not appear in
+# Not a real dependency: tcw's sources are bundled into our own wheel by
+# hatch_build.py rather than installed from anywhere, so it must not appear in
 # [project.dependencies] (there's an unrelated package also named "tcw" on
 # PyPI, and any plain `pip install` would resolve to that one). Listed here
 # only so `uv sync`'s dev dependency group below can install it editable.

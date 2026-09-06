@@ -777,7 +777,7 @@ It is consumed as an editable path dependency (`[tool.uv.sources]` in
 `pyproject.toml`), so an edit there is live here with no reinstall.
 
 > **`tcw` must never appear in `[project.dependencies]`.** It is not published
-> anywhere, so a built snowcone wheel instead vendors a copy of its sources
+> anywhere, so a built snowcone wheel instead bundles a copy of its sources
 > directly (`hatch_build.py`, triggered as a custom build hook on both the
 > `sdist` and `wheel` targets — see the hook's own comments for how it locates
 > a source copy for each). `[tool.uv.sources]`'s path override only takes
@@ -785,7 +785,7 @@ It is consumed as an editable path dependency (`[tool.uv.sources]` in
 > for a plain `pip install`/`uv pip install` of the built wheel elsewhere. If
 > `tcw` were listed as a real dependency, any such install would resolve it
 > against PyPI instead — where an unrelated, same-named package already
-> exists — silently shadowing the vendored copy with the wrong one. `tcw` is
+> exists — silently shadowing the bundled copy with the wrong one. `tcw` is
 > therefore listed only under `[dependency-groups] dev`, which `uv sync`
 > honors for the local venv but which never becomes part of a built
 > distribution's metadata.
