@@ -263,6 +263,29 @@ async def test_a_column_name_surfaces_its_owning_table(repo) -> None:
         assert shown(app) == ["SALES.ORDERS"]
 
 
+async def test_a_query_shorter_than_the_gate_does_not_search_columns(repo) -> None:
+    """A short, generic fragment scoring against the whole column corpus is
+    the expensive, low-relevance case MIN_COLUMN_QUERY_LENGTH exists to skip
+    -- see search.py."""
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    put_columns(repo, "SALES", "ORDERS", "ID")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "id")  # 2 chars, below the gate of 3
+        assert shown(app) == []
+
+
+async def test_a_query_at_the_gate_length_does_search_columns(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    put_columns(repo, "SALES", "ORDERS", "IDX")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "idx")  # 3 chars, meets the gate
+        assert shown(app) == ["SALES.ORDERS"]
+
+
 async def test_a_column_hit_is_annotated_with_the_matched_column_name(repo) -> None:
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")

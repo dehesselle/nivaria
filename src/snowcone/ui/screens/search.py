@@ -26,6 +26,11 @@ it lands, so the list corrects itself in place rather than a keystroke ever
 blocking on it. Enter is the one exception: choosing a result and closing the
 dialog is a commitment a still-partial corpus should not get to make, so that
 path alone waits for both loads first.
+
+Ranking itself also skips the column corpus below `MIN_COLUMN_QUERY_LENGTH`
+characters: a short, generic fragment scores against every cached column for
+little relevance benefit and, at a heavily pre-warmed scale (270k columns
+measured), real per-keystroke latency -- see that constant for the number.
 """
 
 from __future__ import annotations
@@ -51,6 +56,15 @@ DEBOUNCE = 0.12
 
 #: A screenful and then some, even at 90% of a large terminal.
 MAX_RESULTS = 200
+
+#: Below this many characters, ranking skips the column corpus entirely --
+#: object names are still matched at any length. A short, generic fragment
+#: scores against every cached column for little relevance benefit and, on a
+#: heavily pre-warmed database, real latency: measured at 270k cached columns,
+#: a 4-character query ("col1") alone cost ~450ms of ranking. A plain module
+#: constant rather than a Setting on purpose -- this is a tuning knob for a
+#: specific machine's cache size, not a per-user preference worth a UI entry.
+MIN_COLUMN_QUERY_LENGTH = 3
 
 
 class SearchScreen(DialogScreen[ObjectRef]):
@@ -190,23 +204,28 @@ class SearchScreen(DialogScreen[ObjectRef]):
         """Best hit per object, from either its own name or a column's.
 
         Pure and widget-free -- safe to call from a thread. `_corpus` and
-        `_column_corpus` do get reassigned once, when the background load in
-        `_load_corpus` finishes, but never mutated in place, and a plain
-        attribute reassignment is atomic under the GIL -- so a read from this
-        thread always sees one complete corpus or the other, never a partial
-        write (see the module docstring for why this runs against a
-        possibly-incomplete corpus at all).
+        `_column_corpus` do get reassigned once each, when the corresponding
+        background load in `_load_objects`/`_load_columns` finishes, but
+        never mutated in place, and a plain attribute reassignment is atomic
+        under the GIL -- so a read from this thread always sees one complete
+        corpus or the other, never a partial write (see the module docstring
+        for why this runs against a possibly-incomplete corpus at all).
         """
+        search_columns = len(query) >= MIN_COLUMN_QUERY_LENGTH
+
         # `rank`/`rank_qualified` break score ties by corpus order, which is
         # what keeps an empty query a plain passthrough; merging two ranked
         # lists through a set would throw that away, so first appearance
         # across either corpus is recorded up front and carried through the
-        # merge as the same kind of tie-break.
+        # merge as the same kind of tie-break. Skipped for the column corpus
+        # below the length gate, same as the ranking itself -- otherwise a
+        # short query would still pay for walking all of it just for this.
         order: dict[ObjectRef, int] = {}
         for _, ref in self._corpus:
             order.setdefault(ref, len(order))
-        for ref, _ in self._column_corpus:
-            order.setdefault(ref, len(order))
+        if search_columns:
+            for ref, _ in self._column_corpus:
+                order.setdefault(ref, len(order))
 
         object_hits: dict[ObjectRef, Match] = dict(
             rank_qualified(
@@ -220,14 +239,15 @@ class SearchScreen(DialogScreen[ObjectRef]):
         # matcher is enough, and its positions are already relative to the
         # bare column name, ready to highlight directly.
         column_hits: dict[ObjectRef, tuple[str, Match]] = {}
-        for (ref, column), hit in rank(
-            query,
-            ((column, (ref, column)) for ref, column in self._column_corpus),
-            limit=MAX_RESULTS,
-        ):
-            best = column_hits.get(ref)
-            if best is None or hit.score > best[1].score:
-                column_hits[ref] = (column, hit)
+        if search_columns:
+            for (ref, column), hit in rank(
+                query,
+                ((column, (ref, column)) for ref, column in self._column_corpus),
+                limit=MAX_RESULTS,
+            ):
+                best = column_hits.get(ref)
+                if best is None or hit.score > best[1].score:
+                    column_hits[ref] = (column, hit)
 
         merged: list[tuple[ObjectRef, Match, str | None]] = []
         for ref in object_hits.keys() | column_hits.keys():
