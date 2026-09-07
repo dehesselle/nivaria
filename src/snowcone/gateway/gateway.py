@@ -97,7 +97,22 @@ class SnowflakeGateway(Protocol):
     ) -> list[Row]: ...
 
     def pipe_activity(
-        self, database: str, schema: str, *, allow_reconnect: bool = True
+        self,
+        database: str,
+        schema: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
+
+    def pipe_history(
+        self,
+        target_catalog: str,
+        target_schema: str,
+        target_table: str,
+        pipe_name: str,
+        *,
+        allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
 
@@ -266,10 +281,30 @@ class PoolGateway:
         )
 
     def pipe_activity(
-        self, database: str, schema: str, *, allow_reconnect: bool = True
+        self,
+        database: str,
+        schema: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.pipe_activity(),
+            queries.pipe_activity(fetch_days),
             (database, schema),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def pipe_history(
+        self,
+        target_catalog: str,
+        target_schema: str,
+        target_table: str,
+        pipe_name: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        return self._fetch(
+            queries.pipe_history(target_catalog, target_schema, target_table),
+            (pipe_name,),
             allow_reconnect=allow_reconnect,
         )

@@ -191,12 +191,21 @@ class FetchService:
         try:
             if generation == 0:
                 generation = self._repo.begin_pass(scope)
+            pipe_target = None
+            if scope.kind is ScopeKind.PIPE_HISTORY:
+                assert scope.database is not None
+                assert scope.schema is not None
+                assert scope.table is not None
+                pipe_target = self._repo.pipe_target_table(
+                    scope.database, scope.schema, scope.table
+                )
             rows, cursor = fetch_page(
                 self._gateway,
                 scope,
                 job.cursor,
                 self._page_size,
                 allow_reconnect=allow_reconnect,
+                pipe_target=pipe_target,
             )
         # A worker thread boundary: the driver, the network and sqlite all
         # raise unrelated exception types, and any escape here would kill the

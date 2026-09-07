@@ -182,25 +182,20 @@ def table_stats(database: str) -> str:
     )
 
 
-#: How far back to look for a pipe's most recent load. A tunable constant,
-#: not a Setting -- same precedent as MIN_COLUMN_QUERY_LENGTH in search.py --
-#: chosen to bound the scan on an account with a lot of COPY_HISTORY
-#: retention (up to 365 days), not to express any real business meaning.
-PIPE_ACTIVITY_LOOKBACK_DAYS = 14
+def pipe_activity(fetch_days: int) -> str:
+    """Every pipe's load history in a schema, back to `fetch_days` ago.
 
-
-def pipe_activity() -> str:
-    """The most recent load per pipe in a schema.
-
-    SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY, filtered to one schema's pipes and
-    collapsed to one row per pipe with QUALIFY -- the view otherwise carries
-    one row per historical load. Like `table_stats`, this needs a running
-    warehouse; unlike it, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather
-    than one built from the database, so both filter values bind as ordinary
-    `%s` parameters -- no `quote_identifier` needed at all. It also needs
-    IMPORTED PRIVILEGES on the SNOWFLAKE database (or ACCOUNTADMIN); either
-    gap just fails this one scope, same as a missing warehouse does for
-    `table_stats`.
+    SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY, filtered to one schema's pipes --
+    one row per historical load, not collapsed to the latest: this is also
+    the backfill for a single pipe's detail view (`pipe_history_scope`),
+    which needs the full history, not just the newest row. `fetch_days`
+    comes from the "pipe history fetch window" setting, read fresh at fetch
+    time. Like `table_stats`, this needs a running warehouse; unlike it,
+    ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather than one built from the
+    database, so both filter values bind as ordinary `%s` parameters -- no
+    `quote_identifier` needed at all. It also needs IMPORTED PRIVILEGES on
+    the SNOWFLAKE database (or ACCOUNTADMIN); either gap just fails this one
+    scope, same as a missing warehouse does for `table_stats`.
     """
     return (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
@@ -208,10 +203,45 @@ def pipe_activity() -> str:
         "TABLE_SCHEMA_NAME, TABLE_NAME "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
-        "AND LAST_LOAD_TIME >= DATEADD('day', "
-        f"-{PIPE_ACTIVITY_LOOKBACK_DAYS}, CURRENT_TIMESTAMP()) "
-        "QUALIFY ROW_NUMBER() OVER "
-        "(PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1"
+        f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP())"
+    )
+
+
+#: Snowflake's own retention limit for INFORMATION_SCHEMA.COPY_HISTORY -- a
+#: platform constant, not a preference, so it is not a Setting. This is also
+#: why ScopeKind.PIPE_ACTIVITY's TTL override (models.py) stays one day
+#: under this: the two sources must jointly cover every day with no gap.
+PIPE_HISTORY_RETENTION_DAYS = 14
+
+
+def pipe_history(target_catalog: str, target_schema: str, target_table: str) -> str:
+    """One pipe's near-real-time load history, the last 14 days.
+
+    INFORMATION_SCHEMA.COPY_HISTORY, a table function that requires a
+    TABLE_NAME argument -- Snowflake exposes no way to ask for "this pipe's"
+    history directly, so the caller resolves the pipe's target table first
+    (from the already-cached ACCOUNT_USAGE.COPY_HISTORY data -- see
+    FetchService._resolve_pipe_target) and this just filters that table's
+    history down to one pipe.
+
+    TABLE_NAME and START_TIME are table-function named arguments, not an
+    ordinary SELECT's WHERE clause -- whether the driver's pyformat bind
+    works inside one is untested, so both are quote_literal'd/computed as
+    plain SQL text instead, the same "where binding does not clearly apply"
+    reasoning `queries.py`'s own module docstring already carries for
+    `SHOW ... FROM`. PIPE_NAME, filtering the function's *output*, is an
+    ordinary WHERE value and binds normally.
+    """
+    target = f"{quote_identifier(target_catalog)}.INFORMATION_SCHEMA.COPY_HISTORY"
+    qualified_table = quote_literal(f"{target_catalog}.{target_schema}.{target_table}")
+    return (
+        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME "
+        f"FROM TABLE({target}("
+        f"TABLE_NAME => {qualified_table}, "
+        "START_TIME => DATEADD('day', "
+        f"-{PIPE_HISTORY_RETENTION_DAYS}, CURRENT_TIMESTAMP())"
+        ")) "
+        "WHERE PIPE_NAME = %s"
     )
 
 

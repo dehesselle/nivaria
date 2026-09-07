@@ -96,6 +96,22 @@ def _local(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone()
 
 
+def parse_timestamp(value: str | None) -> datetime | None:
+    """Parse a stored timestamp into an aware local `datetime`, or None.
+
+    Same parsing as `_local` (used by every `format_*` below), but returns
+    None on absence/failure instead of raising -- for callers that need to
+    *compare* timestamps (picking the most recent of several rows, or
+    filtering to a display window) rather than render one.
+    """
+    if not value:
+        return None
+    try:
+        return _local(value)
+    except ValueError:
+        return None
+
+
 def format_date(value: str | None) -> str:
     """YYYY-MM-DD in local time, for a cell too narrow for the full timestamp.
 

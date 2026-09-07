@@ -12,6 +12,7 @@ from snowcone.models import (
     columns_scope,
     databases_scope,
     objects_scope,
+    pipe_activity_scope,
     roles_scope,
     schemas_scope,
     warehouses_scope,
@@ -417,6 +418,19 @@ def test_only_the_scopes_offered_are_considered(repo) -> None:
     assert unwatched not in repo.stale_scopes(900, [watched])
 
 
+def test_pipe_activitys_ttl_override_outlasts_the_ordinary_sweep_interval(repo) -> None:
+    """An ordinary scope this old is stale at a 0.01s ttl; PIPE_ACTIVITY's
+    13-day floor (models.scope_ttl) must keep it fresh regardless -- see
+    ScopeKind.PIPE_ACTIVITY's comment for why re-fetching it on the ordinary
+    cadence would just repeat the same round trip for no new data."""
+    ordinary = databases_scope()
+    pipes = pipe_activity_scope("MYDB", "PUBLIC")
+    load(repo, ordinary, db_rows("ACME"))
+    load(repo, pipes, [])
+    time.sleep(0.02)
+    assert repo.stale_scopes(0.01, [ordinary, pipes]) == [ordinary]
+
+
 # ------------------------------------------- schema.sql / TableSpec agreement
 
 
@@ -429,6 +443,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _DATABASES,
         _OBJECT_TABLES,
         _PIPE_ACTIVITY,
+        _PIPE_HISTORY,
         _SCHEMAS,
         _TABLE_STATS,
     )
@@ -439,6 +454,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _COLUMNS,
         _TABLE_STATS,
         _PIPE_ACTIVITY,
+        _PIPE_HISTORY,
         *_OBJECT_TABLES.values(),
     ]
     with repo._db.connect() as connection:
@@ -559,3 +575,126 @@ def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["FILE_NAME"] == "orders_1.csv.gz"
     assert stored["STATUS"] == "Loaded"
     assert stored["TABLE_NAME"] == "ORDERS"
+
+
+def test_pipe_activity_keeps_every_historical_load_not_just_the_latest(repo) -> None:
+    """The PK widened from (pipe) to (pipe, FILE_NAME, LAST_LOAD_TIME) so a
+    single pipe's detail view can show its full history, not just the most
+    recent row the "Pipes (n)" list needs -- see queries.pipe_activity."""
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "MY_PIPE",
+                "FILE_NAME": "orders_1.csv.gz",
+                "FILE_SIZE": 1024,
+                "ROW_COUNT": 42,
+                "STATUS": "Loaded",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+                "TABLE_CATALOG_NAME": "MYDB",
+                "TABLE_SCHEMA_NAME": "PUBLIC",
+                "TABLE_NAME": "ORDERS",
+            },
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "MY_PIPE",
+                "FILE_NAME": "orders_2.csv.gz",
+                "FILE_SIZE": 2048,
+                "ROW_COUNT": 84,
+                "STATUS": "Loaded",
+                "LAST_LOAD_TIME": "2026-01-03 03:04:05",
+                "TABLE_CATALOG_NAME": "MYDB",
+                "TABLE_SCHEMA_NAME": "PUBLIC",
+                "TABLE_NAME": "ORDERS",
+            },
+        ],
+    )
+    stored = repo.raw_rows(scope)
+    assert {row["FILE_NAME"] for row in stored} == {
+        "orders_1.csv.gz",
+        "orders_2.csv.gz",
+    }
+
+
+def test_pipe_target_table_is_none_with_no_activity_cached(repo) -> None:
+    """A pipe that has never loaded anything (or whose schema's activity
+    scope has never been fetched) has nothing to resolve a target from --
+    None, not an error, is the correct answer here."""
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") is None
+
+
+def test_pipe_target_table_ignores_another_pipes_activity_rows(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "LOAD_OTHER",
+                "FILE_NAME": "other.csv.gz",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+                "TABLE_CATALOG_NAME": "MYDB",
+                "TABLE_SCHEMA_NAME": "PUBLIC",
+                "TABLE_NAME": "OTHER",
+            }
+        ],
+    )
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") is None
+
+
+def test_pipe_target_table_reads_snowflakes_own_resolution(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "LOAD_ORDERS",
+                "FILE_NAME": "orders_1.csv.gz",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+                "TABLE_CATALOG_NAME": "MYDB",
+                "TABLE_SCHEMA_NAME": "RAW",
+                "TABLE_NAME": "ORDERS",
+            }
+        ],
+    )
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") == (
+        "MYDB",
+        "RAW",
+        "ORDERS",
+    )
+
+
+def test_pipe_history_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as the other two SELECT-backed mirrors: this shape comes
+    from Snowflake's published INFORMATION_SCHEMA.COPY_HISTORY documentation,
+    not a probed live account -- see DESIGN.md "Known gaps"."""
+    from snowcone.models import pipe_history_scope
+
+    scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "FILE_NAME": "orders_9.csv.gz",
+                "FILE_SIZE": 2048,
+                "ROW_COUNT": 100,
+                "STATUS": "Loaded",
+                "LAST_LOAD_TIME": "2026-03-01 08:00:00",
+                "PIPE_NAME": "LOAD_ORDERS",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["FILE_NAME"] == "orders_9.csv.gz"
+    assert stored["STATUS"] == "Loaded"

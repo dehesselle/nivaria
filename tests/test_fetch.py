@@ -147,6 +147,53 @@ def test_pipe_activity_is_fetched_in_one_shot() -> None:
     assert cursor is None
 
 
+def test_pipe_history_is_fetched_in_one_shot_given_its_resolved_target() -> None:
+    """One pipe's near-real-time history is likewise bounded and unpaged --
+    same reasoning as pipe_activity above."""
+    from snowcone.models import pipe_history_scope
+
+    gateway = FakeGateway(
+        pipe_history={
+            ("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS"): [
+                {
+                    "FILE_NAME": "orders_9.csv.gz",
+                    "FILE_SIZE": 2048,
+                    "ROW_COUNT": 100,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-03-01T08:00:00+00:00",
+                    "PIPE_NAME": "LOAD_ORDERS",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway,
+        pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+        None,
+        limit=1,
+        pipe_target=("MYDB", "PUBLIC", "ORDERS"),
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
+def test_pipe_history_without_a_resolved_target_raises() -> None:
+    """fetch_page has no repository access and so cannot resolve the target
+    table itself -- see FetchService._resolve_pipe_target, the caller that
+    is supposed to supply `pipe_target`. A caller that forgets is a bug, not
+    a silent no-op, so this raises rather than fetching nothing quietly."""
+    from snowcone.models import pipe_history_scope
+
+    gateway = FakeGateway()
+    with pytest.raises(ValueError):
+        fetch_page(
+            gateway,
+            pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+            None,
+            limit=1,
+        )
+
+
 # -------------------------------------------------------------- end to end
 
 
@@ -818,6 +865,87 @@ def test_a_failing_pipe_activity_fetch_keeps_previously_cached_activity(repo) ->
         service.stop()
     assert repo.entry(scope).state is CacheState.ERROR
     assert [row["PIPE_NAME"] for row in repo.raw_rows(scope)] == ["MY_PIPE"]
+
+
+def test_pipe_history_resolves_its_target_from_cached_pipe_activity(repo) -> None:
+    """FetchService._resolve_pipe_target reads the target table straight off
+    whatever PIPE_ACTIVITY already has cached, Snowflake's own resolution --
+    an opportunistic read of a sibling scope's cache, the same pattern
+    _fan_out_columns_by_schema already uses for SCHEMAS."""
+    from snowcone.models import pipe_activity_scope, pipe_history_scope
+
+    activity_scope = pipe_activity_scope("MYDB", "PUBLIC")
+    history_scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    gateway = FakeGateway(
+        pipe_activity={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "PIPE_CATALOG_NAME": "MYDB",
+                    "PIPE_SCHEMA_NAME": "PUBLIC",
+                    "PIPE_NAME": "LOAD_ORDERS",
+                    "FILE_NAME": "orders_1.csv.gz",
+                    "FILE_SIZE": 1024,
+                    "ROW_COUNT": 42,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
+                    "TABLE_CATALOG_NAME": "MYDB",
+                    "TABLE_SCHEMA_NAME": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                }
+            ]
+        },
+        pipe_history={
+            ("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS"): [
+                {
+                    "FILE_NAME": "orders_9.csv.gz",
+                    "FILE_SIZE": 2048,
+                    "ROW_COUNT": 100,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-03-01T08:00:00+00:00",
+                    "PIPE_NAME": "LOAD_ORDERS",
+                }
+            ]
+        },
+    )
+    service = make_service(gateway, repo)
+    try:
+        service.request(activity_scope)
+        assert wait_until(
+            lambda: repo.entry(activity_scope).state is CacheState.COMPLETE
+        )
+        service.request(history_scope)
+        assert wait_until(
+            lambda: repo.entry(history_scope).state is CacheState.COMPLETE
+        )
+    finally:
+        service.stop()
+    assert [row["FILE_NAME"] for row in repo.raw_rows(history_scope)] == [
+        "orders_9.csv.gz"
+    ]
+    assert (
+        "pipe_history",
+        ("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS"),
+    ) in gateway.calls
+
+
+def test_pipe_history_fails_gracefully_with_no_pipe_activity_data_cached(repo) -> None:
+    """Nothing to resolve the target table from yet -- e.g. the schema's
+    pipe-activity scope has never been fetched, or this pipe genuinely has no
+    load history at all. This must fail the one scope, not crash the worker
+    thread and strand every later job (see FetchService._execute)."""
+    from snowcone.models import pipe_history_scope
+
+    scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    errors: list[str] = []
+    service = make_service(
+        FakeGateway(), repo, on_error=lambda s, message: errors.append(message)
+    )
+    try:
+        service.request(scope)
+        assert wait_until(lambda: bool(errors))
+    finally:
+        service.stop()
+    assert repo.entry(scope).state is CacheState.ERROR
 
 
 # --------------------------------------------------------- columns-wide prime

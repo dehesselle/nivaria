@@ -17,7 +17,15 @@ from snowcone.paths import APP_NAME
 
 configure(APP_NAME)
 
-__all__ = ["CACHE_TTL", "PAGE_SIZE", "POOL_SIZE", "Setting", "config"]
+__all__ = [
+    "CACHE_TTL",
+    "PAGE_SIZE",
+    "PIPE_HISTORY_FETCH_DAYS",
+    "PIPE_HISTORY_SHOW_DAYS",
+    "POOL_SIZE",
+    "Setting",
+    "config",
+]
 
 
 CACHE_TTL = Setting(
@@ -57,4 +65,29 @@ PAGE_SIZE = Setting(
     ),
     group="Cache",
     default=1000,
+)
+
+PIPE_HISTORY_FETCH_DAYS = Setting(
+    key="pipe_history_fetch_days",
+    label="pipe history fetch window (days)",
+    description=(
+        "How many days of pipe load history to pull from "
+        "SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY per schema, kept in the cache "
+        "regardless of how much of it the pipe detail view actually shows -- "
+        "see 'pipe history display window' below."
+    ),
+    group="Cache",
+    default=90,
+)
+
+PIPE_HISTORY_SHOW_DAYS = Setting(
+    key="pipe_history_show_days",
+    label="pipe history display window (days)",
+    description=(
+        "How many days of a pipe's load history to show in its detail view. "
+        "Can be smaller than the fetch window above to keep the list short "
+        "while still keeping older rows cached for later."
+    ),
+    group="Cache",
+    default=90,
 )

@@ -219,17 +219,22 @@ CREATE TABLE IF NOT EXISTS information_schema_tables (
 CREATE INDEX IF NOT EXISTS information_schema_tables_scope
     ON information_schema_tables(_scope);
 
--- Most recent load per pipe for the "Pipes (n)" list, sourced via a real
--- SELECT against SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY (needs a running
--- warehouse) rather than SHOW -- see DESIGN.md's dual-source note, the
--- second instance of the pattern information_schema_tables established.
--- Unlike that first instance, the source here is ACCOUNT_USAGE rather than
--- INFORMATION_SCHEMA: it also needs IMPORTED PRIVILEGES on the SNOWFLAKE
--- database (or ACCOUNTADMIN) and can lag real activity by up to ~2 hours --
--- either gap just leaves these columns blank, same as a missing warehouse
--- does. This column set is NOT verified against a live account -- it is
--- taken from Snowflake's published ACCOUNT_USAGE.COPY_HISTORY documentation
--- only.
+-- Every pipe's load history in a schema (bounded by the "pipe history fetch
+-- window" setting), sourced via a real SELECT against
+-- SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY (needs a running warehouse) rather
+-- than SHOW -- see DESIGN.md's dual-source note, the second instance of the
+-- pattern information_schema_tables established. Unlike that first
+-- instance, the source here is ACCOUNT_USAGE rather than INFORMATION_SCHEMA:
+-- it also needs IMPORTED PRIVILEGES on the SNOWFLAKE database (or
+-- ACCOUNTADMIN) and can lag real activity by up to ~2 hours -- either gap
+-- just leaves these columns blank, same as a missing warehouse does. This
+-- column set is NOT verified against a live account -- it is taken from
+-- Snowflake's published ACCOUNT_USAGE.COPY_HISTORY documentation only.
+--
+-- One row per historical load, not per pipe: this backs both the "Pipes (n)"
+-- list (which reduces it to the latest load per pipe in Python) and a single
+-- pipe's detail view (which shows the whole history, merged with the
+-- near-real-time information_schema_copy_history below).
 CREATE TABLE IF NOT EXISTS account_usage_copy_history (
     PIPE_CATALOG_NAME  TEXT NOT NULL,
     PIPE_SCHEMA_NAME   TEXT NOT NULL,
@@ -245,10 +250,32 @@ CREATE TABLE IF NOT EXISTS account_usage_copy_history (
     _scope             TEXT    NOT NULL,
     _generation        INTEGER NOT NULL,
     _fetched_at        REAL    NOT NULL,
-    PRIMARY KEY (PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME)
+    PRIMARY KEY (PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, LAST_LOAD_TIME)
 );
 CREATE INDEX IF NOT EXISTS account_usage_copy_history_scope
     ON account_usage_copy_history(_scope);
+
+-- One pipe's near-real-time load history (the last 14 days -- Snowflake's
+-- own retention limit for the function backing this), sourced via a real
+-- SELECT against INFORMATION_SCHEMA.COPY_HISTORY. Scoped per pipe, like
+-- information_schema_columns is scoped per table -- _scope disambiguates
+-- which pipe's rows these are, since the physical table holds every pipe's
+-- history together. This column set is likewise NOT verified against a live
+-- account.
+CREATE TABLE IF NOT EXISTS information_schema_copy_history (
+    FILE_NAME      TEXT,
+    FILE_SIZE      INTEGER,
+    ROW_COUNT      INTEGER,
+    STATUS         TEXT,
+    LAST_LOAD_TIME TEXT,
+    PIPE_NAME      TEXT,
+    _scope         TEXT    NOT NULL,
+    _generation    INTEGER NOT NULL,
+    _fetched_at    REAL    NOT NULL,
+    PRIMARY KEY (_scope, FILE_NAME, LAST_LOAD_TIME)
+);
+CREATE INDEX IF NOT EXISTS information_schema_copy_history_scope
+    ON information_schema_copy_history(_scope);
 
 -- The freshness ledger: one row per separately-refreshable scope. This is
 -- what makes a refresh surgical rather than "fetch everything again".

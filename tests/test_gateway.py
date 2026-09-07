@@ -234,11 +234,40 @@ def test_pipe_activity_binds_database_and_schema_as_parameters() -> None:
             "ORDERS",
         )
     ]
-    rows = gateway.pipe_activity("MYDB", "PUBLIC")
+    rows = gateway.pipe_activity("MYDB", "PUBLIC", 90)
     statement, params = connection.executed[-1]
     assert "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY" in statement
+    assert "DATEADD('day', -90," in statement
     assert params == ("MYDB", "PUBLIC")
     assert rows[0]["PIPE_NAME"] == "MY_PIPE"
+
+
+def test_pipe_history_binds_pipe_name_and_qualifies_the_target_table() -> None:
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "FILE_NAME",
+        "FILE_SIZE",
+        "ROW_COUNT",
+        "STATUS",
+        "LAST_LOAD_TIME",
+        "PIPE_NAME",
+    ]
+    connection.rows = [
+        (
+            "orders_9.csv.gz",
+            2048,
+            100,
+            "Loaded",
+            "2026-03-01T08:00:00+00:00",
+            "LOAD_ORDERS",
+        )
+    ]
+    rows = gateway.pipe_history("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS")
+    statement, params = connection.executed[-1]
+    assert 'FROM TABLE("MYDB".INFORMATION_SCHEMA.COPY_HISTORY(' in statement
+    assert "TABLE_NAME => 'MYDB.PUBLIC.ORDERS'" in statement
+    assert params == ("LOAD_ORDERS",)
+    assert rows[0]["FILE_NAME"] == "orders_9.csv.gz"
 
 
 def test_background_priority_retries_but_never_reconnects_unattended() -> None:

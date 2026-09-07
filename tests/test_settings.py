@@ -11,23 +11,41 @@ from tcw.paths import settings_file as tcw_settings_file
 from tcw.settings import all_settings, config, configure
 
 from snowcone.paths import APP_NAME
-from snowcone.settings import CACHE_TTL, PAGE_SIZE, POOL_SIZE
+from snowcone.settings import (
+    CACHE_TTL,
+    PAGE_SIZE,
+    PIPE_HISTORY_FETCH_DAYS,
+    PIPE_HISTORY_SHOW_DAYS,
+    POOL_SIZE,
+)
 
 
-def test_the_three_settings_are_registered() -> None:
+def test_the_settings_are_registered() -> None:
     keys = {entry.key for entry in all_settings()}
-    assert {"cache_ttl", "pool_size", "page_size"} <= keys
+    assert {
+        "cache_ttl",
+        "pool_size",
+        "page_size",
+        "pipe_history_fetch_days",
+        "pipe_history_show_days",
+    } <= keys
 
 
 def test_they_are_grouped_the_way_the_dialog_renders_them() -> None:
     assert (CACHE_TTL.group, PAGE_SIZE.group) == ("Cache", "Cache")
     assert POOL_SIZE.group == "Connection"
+    assert (PIPE_HISTORY_FETCH_DAYS.group, PIPE_HISTORY_SHOW_DAYS.group) == (
+        "Cache",
+        "Cache",
+    )
 
 
 def test_their_defaults_are_the_documented_ones() -> None:
     assert CACHE_TTL.default == 900
     assert POOL_SIZE.default == 3
     assert PAGE_SIZE.default == 1000
+    assert PIPE_HISTORY_FETCH_DAYS.default == 90
+    assert PIPE_HISTORY_SHOW_DAYS.default == 90
 
 
 def test_a_ttl_of_zero_round_trips() -> None:

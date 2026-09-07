@@ -38,7 +38,9 @@ from snowcone.models import (
     Scope,
     ScopeKind,
     SFObject,
+    pipe_activity_scope,
     schemas_scope,
+    scope_ttl,
 )
 from snowcone.models import Database as DatabaseRow
 from snowcone.models import Role as RoleRow
@@ -261,8 +263,31 @@ _PIPE_ACTIVITY = TableSpec(
         "TABLE_SCHEMA_NAME",
         "TABLE_NAME",
     ),
-    key=("PIPE_CATALOG_NAME", "PIPE_SCHEMA_NAME", "PIPE_NAME"),
-    order_by=("PIPE_NAME",),
+    # One row per historical load, not per pipe -- see queries.pipe_activity.
+    key=(
+        "PIPE_CATALOG_NAME",
+        "PIPE_SCHEMA_NAME",
+        "PIPE_NAME",
+        "FILE_NAME",
+        "LAST_LOAD_TIME",
+    ),
+    order_by=("PIPE_NAME", "LAST_LOAD_TIME"),
+)
+
+_PIPE_HISTORY = TableSpec(
+    name="information_schema_copy_history",
+    columns=(
+        "FILE_NAME",
+        "FILE_SIZE",
+        "ROW_COUNT",
+        "STATUS",
+        "LAST_LOAD_TIME",
+        "PIPE_NAME",
+    ),
+    # _scope disambiguates by pipe -- the physical table holds every pipe's
+    # rows together, same as every other mirror table.
+    key=("_scope", "FILE_NAME", "LAST_LOAD_TIME"),
+    order_by=("LAST_LOAD_TIME",),
 )
 
 
@@ -281,6 +306,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _TABLE_STATS
         case ScopeKind.PIPE_ACTIVITY:
             return _PIPE_ACTIVITY
+        case ScopeKind.PIPE_HISTORY:
+            return _PIPE_HISTORY
         case ScopeKind.WAREHOUSES:
             return _WAREHOUSES
         case ScopeKind.ROLES:
@@ -485,6 +512,31 @@ class Repository:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def pipe_target_table(
+        self, database: str, schema: str, pipe: str
+    ) -> tuple[str, str, str] | None:
+        """The (catalog, schema, table) a pipe loads into, as (catalog,
+        schema, table) -- or None if nothing is known yet.
+
+        Read straight off whatever PIPE_ACTIVITY (ACCOUNT_USAGE.COPY_HISTORY)
+        already has cached for this pipe: Snowflake's own resolution, not a
+        guess. None means exactly that -- nothing cached, whether because the
+        schema's activity scope has never been fetched or because this pipe
+        genuinely has no load history at all -- and callers (PipeView,
+        FetchService._execute) treat it as "nothing to show yet", not an
+        error: a pipe that has simply never run is a normal, permanent state
+        for plenty of pipes, not a transient failure to retry.
+        """
+        for row in self.raw_rows(pipe_activity_scope(database, schema)):
+            if row.get("PIPE_NAME") != pipe:
+                continue
+            catalog = row.get("TABLE_CATALOG_NAME")
+            table_schema = row.get("TABLE_SCHEMA_NAME")
+            table = row.get("TABLE_NAME")
+            if catalog and table_schema and table:
+                return (str(catalog), str(table_schema), str(table))
+        return None
+
     def search_corpus(self, databases: Sequence[str]) -> list[tuple[str, ObjectRef]]:
         """Every searchable object across `databases` as (text, ref) pairs.
 
@@ -631,7 +683,7 @@ class Repository:
                     stale.append(scope)
                     continue
                 age = entry.age(now)
-                if age is None or age >= ttl:
+                if age is None or age >= scope_ttl(scope, ttl):
                     stale.append(scope)
         return stale
 

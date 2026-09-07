@@ -9,8 +9,10 @@ from snowcone.models import (
     databases_scope,
     objects_scope,
     pipe_activity_scope,
+    pipe_history_scope,
     roles_scope,
     schemas_scope,
+    scope_ttl,
     table_stats_scope,
     warehouses_scope,
 )
@@ -96,6 +98,42 @@ def test_pipe_activity_scope_key() -> None:
 def test_pipe_activity_scope_carries_no_object_kind() -> None:
     """Same regression as table_stats -- see that test's comment."""
     assert pipe_activity_scope("MYDB", "PUBLIC").object_kind is None
+
+
+def test_pipe_history_scope_key() -> None:
+    assert (
+        pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").key
+        == "pipe_history:MYDB.PUBLIC.LOAD_ORDERS"
+    )
+
+
+def test_pipe_history_scope_carries_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").object_kind is None
+
+
+def test_scope_ttl_leaves_an_ordinary_scope_untouched() -> None:
+    """Almost every scope kind has no override -- the caller's own TTL wins,
+    whatever it is."""
+    assert scope_ttl(table_stats_scope("MYDB", "PUBLIC"), 900) == 900
+    assert scope_ttl(databases_scope(), 0) == 0
+
+
+def test_scope_ttl_never_shortens_the_callers_own_ttl() -> None:
+    """PIPE_ACTIVITY's override is a floor, not a fixed value -- a caller
+    that already asks for something slower must not be sped up."""
+    generous = 30 * 86400
+    assert scope_ttl(pipe_activity_scope("MYDB", "PUBLIC"), generous) == generous
+
+
+def test_scope_ttl_extends_pipe_activitys_refresh_past_the_ordinary_cadence() -> None:
+    """13 days, one short of INFORMATION_SCHEMA.COPY_HISTORY's 14-day
+    retention -- see models.py's _TTL_OVERRIDES comment for the full
+    reasoning (the two sources must jointly cover every day with no gap)."""
+    ordinary = 900
+    effective = scope_ttl(pipe_activity_scope("MYDB", "PUBLIC"), ordinary)
+    assert effective > ordinary
+    assert effective == 13 * 86400
 
 
 def test_warehouses_and_roles_are_flat_scopes_like_databases() -> None:

@@ -12,6 +12,7 @@ from snowcone.format import (
     format_date,
     format_timestamp_full,
     format_timestamp_minutes,
+    parse_timestamp,
     truncate_middle,
 )
 
@@ -196,6 +197,24 @@ def test_format_timestamp_full_of_none_or_empty_is_blank() -> None:
 
 def test_format_timestamp_full_falls_back_to_the_raw_value() -> None:
     assert format_timestamp_full("not a timestamp") == "not a timestamp"
+
+
+def test_parse_timestamp_matches_format_timestamp_fulls_own_parsing() -> None:
+    value = "2026-01-02 13:45:07+00:00"
+    assert parse_timestamp(value) == datetime.fromisoformat(value).astimezone()
+
+
+def test_parse_timestamp_of_none_or_empty_is_none() -> None:
+    assert parse_timestamp(None) is None
+    assert parse_timestamp("") is None
+
+
+def test_parse_timestamp_of_unparseable_text_is_none_not_a_raise() -> None:
+    """Unlike the format_* functions, which fall back to the raw string for
+    display, a comparison has nothing sensible to fall back to -- callers
+    (e.g. picking the most recent of several rows) treat None as "loses
+    every comparison" rather than crashing on one bad row."""
+    assert parse_timestamp("not a timestamp") is None
 
 
 def test_truncate_middle_keeps_both_ends() -> None:

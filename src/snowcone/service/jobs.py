@@ -22,6 +22,7 @@ from typing import Any
 from snowcone.gateway.gateway import SnowflakeGateway
 from snowcone.gateway.queries import MAX_PAGE_SIZE
 from snowcone.models import Scope, ScopeKind
+from snowcone.settings import PIPE_HISTORY_FETCH_DAYS, config
 
 _sequence = itertools.count()
 
@@ -79,6 +80,7 @@ def fetch_page(
     limit: int,
     *,
     allow_reconnect: bool = True,
+    pipe_target: tuple[str, str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Fetch one page, returning (rows, next_cursor).
 
@@ -90,6 +92,13 @@ def fetch_page(
     background-priority job, so a dead pooled connection is never repaired by
     opening a new, possibly-interactive session while nobody is watching --
     see `ConnectionPool.acquire`.
+
+    `pipe_target` is only meaningful for ScopeKind.PIPE_HISTORY, whose query
+    needs the pipe's target table (catalog, schema, table) -- a piece of
+    context this function has no way to resolve itself (it only has a
+    gateway, not the repository, so it cannot look up cached data). The
+    caller (`FetchService._execute`) resolves it before calling here; every
+    other scope kind ignores this parameter.
     """
     match scope.kind:
         case ScopeKind.DATABASES:
@@ -143,10 +152,35 @@ def fetch_page(
         case ScopeKind.PIPE_ACTIVITY:
             assert scope.database is not None
             assert scope.schema is not None
-            # A schema's pipe count is bounded, same reasoning as TABLE_STATS.
+            # A schema's pipe-history row count is bounded (by the fetch
+            # window setting), same reasoning as TABLE_STATS.
+            fetch_days = config.get(PIPE_HISTORY_FETCH_DAYS)
             return (
                 gateway.pipe_activity(
-                    scope.database, scope.schema, allow_reconnect=allow_reconnect
+                    scope.database,
+                    scope.schema,
+                    fetch_days,
+                    allow_reconnect=allow_reconnect,
+                ),
+                None,
+            )
+        case ScopeKind.PIPE_HISTORY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            assert scope.table is not None  # the pipe's name
+            if pipe_target is None:
+                raise ValueError(
+                    f"cannot determine the target table for pipe {scope.table} "
+                    "(no cached pipe-activity data to resolve it from yet)"
+                )
+            target_catalog, target_schema, target_table = pipe_target
+            return (
+                gateway.pipe_history(
+                    target_catalog,
+                    target_schema,
+                    target_table,
+                    scope.table,
+                    allow_reconnect=allow_reconnect,
                 ),
                 None,
             )

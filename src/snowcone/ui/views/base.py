@@ -25,7 +25,7 @@ from textual.app import ComposeResult
 from textual.widget import Widget
 
 from snowcone.cache.repository import Repository
-from snowcone.models import ObjectKind, ObjectRef, Scope
+from snowcone.models import ObjectKind, ObjectRef, Scope, scope_ttl
 from snowcone.ui.messages import ScopeNeeded
 
 _registry: dict[ObjectKind, type[ObjectView]] = {}
@@ -63,7 +63,12 @@ class _ScopedView(Widget):
     def ensure(self, scope: Scope, ttl: float, *, interactive: bool = True) -> bool:
         """Ask for `scope` if it is missing or stale. Returns whether it asked."""
         age = self.repo.entry(scope).age()
-        if age is None or (ttl > 0 and age >= ttl):
+        # scope_ttl only ever lengthens ttl, and only for scope kinds with an
+        # override -- see its own docstring -- so a ttl of 0 (background
+        # refreshing disabled) still only fetches an unseen scope, exactly as
+        # before.
+        effective = scope_ttl(scope, ttl) if ttl > 0 else ttl
+        if age is None or (effective > 0 and age >= effective):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
             return True
         return False

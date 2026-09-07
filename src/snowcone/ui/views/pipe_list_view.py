@@ -29,12 +29,28 @@ from snowcone.format import (
     format_bytes,
     format_timestamp_full,
     format_timestamp_minutes,
+    parse_timestamp,
 )
-from snowcone.models import ObjectKind, Scope, pipe_activity_scope
+from snowcone.models import ObjectKind, ObjectRef, Scope, pipe_activity_scope
 from snowcone.settings import CACHE_TTL, config
+from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
 
 _COLUMNS = ("Name", "Rows", "Size", "Loaded", "Status", "Target Table", "Filename")
+
+
+def _is_more_recent(candidate: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether `candidate`'s LAST_LOAD_TIME is later than `current`'s.
+
+    An unparseable/missing timestamp never displaces an existing pick, and
+    never blocks one either -- it just loses every comparison either way.
+    """
+    candidate_ts = parse_timestamp(candidate.get("LAST_LOAD_TIME"))
+    if candidate_ts is None:
+        return False
+    current_ts = parse_timestamp(current.get("LAST_LOAD_TIME"))
+    return current_ts is None or candidate_ts > current_ts
+
 
 #: Which merged-row field a tooltip-bearing column's full value comes from,
 #: by column index. Every other column has no tooltip.
@@ -95,6 +111,19 @@ class PipeListView(CategoryView):
         yield Label(f"{self.scope.database}.{self.scope.schema}", id="context-title")
         yield Static("Pipes", id="context-detail")
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Enter on a row opens that pipe's detail view, revealed in the tree.
+
+        Reuses the exact path a search hit already takes (`ObjectSelected` ->
+        `MainScreen._select` -> `tree.reveal` + `detail.show`), so this needs
+        no new message and no MainScreen change.
+        """
+        name = event.row_key.value
+        if name is None:
+            return
+        ref = ObjectRef(ObjectKind.PIPE, self.scope.database, self.scope.schema, name)
+        self.post_message(ObjectSelected(ref))
+
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.scope.database, self.scope.schema)
 
@@ -109,11 +138,21 @@ class PipeListView(CategoryView):
         self.ensure(self.scope, ttl)
         activity_scope = self.activity_scope()
         self.ensure(activity_scope, ttl)
-        # Keyed by PIPE_NAME so a missing/failed activity pass just means an
-        # empty dict here -- every row still renders from show_pipes alone.
-        activity_by_name = {
-            row["PIPE_NAME"]: row for row in self.repo.raw_rows(activity_scope)
-        }
+        # The cache holds one row per historical load (see
+        # queries.pipe_activity), not one per pipe -- reduced to each pipe's
+        # single most recent row here, in Python, rather than in SQL, since
+        # a single pipe's detail view needs the full history from the same
+        # scope. Keyed by PIPE_NAME so a missing/failed activity pass just
+        # means an empty dict here -- every row still renders from
+        # show_pipes alone.
+        activity_by_name: dict[str, dict[str, Any]] = {}
+        for row in self.repo.raw_rows(activity_scope):
+            name = row.get("PIPE_NAME")
+            if not name:
+                continue
+            current = activity_by_name.get(name)
+            if current is None or _is_more_recent(row, current):
+                activity_by_name[name] = row
 
         table = self.query_one("#detail-table-list", DataTable)
         table.clear(columns=True)

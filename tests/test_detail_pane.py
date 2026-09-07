@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,11 @@ from snowcone.models import (
     columns_scope,
     objects_scope,
     pipe_activity_scope,
+    pipe_history_scope,
     table_stats_scope,
 )
-from snowcone.ui.messages import ScopeNeeded
+from snowcone.settings import PIPE_HISTORY_SHOW_DAYS, config
+from snowcone.ui.messages import ObjectSelected, ScopeNeeded
 from snowcone.ui.views.base import registered_kinds, view_for
 from snowcone.ui.views.pipe_list_view import PipeListView
 from snowcone.ui.views.pipe_view import PipeView
@@ -42,12 +45,16 @@ class Harness(App[None]):
         super().__init__()
         self._repo = repo
         self.needed: list[str] = []
+        self.selected: list[ObjectRef] = []
 
     def compose(self) -> ComposeResult:
         yield DetailPane(self._repo, id="detail")
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         self.needed.append(event.scope.key)
+
+    def on_object_selected(self, event: ObjectSelected) -> None:
+        self.selected.append(event.ref)
 
 
 def load(repo: Repository, scope, rows) -> None:
@@ -152,7 +159,38 @@ def put_pipe_activity(repo: Repository, pipe: str, **extra) -> None:
         "TABLE_NAME": "ORDERS",
     }
     row.update(extra)
-    load(repo, pipe_activity_scope("MYDB", "PUBLIC"), [row])
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+
+
+def put_pipe_history(repo: Repository, pipe: str, **extra) -> None:
+    row = {
+        "FILE_NAME": "orders_9.csv.gz",
+        "FILE_SIZE": 2048,
+        "ROW_COUNT": 100,
+        "STATUS": "Loaded",
+        "LAST_LOAD_TIME": "2026-03-01 08:00:00",
+        "PIPE_NAME": pipe,
+    }
+    row.update(extra)
+    scope = pipe_history_scope("MYDB", "PUBLIC", pipe)
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
 
 
 # ---------------------------------------------------------------- registry
@@ -366,7 +404,7 @@ async def test_the_pane_reports_the_scopes_it_reads(repo) -> None:
 # --------------------------------------------------------------- pipe view
 
 
-async def test_a_pipe_shows_its_definition_not_columns(repo) -> None:
+async def test_a_pipe_shows_load_history_not_columns(repo) -> None:
     """A different shape entirely -- which is what the registry is for."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     app = Harness(repo)
@@ -374,42 +412,195 @@ async def test_a_pipe_shows_its_definition_not_columns(repo) -> None:
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        assert "COPY INTO" in str(pane.query_one("#pipe-definition", Static).render())
+        assert pane.query_one("#pipe-history", DataTable)
         assert len(pane.query("#detail-columns")) == 0
 
 
-async def test_a_healthy_pipe_hides_the_problem_banner(repo) -> None:
-    ref = put_pipe(repo, "LOAD_ORDERS")
-    app = Harness(repo)
-    async with app.run_test(size=(100, 30)) as pilot:
-        pane = app.query_one(DetailPane)
-        pane.show(ref)
-        await pilot.pause()
-        assert pane.query_one("#pipe-problem", Static).display is False
-
-
-async def test_a_stopped_pipe_says_so_loudly(repo) -> None:
+async def test_a_stopped_pipes_status_says_so(repo) -> None:
     """A stopped pipe looks exactly like a healthy one until you read
-    invalid_reason, which is why it gets a banner of its own."""
+    invalid_reason -- compact enough to live in the context bar rather than
+    a banner of its own, now that the body is the history table."""
     ref = put_pipe(repo, "LOAD_ORDERS", invalid_reason="stage dropped")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
-        pane.show(ref)
+        view = pane.show(ref)
         await pilot.pause()
-        banner = pane.query_one("#pipe-problem", Static)
-        assert banner.display is True
-        assert "stage dropped" in str(banner.render())
+        assert "stopped: stage dropped" in view._status()
 
 
-async def test_a_pipe_needs_no_extra_fetch(repo) -> None:
-    """Everything a pipe shows came with the SHOW PIPES row already cached."""
+async def test_opening_a_pipe_requests_its_activity_scope(repo) -> None:
+    """The base facts came with the SHOW PIPES row already cached, but load
+    history is backed by its own SELECT scope -- see pipe_view.py -- and is
+    requested the moment the view opens, same as a table's columns scope."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
-    assert app.needed == []
+    assert pipe_activity_scope("MYDB", "PUBLIC").key in app.needed
+
+
+async def test_a_pipe_with_no_activity_data_never_requests_history_or_errors(
+    repo,
+) -> None:
+    """A pipe that has never loaded anything has no cached activity data, so
+    its target table cannot be resolved (Snowflake exposes it nowhere else --
+    see Repository.pipe_target_table). That must not repeatedly fail a fetch
+    it can never succeed at: history_scope is simply never requested until a
+    target becomes resolvable, and the view shows an empty table instead of
+    an error."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#pipe-history", DataTable).row_count == 0
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").key not in app.needed
+
+
+async def test_a_pipe_with_activity_data_requests_its_history_scope_too(repo) -> None:
+    """Once account_usage_copy_history has a row for this pipe, its target
+    table is resolvable and history_scope becomes worth asking for."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").key in app.needed
+
+
+async def test_a_pipes_history_table_is_empty_with_no_activity_or_history_cached(
+    repo,
+) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#pipe-history", DataTable).row_count == 0
+
+
+def _days_ago(days: float) -> str:
+    """A relative, always-recent-enough timestamp -- these tests filter by
+    the show window against the real current time, so a fixed calendar date
+    would eventually age out of it."""
+    return (datetime.now().astimezone() - timedelta(days=days)).isoformat()
+
+
+async def test_a_pipes_history_table_lists_rows_from_both_sources(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=_days_ago(60),
+        ROW_COUNT=42,
+    )
+    put_pipe_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_9.csv.gz",
+        LAST_LOAD_TIME=_days_ago(5),
+        ROW_COUNT=100,
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#pipe-history", DataTable)
+        assert table.row_count == 2
+        # Sorted newest first.
+        assert table.get_cell_at((0, 4)).plain == "orders_9.csv.gz"
+        assert table.get_cell_at((1, 4)).plain == "orders_1.csv.gz"
+
+
+async def test_a_pipes_history_ignores_another_pipes_activity_rows(repo) -> None:
+    """account_usage_copy_history holds every pipe's rows for the schema
+    together -- a single pipe's view must filter to its own name."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_OTHER", FILE_NAME="other.csv.gz")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#pipe-history", DataTable).row_count == 0
+
+
+async def test_the_near_real_time_source_wins_on_an_overlapping_row(repo) -> None:
+    """Merged by (FILE_NAME, LAST_LOAD_TIME) -- the near-real-time source is
+    inserted last, so an identical key from the backfill is overlaid rather
+    than duplicated."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    when = _days_ago(10)
+    put_pipe_activity(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=when,
+        STATUS="Load in progress",
+    )
+    put_pipe_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=when,
+        STATUS="Loaded",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#pipe-history", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 3)).plain == "Loaded"
+
+
+async def test_rows_older_than_the_show_window_are_hidden_but_stay_cached(repo) -> None:
+    """The display window can be shorter than the fetch window on purpose --
+    shrinking it is a display-only change, since the wider range is still in
+    the cache either way (see settings.PIPE_HISTORY_SHOW_DAYS)."""
+    config.set(PIPE_HISTORY_SHOW_DAYS, 30)
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    old = datetime.now().astimezone() - timedelta(days=31)
+    put_pipe_activity(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="ancient.csv.gz",
+        LAST_LOAD_TIME=old.isoformat(),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#pipe-history", DataTable).row_count == 0
+    # Still in the cache -- only hidden from this paint.
+    assert repo.raw_rows(pipe_activity_scope("MYDB", "PUBLIC"))
+
+
+def test_pipe_view_scopes_always_includes_activity(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    view = PipeView(repo, ref)
+    assert pipe_activity_scope("MYDB", "PUBLIC") in view.scopes()
+
+
+def test_pipe_view_scopes_excludes_history_until_a_target_is_resolvable(repo) -> None:
+    """This is what keeps the background sweep (MainScreen._sweep, which
+    watches self.detail.scopes()) from repeatedly retrying a fetch that has
+    no target table to give -- not just the interactive ensure() path."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    view = PipeView(repo, ref)
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS") not in view.scopes()
+
+    put_pipe_activity(repo, "LOAD_ORDERS")
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS") in view.scopes()
 
 
 async def test_each_view_supplies_its_own_context(repo) -> None:
@@ -505,6 +696,26 @@ def test_table_list_view_scopes_includes_the_stats_scope(repo) -> None:
     scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
     view = TableListView(repo, scope)
     assert table_stats_scope("MYDB", "PUBLIC") in view.scopes()
+
+
+async def test_pressing_enter_on_a_table_row_selects_it(repo) -> None:
+    """Reuses the exact path a search hit takes (ObjectSelected ->
+    MainScreen._select) -- this only has to prove the row posts the message
+    with the right ref; the reveal/show wiring itself is search's own,
+    already-tested plumbing."""
+    put_table(repo, "ORDERS")
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.selected == [ObjectRef(ObjectKind.TABLE, "MYDB", "PUBLIC", "ORDERS")]
 
 
 async def test_moving_between_two_schemas_tables_reuses_the_list_view(repo) -> None:
@@ -618,6 +829,24 @@ def test_pipe_list_view_scopes_includes_the_activity_scope(repo) -> None:
     scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
     view = PipeListView(repo, scope)
     assert pipe_activity_scope("MYDB", "PUBLIC") in view.scopes()
+
+
+async def test_pressing_enter_on_a_pipe_row_selects_it(repo) -> None:
+    """See test_pressing_enter_on_a_table_row_selects_it -- same handler,
+    same reasoning, added to pipes only per the current request."""
+    put_pipe(repo, "LOAD_ORDERS")
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.selected == [ObjectRef(ObjectKind.PIPE, "MYDB", "PUBLIC", "LOAD_ORDERS")]
 
 
 async def test_an_unregistered_category_kind_shows_a_placeholder(repo) -> None:

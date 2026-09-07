@@ -61,13 +61,21 @@ class ScopeKind(StrEnum):
     #: fetch SHOW TABLES, not this SELECT -- columns_scope avoids the same
     #: trap the same way, for a table's own single-object fetch.
     TABLE_STATS = "table_stats"
-    #: A schema's pipes' most recent load, sourced by a real SELECT against
+    #: A schema's pipes' load history (bounded by the "pipe history fetch
+    #: window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
     #: instance of the dual-source pattern TABLE_STATS established (see
     #: DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
     #: its own mirror table. Deliberately carries no object_kind, for exactly
-    #: the same reason TABLE_STATS does not -- see that comment.
+    #: the same reason TABLE_STATS does not -- see that comment. Its own data
+    #: barely changes on the ordinary CACHE_TTL cadence, so it carries a much
+    #: longer effective TTL -- see `scope_ttl` below.
     PIPE_ACTIVITY = "pipe_activity"
+    #: One pipe's near-real-time load history (the last 14 days -- Snowflake's
+    #: own retention limit for the function backing it), sourced by a real
+    #: SELECT against INFORMATION_SCHEMA.COPY_HISTORY. Scoped to one pipe like
+    #: COLUMNS is scoped to one table -- see `pipe_history_scope`.
+    PIPE_HISTORY = "pipe_history"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
 
@@ -124,6 +132,8 @@ class Scope:
                 return f"table_stats:{self.database}.{self.schema}"
             case ScopeKind.PIPE_ACTIVITY:
                 return f"pipe_activity:{self.database}.{self.schema}"
+            case ScopeKind.PIPE_HISTORY:
+                return f"pipe_history:{self.database}.{self.schema}.{self.table}"
             case ScopeKind.WAREHOUSES:
                 return "warehouses"
             case ScopeKind.ROLES:
@@ -167,12 +177,52 @@ def pipe_activity_scope(database: str, schema: str) -> Scope:
     return Scope(ScopeKind.PIPE_ACTIVITY, database=database, schema=schema)
 
 
+def pipe_history_scope(database: str, schema: str, pipe: str) -> Scope:
+    # `table` holds the pipe's name here -- the generic "one object this
+    # scope narrows to" slot, the same reuse `columns_scope` makes for a
+    # table's name.
+    return Scope(ScopeKind.PIPE_HISTORY, database=database, schema=schema, table=pipe)
+
+
 def warehouses_scope() -> Scope:
     return Scope(ScopeKind.WAREHOUSES)
 
 
 def roles_scope() -> Scope:
     return Scope(ScopeKind.ROLES)
+
+
+#: Refresh cadence, in seconds, for a scope whose own data does not change on
+#: the ordinary CACHE_TTL cadence -- see ScopeKind.PIPE_ACTIVITY's comment. A
+#: plain constant, not a Setting: it is a correctness bound, not a
+#: preference. 13 days, one short of INFORMATION_SCHEMA.COPY_HISTORY's 14-day
+#: retention limit (`gateway.queries.PIPE_HISTORY_RETENTION_DAYS`) -- the two
+#: sources must jointly cover every day with no gap between them, and
+#: ACCOUNT_USAGE's own ingestion lag (up to a few hours) eats into a boundary
+#: cut exactly at 14, so this stays one day inside it.
+_TTL_OVERRIDES: dict[ScopeKind, float] = {
+    ScopeKind.PIPE_ACTIVITY: 13 * 86400,
+}
+
+
+def scope_ttl(scope: Scope, default: float) -> float:
+    """The TTL that actually governs `scope`'s staleness.
+
+    Almost every scope just uses the caller's TTL (the CACHE_TTL setting).
+    The rare exception is a scope kind in `_TTL_OVERRIDES`, whose own data
+    does not change on that cadence -- refreshing it that often would just
+    repeat the same round trip for no new data. Never faster than the
+    caller's own default, only ever slower -- an aggressive default TTL is
+    still honoured for every scope that has no override.
+
+    Called from both `Repository.stale_scopes` (the background sweep) and
+    `_ScopedView.ensure` (a view's own paint-time check), so the override
+    applies uniformly regardless of which path is asking.
+    """
+    override = _TTL_OVERRIDES.get(scope.kind)
+    if override is None:
+        return default
+    return max(default, override)
 
 
 @dataclass(frozen=True)

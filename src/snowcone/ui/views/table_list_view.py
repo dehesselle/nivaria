@@ -31,8 +31,9 @@ from snowcone.format import (
     format_timestamp_full,
     format_timestamp_minutes,
 )
-from snowcone.models import ObjectKind, Scope, table_stats_scope
+from snowcone.models import ObjectKind, ObjectRef, Scope, table_stats_scope
 from snowcone.settings import CACHE_TTL, config
+from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
 
 _COLUMNS = ("Name", "Rows", "Size", "Created", "Last DDL", "Last Altered", "Comment")
@@ -103,6 +104,15 @@ class TableListView(CategoryView):
     def compose_context(self) -> ComposeResult:
         yield Label(f"{self.scope.database}.{self.scope.schema}", id="context-title")
         yield Static("Tables", id="context-detail")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Enter on a row opens that table's detail view, revealed in the
+        tree -- see PipeListView's identical handler for the full reasoning."""
+        name = event.row_key.value
+        if name is None:
+            return
+        ref = ObjectRef(ObjectKind.TABLE, self.scope.database, self.scope.schema, name)
+        self.post_message(ObjectSelected(ref))
 
     def stats_scope(self) -> Scope:
         return table_stats_scope(self.scope.database, self.scope.schema)
