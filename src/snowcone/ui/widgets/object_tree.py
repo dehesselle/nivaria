@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from rich.text import Text
+from textual.geometry import Region
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
@@ -174,8 +175,31 @@ class ObjectTree(Tree[NodeData]):
             return False
         node.expand()
         self._apply(node, self._desired(node))
-        self.call_after_refresh(self.move_cursor, node)
+        self.call_after_refresh(self._settle_on_schema, node)
         return True
+
+    def _settle_on_schema(self, node: TreeNode[NodeData]) -> None:
+        """Put the cursor on `node` and scroll so its just-expanded category
+        children are visible too, not only the schema's own line.
+
+        `move_cursor`'s default scroll (`Tree.scroll_to_node`) treats the
+        cursor as a single line and scrolls the least distance to bring only
+        that line into view -- for a downward reveal that pins the schema at
+        the very last visible row, pushing every category it just gained off
+        the bottom of the screen. Scrolling to a region spanning the schema
+        and its children instead keeps both ends in view when they fit, and
+        anchors on the schema's own line rather than the last child when they
+        do not (`Region.crop_size`, which the scroll math crops through,
+        keeps a region's top-left and only shrinks toward it).
+        """
+        self.move_cursor(node)
+        label = self._get_label_region(node._line)
+        if label is None:
+            return
+        span = Region(label.x, label.y, label.width, label.height + len(node.children))
+        self.scroll_to_region(
+            span, animate=False, force=True, origin_visible=False, x_axis=False
+        )
 
     # ---------------------------------------------------------- cache input
 

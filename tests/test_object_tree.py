@@ -527,6 +527,29 @@ async def test_reveal_schema_expands_it_and_moves_the_cursor(repo) -> None:
         assert tree.cursor_node.is_expanded
 
 
+async def test_reveal_schema_scrolls_the_expanded_categories_into_view(repo) -> None:
+    """A schema far down a long list used to land at the very last visible
+    row -- the least scroll needed to bring just that one line into view --
+    which pushed every category it had just gained off the bottom of the
+    screen. The reveal should show the schema's line and its new children
+    together, not just the schema on its own."""
+    schemas = [f"SCHEMA{i:03d}" for i in range(50)]
+    put_schemas(repo, "MYDB", *schemas)
+    app = Harness(repo)
+    async with app.run_test(size=(80, 15)) as pilot:
+        tree = await open_tree(app, pilot)
+        assert tree.reveal_schema(SchemaRef(database="MYDB", name="SCHEMA040"))
+        await pilot.pause()
+
+        node = tree.cursor_node
+        assert node is not None
+        assert node.data.key == "SCHEMA040"
+        last_child_line = node._line + len(node.children)
+        visible = range(int(tree.scroll_y), int(tree.scroll_y) + tree.size.height)
+        assert node._line in visible
+        assert last_child_line in visible
+
+
 async def test_reveal_schema_fails_for_a_different_database(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     app = Harness(repo)
