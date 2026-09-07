@@ -45,12 +45,7 @@ class DetailPane(Vertical):
         return self._scope
 
     def show(self, ref: ObjectRef) -> ObjectView | None:
-        """Point the pane at an object. Returns the view now showing it.
-
-        The return value is how the screen knows whether the context bar above
-        needs rebuilding: a returned view identical to last time means the
-        context is still correct.
-        """
+        """Point the pane at an object. Returns the view now showing it."""
         self._ref = ref
         self._scope = None
         view_class = view_for(ref.kind)

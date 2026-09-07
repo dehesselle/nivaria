@@ -6,10 +6,10 @@ trees resident at all times, each needing a coherent "nothing selected" state,
 each subscribing to cache updates it does not care about. Mounting on demand
 keeps exactly one view alive -- the one being looked at.
 
-The pairing rule that makes this worth it: a view owns *both* its detail body
-and whatever it contributes to the context bar above. They are one concept
-("what you can do with a pipe"), and splitting them across two registries would
-guarantee they drift apart.
+A view owns its whole body: there is one registry, one contract
+(`compose()`/`update_content()`), not a second one for a separate context
+strip. Whatever a view wants to show -- including its own identity or status
+-- is content it composes itself, wherever in its own body it belongs.
 
 Registration is a module-level dict populated by a decorator at import time.
 No entry points, nothing to configure -- adding a kind is one new module plus
@@ -21,7 +21,6 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import ClassVar
 
-from textual.app import ComposeResult
 from textual.widget import Widget
 
 from snowcone.cache.repository import Repository
@@ -49,10 +48,6 @@ class _ScopedView(Widget):
     def scopes(self) -> list[Scope]:
         """Cache scopes this view reads, for freshness and the countdown."""
         return []
-
-    def compose_context(self) -> ComposeResult:
-        """Widgets this view contributes to the context bar above."""
-        yield from ()
 
     @abstractmethod
     def update_content(self) -> None:

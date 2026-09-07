@@ -1,10 +1,11 @@
-"""Detail view for pipes: load history.
+"""Detail view for pipes: status, load history, and definition.
 
 Deliberately a different shape from the column views: a pipe has no columns,
-so its detail body is its load history instead -- one row per file it has
-loaded, the same dual-source pattern `pipe_list_view.py` uses. The pipe's own
-running/stopped state (`invalid_reason`) is compact enough to live in the
-context bar (`_status`) rather than the body -- see `compose_context`.
+so its body is tabbed instead -- Status (pipe/status/invalid_reason, one row),
+Load history (one row per file it has loaded, the same dual-source pattern
+`pipe_list_view.py` uses, plus a detail panel below for whatever the
+highlighted row wants to say about itself -- currently its error, if any),
+and Definition (the pipe's raw COPY INTO SQL, unformatted).
 
 The history merges two sources: `pipe_activity_scope` (SNOWFLAKE.
 ACCOUNT_USAGE.COPY_HISTORY, the full backfill within the "pipe history fetch
@@ -35,10 +36,20 @@ from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Label, Static
+from textual.binding import Binding
+from textual.coordinate import Coordinate
+from textual.widgets import DataTable, Static, TabbedContent, TabPane, TextArea
+from textual.widgets.data_table import CellDoesNotExist
 
+from snowcone.cache.repository import Repository
 from snowcone.format import format_bytes, format_timestamp_minutes, parse_timestamp
-from snowcone.models import ObjectKind, Scope, pipe_activity_scope, pipe_history_scope
+from snowcone.models import (
+    ObjectKind,
+    ObjectRef,
+    Scope,
+    pipe_activity_scope,
+    pipe_history_scope,
+)
 from snowcone.settings import CACHE_TTL, PIPE_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
 
@@ -49,14 +60,42 @@ _HISTORY_COLUMNS = ("Rows", "Size", "Loaded", "Status", "Filename")
 class PipeView(ObjectView):
     OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.PIPE
 
-    def compose(self) -> ComposeResult:
-        table: DataTable[Text] = DataTable(id="pipe-history", cursor_type="row")
-        table.zebra_stripes = True
-        yield table
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("s", "show_tab('status')", "Status", show=False),
+        Binding("l", "show_tab('history')", "Load history", show=False),
+        Binding("d", "show_tab('definition')", "Definition", show=False),
+    ]
 
-    def compose_context(self) -> ComposeResult:
-        yield Label(self.ref.fqn, id="context-title")
-        yield Static(self._status(), id="context-detail")
+    def __init__(self, repo: Repository, ref: ObjectRef) -> None:
+        super().__init__(repo, ref)
+        #: This paint's history rows, keyed by the row key stamped in
+        #: update_content -- looked back up when a row is highlighted.
+        self._history_rows: dict[str, dict[str, Any]] = {}
+
+    def compose(self) -> ComposeResult:
+        with TabbedContent(initial="tab-status"):
+            with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
+                status: DataTable[Text] = DataTable(id="pipe-status", cursor_type="row")
+                status.add_columns("Pipe", "Status", "Invalid Reason")
+                yield status
+            with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
+                history: DataTable[Text] = DataTable(
+                    id="pipe-history", cursor_type="row"
+                )
+                history.zebra_stripes = True
+                yield history
+                yield Static("", id="pipe-history-detail")
+            with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
+                yield TextArea(
+                    "",
+                    id="pipe-definition",
+                    read_only=True,
+                    soft_wrap=True,
+                    show_line_numbers=False,
+                )
+
+    def action_show_tab(self, tab: str) -> None:
+        self.query_one(TabbedContent).active = f"tab-{tab}"
 
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.ref.database, self.ref.schema)
@@ -81,6 +120,22 @@ class PipeView(ObjectView):
         return scopes
 
     def update_content(self) -> None:
+        self._update_status()
+        self._update_history()
+        self._update_definition()
+
+    def _update_status(self) -> None:
+        row = self.repo.object_detail(self.ref)
+        table = self.query_one("#pipe-status", DataTable)
+        table.clear()
+        if row is None:
+            table.add_row(Text(self.ref.name), Text("not cached"), Text(""))
+            return
+        invalid_reason = row.get("invalid_reason") or ""
+        status = "stopped" if invalid_reason else "running"
+        table.add_row(Text(self.ref.name), Text(status), Text(invalid_reason))
+
+    def _update_history(self) -> None:
         ttl = config.get(CACHE_TTL)
         activity_scope = self.activity_scope()
         self.ensure(activity_scope, ttl)
@@ -113,7 +168,10 @@ class PipeView(ObjectView):
         table = self.query_one("#pipe-history", DataTable)
         table.clear(columns=True)
         table.add_columns(*_HISTORY_COLUMNS)
-        for _, r in dated:
+        self._history_rows = {}
+        for index, (_, r) in enumerate(dated):
+            key = str(index)
+            self._history_rows[key] = r
             row_count = r.get("ROW_COUNT")
             table.add_row(
                 Text(f"{row_count:,}" if row_count is not None else ""),
@@ -121,11 +179,47 @@ class PipeView(ObjectView):
                 Text(format_timestamp_minutes(r.get("LAST_LOAD_TIME"))),
                 Text(r.get("STATUS") or ""),
                 Text(r.get("FILE_NAME") or ""),
+                key=key,
             )
+        self._sync_history_detail(table.cursor_row)
 
-    def _status(self) -> str:
+    def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)
-        if row is None:
-            return "not cached"
-        reason = row.get("invalid_reason")
-        return f"stopped: {reason}" if reason else "running"
+        text = (row or {}).get("definition") or "-- not cached"
+        self.query_one("#pipe-definition", TextArea).text = text
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._sync_history_detail_from_key(
+            event.row_key.value if event.row_key is not None else None
+        )
+
+    def _sync_history_detail(self, cursor_row: int) -> None:
+        """Resync against whatever the cursor is actually on after a repaint
+        -- not left to RowHighlighted alone, since it's not guaranteed to
+        re-fire on a table.clear()-and-repopulate while a row is already
+        highlighted."""
+        table = self.query_one("#pipe-history", DataTable)
+        try:
+            row_key, _ = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
+        except CellDoesNotExist:
+            self._show_history_detail(None)
+            return
+        self._sync_history_detail_from_key(row_key.value)
+
+    def _sync_history_detail_from_key(self, key: str | None) -> None:
+        row = self._history_rows.get(key) if key is not None else None
+        message = row.get("FIRST_ERROR_MESSAGE") if row else None
+        if not message:
+            self._show_history_detail(None)
+            return
+        line = row.get("FIRST_ERROR_LINE_NUMBER")
+        text = f"Line {line}: {message}" if line is not None else message
+        self._show_history_detail(text)
+
+    def _show_history_detail(self, text: str | None) -> None:
+        panel = self.query_one("#pipe-history-detail", Static)
+        if text:
+            panel.update(Text(text))
+            panel.display = True
+        else:
+            panel.display = False

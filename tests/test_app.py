@@ -114,15 +114,13 @@ def _repo(tmp_path) -> Repository:
     return Repository(database)
 
 
-async def test_the_main_screen_has_its_three_panes(tmp_path) -> None:
+async def test_the_main_screen_has_its_two_panes(tmp_path) -> None:
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.app.push_screen(MainScreen(_repo(tmp_path)))
         await pilot.pause()
         screen = pilot.app.screen
-        assert screen.query_one("#left")
         assert screen.query_one("#tree")
-        assert screen.query_one("#context")
         assert screen.query_one("#detail")
 
 

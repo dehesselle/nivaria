@@ -21,7 +21,7 @@ from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.coordinate import Coordinate
-from textual.widgets import DataTable, Label, Static
+from textual.widgets import DataTable
 from textual.widgets.data_table import CellDoesNotExist
 
 from snowcone.cache.repository import Repository
@@ -100,10 +100,6 @@ class TableListView(CategoryView):
         )
         table.zebra_stripes = True
         yield table
-
-    def compose_context(self) -> ComposeResult:
-        yield Label(f"{self.scope.database}.{self.scope.schema}", id="context-title")
-        yield Static("Tables", id="context-detail")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Enter on a row opens that table's detail view, revealed in the

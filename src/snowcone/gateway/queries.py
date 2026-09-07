@@ -200,7 +200,8 @@ def pipe_activity(fetch_days: int) -> str:
     return (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
         "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
-        "TABLE_SCHEMA_NAME, TABLE_NAME "
+        "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
+        "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
         f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP())"
@@ -235,7 +236,8 @@ def pipe_history(target_catalog: str, target_schema: str, target_table: str) -> 
     target = f"{quote_identifier(target_catalog)}.INFORMATION_SCHEMA.COPY_HISTORY"
     qualified_table = quote_literal(f"{target_catalog}.{target_schema}.{target_table}")
     return (
-        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME "
+        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME, "
+        "FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
         f"FROM TABLE({target}("
         f"TABLE_NAME => {qualified_table}, "
         "START_TIME => DATEADD('day', "

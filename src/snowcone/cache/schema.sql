@@ -236,20 +236,22 @@ CREATE INDEX IF NOT EXISTS information_schema_tables_scope
 -- pipe's detail view (which shows the whole history, merged with the
 -- near-real-time information_schema_copy_history below).
 CREATE TABLE IF NOT EXISTS account_usage_copy_history (
-    PIPE_CATALOG_NAME  TEXT NOT NULL,
-    PIPE_SCHEMA_NAME   TEXT NOT NULL,
-    PIPE_NAME          TEXT NOT NULL,
-    FILE_NAME          TEXT,
-    FILE_SIZE          INTEGER,
-    ROW_COUNT          INTEGER,
-    STATUS             TEXT,
-    LAST_LOAD_TIME     TEXT,
-    TABLE_CATALOG_NAME TEXT,
-    TABLE_SCHEMA_NAME  TEXT,
-    TABLE_NAME         TEXT,
-    _scope             TEXT    NOT NULL,
-    _generation        INTEGER NOT NULL,
-    _fetched_at        REAL    NOT NULL,
+    PIPE_CATALOG_NAME       TEXT NOT NULL,
+    PIPE_SCHEMA_NAME        TEXT NOT NULL,
+    PIPE_NAME               TEXT NOT NULL,
+    FILE_NAME               TEXT,
+    FILE_SIZE               INTEGER,
+    ROW_COUNT               INTEGER,
+    STATUS                  TEXT,
+    LAST_LOAD_TIME          TEXT,
+    TABLE_CATALOG_NAME      TEXT,
+    TABLE_SCHEMA_NAME       TEXT,
+    TABLE_NAME              TEXT,
+    FIRST_ERROR_MESSAGE     TEXT,
+    FIRST_ERROR_LINE_NUMBER INTEGER,
+    _scope                  TEXT    NOT NULL,
+    _generation             INTEGER NOT NULL,
+    _fetched_at             REAL    NOT NULL,
     PRIMARY KEY (PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, LAST_LOAD_TIME)
 );
 CREATE INDEX IF NOT EXISTS account_usage_copy_history_scope
@@ -263,15 +265,17 @@ CREATE INDEX IF NOT EXISTS account_usage_copy_history_scope
 -- history together. This column set is likewise NOT verified against a live
 -- account.
 CREATE TABLE IF NOT EXISTS information_schema_copy_history (
-    FILE_NAME      TEXT,
-    FILE_SIZE      INTEGER,
-    ROW_COUNT      INTEGER,
-    STATUS         TEXT,
-    LAST_LOAD_TIME TEXT,
-    PIPE_NAME      TEXT,
-    _scope         TEXT    NOT NULL,
-    _generation    INTEGER NOT NULL,
-    _fetched_at    REAL    NOT NULL,
+    FILE_NAME               TEXT,
+    FILE_SIZE               INTEGER,
+    ROW_COUNT               INTEGER,
+    STATUS                  TEXT,
+    LAST_LOAD_TIME          TEXT,
+    PIPE_NAME               TEXT,
+    FIRST_ERROR_MESSAGE     TEXT,
+    FIRST_ERROR_LINE_NUMBER INTEGER,
+    _scope                  TEXT    NOT NULL,
+    _generation             INTEGER NOT NULL,
+    _fetched_at             REAL    NOT NULL,
     PRIMARY KEY (_scope, FILE_NAME, LAST_LOAD_TIME)
 );
 CREATE INDEX IF NOT EXISTS information_schema_copy_history_scope

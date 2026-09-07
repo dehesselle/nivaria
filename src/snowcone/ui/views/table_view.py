@@ -6,9 +6,9 @@ from typing import ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Label, Static
+from textual.widgets import DataTable
 
-from snowcone.format import format_bytes, format_data_type
+from snowcone.format import format_data_type
 from snowcone.models import ObjectKind, Scope, columns_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.views.base import ObjectView, register_view
@@ -17,10 +17,14 @@ _COLUMNS = ("Column", "Type", "Null", "Default", "Comment")
 
 
 class ColumnsView(ObjectView):
-    """Shared body for the kinds whose detail is a column list."""
+    """Shared body for the kinds whose detail is a column list.
+
+    Rows and size and comment for the table itself (not its columns) are
+    not shown here -- they're already visible one step earlier, as columns
+    in TableListView's own list of every table in the schema.
+    """
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="detail-summary")
         table: DataTable[Text] = DataTable(id="detail-columns", cursor_type="row")
         table.zebra_stripes = True
         yield table
@@ -31,16 +35,9 @@ class ColumnsView(ObjectView):
     def scopes(self) -> list[Scope]:
         return [self.columns_scope()]
 
-    def compose_context(self) -> ComposeResult:
-        yield Label(self.ref.fqn, id="context-title")
-        yield Static(self._facts(), id="context-detail")
-
     def update_content(self) -> None:
         scope = self.columns_scope()
         self.ensure(scope, config.get(CACHE_TTL))
-        # The context bar above already carries the name; repeating it
-        # here would spend a line of a small pane saying nothing new.
-        self.query_one("#detail-summary", Static).update(self._facts())
 
         table = self.query_one("#detail-columns", DataTable)
         table.clear(columns=True)
@@ -62,20 +59,6 @@ class ColumnsView(ObjectView):
                 Text(column.default or ""),
                 Text(column.comment or ""),
             )
-
-    def _facts(self) -> str:
-        """Size and comment, without the name."""
-        row = self.repo.object_detail(self.ref)
-        if row is None:
-            return "not cached"
-        parts: list[str] = []
-        if row.get("rows") is not None:
-            parts.append(f"{row['rows']:,} rows")
-        if row.get("bytes"):
-            parts.append(format_bytes(row["bytes"]))
-        if row.get("comment"):
-            parts.append(str(row["comment"]))
-        return "  ·  ".join(parts) or "no details cached"
 
 
 @register_view

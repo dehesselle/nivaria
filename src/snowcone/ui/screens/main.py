@@ -1,4 +1,4 @@
-"""The three-pane browser.
+"""The two-pane browser.
 
 This screen is the one place that knows about both the cache and the fetch
 service, so it is where scope routing lives: a `CacheUpdated` names exactly one
@@ -16,7 +16,6 @@ from tcw.widgets import Menu, MenuBar, MenuItem, MenuSeparator, SettingsMenuItem
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
 from textual.screen import Screen
 
 from snowcone.cache.repository import Repository
@@ -94,7 +93,6 @@ class MainScreen(Screen):
         self.profiles = profiles or ProfileStore()
         self.databases: list[str] = []
         self._frame = 0
-        self._context_view = None
 
     def compose(self) -> ComposeResult:
         # The nesting is the DOM structure, not style: a Menu is a child of
@@ -120,13 +118,9 @@ class MainScreen(Screen):
                 yield MenuItem(
                     "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
                 )
-        with Vertical(id="left"):
-            tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
-            yield tree
-        with Vertical(id="right"):
-            with Vertical(id="context"):
-                yield Vertical(id="context-bar")
-            yield DetailPane(self.repo, id="detail")
+        tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
+        yield tree
+        yield DetailPane(self.repo, id="detail")
         yield StatusFooter(show_command_palette=False)
 
     def on_mount(self) -> None:
@@ -270,36 +264,14 @@ class MainScreen(Screen):
     def _select_category(self, scope: Scope) -> None:
         # No tree.reveal(...) needed here, unlike _select: the cursor is
         # already on the category node that was just highlighted.
-        view = self.detail.show_category(scope)
-        if view is not self._context_view:
-            self._context_view = view
-            self._rebuild_context(view)
+        self.detail.show_category(scope)
 
     def _select(self, ref: ObjectRef) -> None:
         # A search hit leaves the tree somewhere you can keep browsing from,
         # rather than a detail pane pointing at an object the tree has never
         # heard of.
         self.tree.reveal(ref)
-        view = self.detail.show(ref)
-        # Rebuilt only when the view instance actually changed: moving between
-        # two tables keeps the same view, so its context is already correct.
-        if view is not self._context_view:
-            self._context_view = view
-            self._rebuild_context(view)
-
-    @work(exclusive=True, group="context")
-    async def _rebuild_context(self, view) -> None:
-        """Replace the context bar's contents.
-
-        Awaited rather than fired and forgotten: remove_children() only
-        *queues* the removal, so mounting the next view's widgets in the same
-        tick collides with the outgoing ones on their ids. Exclusive, so a
-        quick run through several object kinds cannot interleave two rebuilds.
-        """
-        bar = self.query_one("#context-bar", Vertical)
-        await bar.remove_children()
-        if view is not None:
-            await bar.mount_all(list(view.compose_context()))
+        self.detail.show(ref)
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         """The tree found something missing or stale.
@@ -336,8 +308,6 @@ class MainScreen(Screen):
         self.databases = []
         self.tree.set_repo(repo)
         self.detail.set_repo(repo)
-        self._context_view = None
-        self._rebuild_context(None)
 
     # ------------------------------------------------------------- databases
 
@@ -352,8 +322,6 @@ class MainScreen(Screen):
             self.fetch.cancel_where(lambda scope: scope.database in removed)
         self.tree.set_databases(databases)
         self.detail.clear()
-        self._context_view = None
-        self._rebuild_context(None)
 
     def action_pick_databases(self) -> None:
         self._pick_databases()

@@ -93,7 +93,8 @@ def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() ->
     assert queries.pipe_activity(90) == (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
         "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
-        "TABLE_SCHEMA_NAME, TABLE_NAME "
+        "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
+        "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
         "AND LAST_LOAD_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP())"
@@ -105,7 +106,8 @@ def test_pipe_history_targets_information_schema_copy_history() -> None:
     ordinary WHERE values, so they are quote_literal'd/computed as plain SQL
     text; PIPE_NAME filters the function's output and binds normally."""
     assert queries.pipe_history("MYDB", "PUBLIC", "ORDERS") == (
-        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME "
+        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME, "
+        "FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
         'FROM TABLE("MYDB".INFORMATION_SCHEMA.COPY_HISTORY('
         "TABLE_NAME => 'MYDB.PUBLIC.ORDERS', "
         "START_TIME => DATEADD('day', -14, CURRENT_TIMESTAMP())"

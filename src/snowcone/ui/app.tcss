@@ -1,34 +1,22 @@
-/* ---- main screen: 25% tree / 75% detail, split 25/75 vertically ------- */
+/* ---- main screen: tree / detail, mouse-resizable -------------------- */
 
 MainScreen {
     layout: horizontal;
 }
 
-#left {
-    width: 1fr;
-}
-
-#right {
-    width: 3fr;
-}
-
 #tree {
-    height: 1fr;
-    border: round $panel;
-}
-
-#context {
+    width: 1fr;
     height: 1fr;
     border: round $panel;
 }
 
 #detail {
-    height: 3fr;
+    width: 3fr;
+    height: 1fr;
     border: round $panel;
 }
 
 #tree:focus-within,
-#context:focus-within,
 #detail:focus-within {
     border: round $accent;
 }
@@ -234,25 +222,6 @@ StatusFooter #footer-pool {
 
 /* ---- detail pane and views -------------------------------------------- */
 
-#context-bar {
-    height: auto;
-    padding: 0 1;
-}
-
-#context-title {
-    text-style: bold;
-}
-
-#context-detail {
-    color: $text-muted;
-}
-
-#detail-summary {
-    height: 1;
-    padding: 0 1;
-    color: $text-muted;
-}
-
 #detail-columns {
     height: 1fr;
 }
@@ -263,6 +232,17 @@ StatusFooter #footer-pool {
 }
 
 #pipe-history {
+    height: 1fr;
+}
+
+#pipe-history-detail {
+    height: auto;
+    max-height: 8;
+    padding: 0 1;
+    color: $error;
+}
+
+#pipe-definition {
     height: 1fr;
 }
 

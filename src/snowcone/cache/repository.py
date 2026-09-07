@@ -262,6 +262,8 @@ _PIPE_ACTIVITY = TableSpec(
         "TABLE_CATALOG_NAME",
         "TABLE_SCHEMA_NAME",
         "TABLE_NAME",
+        "FIRST_ERROR_MESSAGE",
+        "FIRST_ERROR_LINE_NUMBER",
     ),
     # One row per historical load, not per pipe -- see queries.pipe_activity.
     key=(
@@ -283,6 +285,8 @@ _PIPE_HISTORY = TableSpec(
         "STATUS",
         "LAST_LOAD_TIME",
         "PIPE_NAME",
+        "FIRST_ERROR_MESSAGE",
+        "FIRST_ERROR_LINE_NUMBER",
     ),
     # _scope disambiguates by pipe -- the physical table holds every pipe's
     # rows together, same as every other mirror table.

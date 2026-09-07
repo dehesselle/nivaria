@@ -36,12 +36,12 @@ Use these names when discussing changes.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                            Menu bar (F9)                                 │
 ├────────────────────┬─────────────────────────────────────────────────────┤
-│ ┌─────────────────┐│ Context bar                                         │
-│ │  MYDB (12)      │├─────────────────────────────────────────────────────┤
-│ │  OTHERDB (5)    ││                                                     │
-│ │   Object tree   ││                                                     │
-│ │                 ││              Detail pane                            │
-│ │                 ││        (hosts exactly one Object view)              │
+│ ┌─────────────────┐│                                                     │
+│ │  MYDB (12)      ││                                                     │
+│ │  OTHERDB (5)    ││              Detail pane                            │
+│ │   Object tree   ││        (hosts exactly one Object view;              │
+│ │                 ││   drag this border to resize either pane)           │
+│ │                 ││                                                     │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
 │ ^d Databases  / Search  r Refresh  F10 Quit  Role  Warehouse  Countdown  (2/5)│
@@ -68,18 +68,20 @@ terminal:
 |---|---|
 | **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerScreen`, see "The database picker" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerScreen`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
-| **Top pane** | Holds the Context bar. |
-| **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
-| **Detail pane** | Hosts exactly one **Object view** at a time, chosen by object kind. |
-| **Object view** | The per-kind detail UI (e.g. Table view, Pipe view). Owns both its detail body and its Context bar contribution. |
+| **Detail pane** | Hosts exactly one **Object view** at a time, chosen by object kind. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
+| **Object view** | The per-kind detail UI (e.g. Table view, Pipe view). Owns its whole detail body. |
 | **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
 
-The right-hand split is 25 % top pane / 75 % Detail pane; the left pane is 25 %
-of the width. All sizing is in `fr` units, never percentages, so panes stay
-resizable later without rework -- except the search modal, sized in `%` on
-purpose: it wants a share of whatever terminal it is in, not a fixed cell
-count.
+The tree/Detail split starts at 25 % / 75 % of the width, in `fr` units, and
+is now genuinely resizable: dragging `ObjectTree`'s right border (the same
+mechanism as sibling project snakecam's `ResizableTree`) overwrites that `fr`
+value with a fixed cell width, and the Detail pane's own `fr` absorbs
+whatever is left. Neither pane can be dragged narrower than a small minimum.
+The drag is not persisted across sessions, and a terminal resize does not
+re-clamp an already-narrow pane -- both accepted gaps, see "Known gaps".
+The search modal alone is sized in `%`, not `fr`, on purpose: it wants a
+share of whatever terminal it is in, not a fixed cell count.
 
 ---
 
@@ -279,6 +281,21 @@ trade-off: it needs `IMPORTED PRIVILEGES` on the `SNOWFLAKE` database (or
 `ACCOUNTADMIN`) and can lag real activity by up to ~2 hours — both are just
 another way this one scope degrades blank, the same as a missing warehouse
 does for `table_stats`, so nothing new had to be built to accommodate them.
+
+`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` were added later, directly
+onto both `account_usage_copy_history` and `information_schema_copy_history`
+below — the pipe detail view's Load History tab shows them for whichever
+row is currently highlighted. This is a deliberate exception to "never
+retrofit a column onto an existing mirror table" (above), not a
+counterexample to it: snowcone is pre-1.0 with no migration system and no
+backward-compatibility policy, so the usual reason to avoid a retrofit --
+an old cache file's table keeps its old shape and a write to the new column
+then crashes (`schema.sql`'s `CREATE TABLE IF NOT EXISTS` never alters an
+existing table) -- is resolved the simpler way here: `schema.sql` is edited
+in place, and anyone with a pre-existing cache file deletes it after
+upgrading. A new mirror table (as the rule above would otherwise call for)
+stays the right move whenever a straight cache wipe is not an acceptable
+answer.
 
 `information_schema_copy_history` is the third instance, and the first to
 pair with another SELECT-backed scope rather than stand alone: a single
@@ -672,9 +689,14 @@ re-points the existing view, so the widget, its columns and its scroll position
 all survive — which is what makes arrowing down three hundred tables cheap. A
 different kind is a genuine change of shape, so that view is replaced.
 
-**A view owns both its detail body and its Context bar contribution.** They are
-one concept — "what you can do with a pipe" — and splitting them across two
-registries would guarantee they drift apart.
+**A view owns its whole body.** There used to be a second registry contract --
+a view's `compose_context()` fed a separate "Context bar" pane above the
+Detail pane -- but that pane was never a distinct concept, only
+selection-dependent content cramped into a one-line strip by its own
+container. The Context bar and the Detail pane are now one pane, and
+`compose_context()` is gone with it: whatever a view wants to show is
+content it composes as part of its own body, wherever in that body it
+belongs, with no second registry to keep in sync.
 
 A view declares which cache scopes it reads. That is how it knows whether an
 update concerns it, and how its data joins the staleness sweep.
@@ -683,11 +705,17 @@ An object kind with no registered view shows a placeholder rather than
 crashing, so the tree can list kinds ahead of their views existing.
 
 The kinds are genuinely different shapes, which is the justification for the
-seam: a table shows columns; a pipe has no columns at all, showing its load
-history instead -- see "A second source" for where that comes from. A
-stopped pipe is indistinguishable from a healthy one until you read
-`invalid_reason`, so that status lives in the context bar rather than the
-body (`PipeView._status`).
+seam: a table shows columns; a pipe has no columns at all, so its body is a
+`TabbedContent` instead -- **Status** (pipe name, running/stopped, and
+`invalid_reason` as three columns of a one-row table -- a stopped pipe is
+otherwise indistinguishable from a healthy one), **Load history** (see "A
+second source" for where that comes from, plus a detail panel below the
+table for whatever the currently highlighted row wants to say about itself
+-- today that's a load error's message and line number, if it has one), and
+**Definition** (the pipe's raw `COPY INTO` SQL, unformatted -- no syntax
+highlighting, a deliberate scope boundary for now). The three tabs are also
+keyboard-mnemonic switchable (`s`/`l`/`d`, hidden from the footer), the same
+pattern sibling project snakecam's `JobDetailsScreen` already established.
 
 ---
 
@@ -1023,6 +1051,14 @@ Three things about it are worth knowing from inside snowcone:
   history keeps working — not a crash, per this codebase's usual
   degrade-blank convention, but worth a real-account check before relying
   on it.
+- `FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` on `account_usage_copy_
+  history`/`information_schema_copy_history` are likewise documentation-only,
+  unverified against a live account -- same caveat as the two gaps above,
+  now covering two more columns on both sources.
+- The tree/Detail drag-resize (see "Screen anatomy") does not persist across
+  sessions, and does not re-clamp an already-narrow pane if the terminal is
+  then resized smaller -- both accepted, ported as-is from sibling project
+  snakecam's identical mechanism, not engineered around.
 - Stages and tasks appear in the tree but have no Object view yet; they show a
   placeholder.
 - **Multiple databases can now be browsed and searched at once** — this
