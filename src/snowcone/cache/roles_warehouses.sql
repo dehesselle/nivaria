@@ -5,6 +5,7 @@
 CREATE TABLE IF NOT EXISTS show_warehouses (
     name        TEXT NOT NULL PRIMARY KEY,
     comment     TEXT,
+    size        TEXT,
     _scope      TEXT    NOT NULL,
     _generation INTEGER NOT NULL,
     _fetched_at REAL    NOT NULL

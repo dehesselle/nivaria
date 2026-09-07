@@ -409,6 +409,7 @@ class MainScreen(Screen):
                 title="Warehouse",
                 placeholder="type to filter warehouses",
                 current=current,
+                hints={row.name: row.size for row in cached.rows if row.size},
             )
         )
         if chosen is not None and chosen != current:

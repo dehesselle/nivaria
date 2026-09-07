@@ -153,6 +153,7 @@ class Database:
 class Warehouse:
     name: str
     comment: str = ""
+    size: str = ""
 
 
 @dataclass(frozen=True)

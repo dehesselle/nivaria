@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from tcw.widgets import MenuItem
 from textual.app import App
-from textual.widgets import Input
+from textual.widgets import Input, OptionList
 
 import snowcone.ui.app as app_module
 from snowcone import paths
@@ -109,6 +109,23 @@ async def test_the_warehouse_item_opens_a_picker_over_cached_warehouses(repo) ->
         await pilot.pause()
         await open_via_menu(pilot, "w")
         assert isinstance(app.screen, PickerScreen)
+
+
+async def test_the_warehouse_picker_shows_size_as_a_hint(repo) -> None:
+    load(
+        repo,
+        warehouses_scope(),
+        [{"name": "COMPUTE_WH", "comment": "", "size": "X-Small"}],
+    )
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    app = Harness(repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await open_via_menu(pilot, "w")
+        options = app.screen.query_one("#picker-results", OptionList)
+        prompt = options.get_option_at_index(0).prompt
+    assert prompt.plain == "COMPUTE_WH  X-Small"
 
 
 async def test_an_empty_warehouse_cache_requests_a_fetch_instead_of_a_dead_dialog(

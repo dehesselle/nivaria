@@ -206,7 +206,7 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
 
 _WAREHOUSES = TableSpec(
     name="show_warehouses",
-    columns=("name", "comment"),
+    columns=("name", "comment", "size"),
     key=("name",),
     order_by=("name",),
 )
@@ -375,7 +375,11 @@ class Repository:
     def warehouses(self, scope: Scope) -> Cached[WarehouseRow]:
         return self._cached(
             scope,
-            lambda row: WarehouseRow(name=row["name"], comment=row["comment"] or ""),
+            lambda row: WarehouseRow(
+                name=row["name"],
+                comment=row["comment"] or "",
+                size=row["size"] or "",
+            ),
         )
 
     def roles(self, scope: Scope) -> Cached[RoleRow]:

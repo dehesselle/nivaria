@@ -7,7 +7,7 @@ list so a keystroke never waits on sqlite, let alone on Snowflake.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
 from rich.text import Text
@@ -39,12 +39,14 @@ class PickerScreen(DialogScreen[str]):
         title: str = "Pick",
         placeholder: str = "type to filter",
         current: str | None = None,
+        hints: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__()
         self._candidates = list(candidates)
         self._title = title
         self._placeholder = placeholder
         self._current = current
+        self._hints = hints or {}
         self._shown: list[str] = []
 
     def compose(self) -> ComposeResult:
@@ -127,6 +129,19 @@ class PickerScreen(DialogScreen[str]):
         text = Text()
         for run, matched in highlight(name, positions):
             text.append(run, style=style if matched else "")
-        if name == self._current:
-            text.append("  (current)", style="dim")
+        annotation = self._annotation(name)
+        if annotation:
+            text.append(f"  {annotation}", style="dim")
         return text
+
+    def _annotation(self, name: str) -> str | None:
+        """Trailing dimmed text for `name`: its hint, its `(current)` marker,
+        or both -- one composed mechanic rather than two parallel ones, since
+        both are just dimmed context appended after the name."""
+        parts = []
+        hint = self._hints.get(name)
+        if hint:
+            parts.append(hint)
+        if name == self._current:
+            parts.append("(current)")
+        return "  ".join(parts) if parts else None

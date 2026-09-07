@@ -364,6 +364,56 @@ async def test_the_picker_filters_as_you_type(repo) -> None:
     assert app.chosen == "ORDER_ITEMS"
 
 
+async def test_a_candidate_with_a_hint_shows_it_dimmed_next_to_the_name(repo) -> None:
+    from textual.widgets import OptionList
+
+    class PickerApp(App[None]):
+        CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
+
+        def on_mount(self) -> None:
+            self.push_screen(
+                PickerScreen(
+                    ["COMPUTE_WH", "ETL_WH"],
+                    hints={"COMPUTE_WH": "X-Small"},
+                )
+            )
+
+    app = PickerApp()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        options = app.screen.query_one("#picker-results", OptionList)
+        with_hint = options.get_option_at_index(0).prompt
+        without_hint = options.get_option_at_index(1).prompt
+    assert with_hint.plain == "COMPUTE_WH  X-Small"
+    assert without_hint.plain == "ETL_WH"
+    assert any(span.style == "dim" for span in with_hint.spans)
+
+
+async def test_a_hinted_candidate_that_is_also_current_shows_both(repo) -> None:
+    """Hint and `(current)` are one composed annotation, not two independent
+    appends -- this is what would break if they ever drifted back apart."""
+    from textual.widgets import OptionList
+
+    class PickerApp(App[None]):
+        CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
+
+        def on_mount(self) -> None:
+            self.push_screen(
+                PickerScreen(
+                    ["COMPUTE_WH", "ETL_WH"],
+                    current="COMPUTE_WH",
+                    hints={"COMPUTE_WH": "X-Small"},
+                )
+            )
+
+    app = PickerApp()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        options = app.screen.query_one("#picker-results", OptionList)
+        prompt = options.get_option_at_index(0).prompt
+    assert prompt.plain == "COMPUTE_WH  X-Small  (current)"
+
+
 async def test_escaping_the_picker_chooses_nothing(repo) -> None:
     class PickerApp(App[None]):
         CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
