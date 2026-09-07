@@ -182,6 +182,39 @@ def table_stats(database: str) -> str:
     )
 
 
+#: How far back to look for a pipe's most recent load. A tunable constant,
+#: not a Setting -- same precedent as MIN_COLUMN_QUERY_LENGTH in search.py --
+#: chosen to bound the scan on an account with a lot of COPY_HISTORY
+#: retention (up to 365 days), not to express any real business meaning.
+PIPE_ACTIVITY_LOOKBACK_DAYS = 14
+
+
+def pipe_activity() -> str:
+    """The most recent load per pipe in a schema.
+
+    SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY, filtered to one schema's pipes and
+    collapsed to one row per pipe with QUALIFY -- the view otherwise carries
+    one row per historical load. Like `table_stats`, this needs a running
+    warehouse; unlike it, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather
+    than one built from the database, so both filter values bind as ordinary
+    `%s` parameters -- no `quote_identifier` needed at all. It also needs
+    IMPORTED PRIVILEGES on the SNOWFLAKE database (or ACCOUNTADMIN); either
+    gap just fails this one scope, same as a missing warehouse does for
+    `table_stats`.
+    """
+    return (
+        "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
+        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
+        "TABLE_SCHEMA_NAME, TABLE_NAME "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
+        "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
+        "AND LAST_LOAD_TIME >= DATEADD('day', "
+        f"-{PIPE_ACTIVITY_LOOKBACK_DAYS}, CURRENT_TIMESTAMP()) "
+        "QUALIFY ROW_NUMBER() OVER "
+        "(PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1"
+    )
+
+
 def _data_type_fields(raw: object) -> dict[str, object]:
     """Unpack SHOW COLUMNS' data_type, which is a JSON string.
 

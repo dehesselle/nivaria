@@ -82,3 +82,19 @@ def test_table_stats_targets_information_schema_tables_with_bound_params() -> No
         'FROM "MYDB".INFORMATION_SCHEMA.TABLES '
         "WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = %s"
     )
+
+
+def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() -> None:
+    """Unlike table_stats, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather
+    than one built from the database, so both filter values bind as ordinary
+    params -- no quote_identifier involved at all."""
+    assert queries.pipe_activity() == (
+        "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
+        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
+        "TABLE_SCHEMA_NAME, TABLE_NAME "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
+        "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
+        "AND LAST_LOAD_TIME >= DATEADD('day', -14, CURRENT_TIMESTAMP()) "
+        "QUALIFY ROW_NUMBER() OVER "
+        "(PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1"
+    )

@@ -201,6 +201,46 @@ def test_table_stats_binds_schema_and_table_type_as_parameters() -> None:
     assert rows[0]["TABLE_NAME"] == "ORDERS"
 
 
+def test_pipe_activity_binds_database_and_schema_as_parameters() -> None:
+    """Unlike table_stats, the database is not interpolated into the FROM
+    target here -- ACCOUNT_USAGE.COPY_HISTORY is a fixed name -- so both
+    filter values are bound."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "PIPE_CATALOG_NAME",
+        "PIPE_SCHEMA_NAME",
+        "PIPE_NAME",
+        "FILE_NAME",
+        "FILE_SIZE",
+        "ROW_COUNT",
+        "STATUS",
+        "LAST_LOAD_TIME",
+        "TABLE_CATALOG_NAME",
+        "TABLE_SCHEMA_NAME",
+        "TABLE_NAME",
+    ]
+    connection.rows = [
+        (
+            "MYDB",
+            "PUBLIC",
+            "MY_PIPE",
+            "data/orders_1.csv.gz",
+            1024,
+            42,
+            "Loaded",
+            "2026-01-02T03:04:05+00:00",
+            "MYDB",
+            "PUBLIC",
+            "ORDERS",
+        )
+    ]
+    rows = gateway.pipe_activity("MYDB", "PUBLIC")
+    statement, params = connection.executed[-1]
+    assert "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY" in statement
+    assert params == ("MYDB", "PUBLIC")
+    assert rows[0]["PIPE_NAME"] == "MY_PIPE"
+
+
 def test_background_priority_retries_but_never_reconnects_unattended() -> None:
     """The retry itself must respect allow_reconnect: a background-priority
     caller whose only connection just failed must not have it replaced by a

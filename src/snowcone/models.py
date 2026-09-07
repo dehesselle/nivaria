@@ -61,6 +61,13 @@ class ScopeKind(StrEnum):
     #: fetch SHOW TABLES, not this SELECT -- columns_scope avoids the same
     #: trap the same way, for a table's own single-object fetch.
     TABLE_STATS = "table_stats"
+    #: A schema's pipes' most recent load, sourced by a real SELECT against
+    #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
+    #: instance of the dual-source pattern TABLE_STATS established (see
+    #: DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
+    #: its own mirror table. Deliberately carries no object_kind, for exactly
+    #: the same reason TABLE_STATS does not -- see that comment.
+    PIPE_ACTIVITY = "pipe_activity"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
 
@@ -115,6 +122,8 @@ class Scope:
                 return f"columns_prime:{self.database}.{self.schema}"
             case ScopeKind.TABLE_STATS:
                 return f"table_stats:{self.database}.{self.schema}"
+            case ScopeKind.PIPE_ACTIVITY:
+                return f"pipe_activity:{self.database}.{self.schema}"
             case ScopeKind.WAREHOUSES:
                 return "warehouses"
             case ScopeKind.ROLES:
@@ -151,6 +160,11 @@ def columns_prime_scope(database: str, schema: str | None = None) -> Scope:
 def table_stats_scope(database: str, schema: str) -> Scope:
     # No object_kind -- see ScopeKind.TABLE_STATS's comment.
     return Scope(ScopeKind.TABLE_STATS, database=database, schema=schema)
+
+
+def pipe_activity_scope(database: str, schema: str) -> Scope:
+    # No object_kind -- see ScopeKind.PIPE_ACTIVITY's comment.
+    return Scope(ScopeKind.PIPE_ACTIVITY, database=database, schema=schema)
 
 
 def warehouses_scope() -> Scope:

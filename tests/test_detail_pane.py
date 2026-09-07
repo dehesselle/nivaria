@@ -16,10 +16,12 @@ from snowcone.models import (
     ObjectRef,
     columns_scope,
     objects_scope,
+    pipe_activity_scope,
     table_stats_scope,
 )
 from snowcone.ui.messages import ScopeNeeded
 from snowcone.ui.views.base import registered_kinds, view_for
+from snowcone.ui.views.pipe_list_view import PipeListView
 from snowcone.ui.views.pipe_view import PipeView
 from snowcone.ui.views.table_list_view import TableListView
 from snowcone.ui.views.table_view import TableView, ViewView
@@ -123,8 +125,34 @@ def put_pipe(repo: Repository, name: str, **extra) -> ObjectRef:
         "comment": "",
     }
     row.update(extra)
-    load(repo, objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC"), [row])
+    existing = repo.raw_rows(objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC"))
+    load(
+        repo,
+        objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC"),
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
     return ObjectRef(ObjectKind.PIPE, "MYDB", "PUBLIC", name)
+
+
+def put_pipe_activity(repo: Repository, pipe: str, **extra) -> None:
+    row = {
+        "PIPE_CATALOG_NAME": "MYDB",
+        "PIPE_SCHEMA_NAME": "PUBLIC",
+        "PIPE_NAME": pipe,
+        "FILE_NAME": "orders_1.csv.gz",
+        "FILE_SIZE": 1024,
+        "ROW_COUNT": 42,
+        "STATUS": "Loaded",
+        "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+        "TABLE_CATALOG_NAME": "MYDB",
+        "TABLE_SCHEMA_NAME": "PUBLIC",
+        "TABLE_NAME": "ORDERS",
+    }
+    row.update(extra)
+    load(repo, pipe_activity_scope("MYDB", "PUBLIC"), [row])
 
 
 # ---------------------------------------------------------------- registry
@@ -508,9 +536,94 @@ async def test_moving_between_two_schemas_tables_reuses_the_list_view(repo) -> N
         assert pane.query_one("#detail-table-list", DataTable).row_count == 1
 
 
+# ---------------------------------------------------------------- pipe list
+
+
+async def test_selecting_a_pipes_category_mounts_the_pipe_list_view(repo) -> None:
+    put_pipe(repo, "LOAD_ORDERS")
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        assert isinstance(pane.view, PipeListView)
+
+
+async def test_the_pipe_list_view_lists_every_cached_pipe(repo) -> None:
+    put_pipe(repo, "LOAD_ORDERS")
+    put_pipe(repo, "LOAD_CUSTOMERS")
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((0, 0)).plain == "LOAD_CUSTOMERS"
+        assert table.get_cell_at((1, 0)).plain == "LOAD_ORDERS"
+
+
+async def test_pipe_activity_columns_render_when_the_scope_has_data(repo) -> None:
+    put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_9.csv.gz",
+        FILE_SIZE=2048,
+        ROW_COUNT=100,
+        STATUS="Loaded",
+        LAST_LOAD_TIME="2026-03-01 08:00:00",
+        TABLE_NAME="ORDERS",
+    )
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 1)).plain == "100"
+        assert table.get_cell_at((0, 2)).plain == "2.0K"
+        assert table.get_cell_at((0, 3)).plain == "2026-03-01 08:00"
+        assert table.get_cell_at((0, 4)).plain == "Loaded"
+        assert table.get_cell_at((0, 5)).plain == "ORDERS"
+        assert table.get_cell_at((0, 6)).plain == "orders_9.csv.gz"
+
+
+async def test_pipe_activity_columns_are_blank_without_a_successful_activity_pass(
+    repo,
+) -> None:
+    """A missing/failed activity scope must not block the SHOW-sourced Name
+    column: the row still renders, just with the activity cells blank."""
+    put_pipe(repo, "LOAD_ORDERS")
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 1)).plain == ""
+        assert table.get_cell_at((0, 4)).plain == ""
+        assert table.get_cell_at((0, 5)).plain == ""
+        assert table.get_cell_at((0, 6)).plain == ""
+
+
+def test_pipe_list_view_scopes_includes_the_activity_scope(repo) -> None:
+    """This is what wires the new scope into the background staleness sweep
+    (MainScreen._sweep reads self.detail.scopes()) with no other plumbing."""
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    view = PipeListView(repo, scope)
+    assert pipe_activity_scope("MYDB", "PUBLIC") in view.scopes()
+
+
 async def test_an_unregistered_category_kind_shows_a_placeholder(repo) -> None:
-    """Only Tables has a list view so far; the other category kinds fall back
-    to the same placeholder convention as an unregistered object kind."""
+    """Only Tables and Pipes have list views so far; the other category kinds
+    fall back to the same placeholder convention as an unregistered object
+    kind."""
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)

@@ -8,6 +8,7 @@ from snowcone.models import (
     columns_scope,
     databases_scope,
     objects_scope,
+    pipe_activity_scope,
     roles_scope,
     schemas_scope,
     table_stats_scope,
@@ -86,6 +87,15 @@ def test_table_stats_scope_carries_no_object_kind() -> None:
     misroute every ensure()-triggered fetch of this scope into that prime
     instead of the INFORMATION_SCHEMA SELECT this scope actually needs."""
     assert table_stats_scope("MYDB", "PUBLIC").object_kind is None
+
+
+def test_pipe_activity_scope_key() -> None:
+    assert pipe_activity_scope("MYDB", "PUBLIC").key == "pipe_activity:MYDB.PUBLIC"
+
+
+def test_pipe_activity_scope_carries_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert pipe_activity_scope("MYDB", "PUBLIC").object_kind is None
 
 
 def test_warehouses_and_roles_are_flat_scopes_like_databases() -> None:

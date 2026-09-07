@@ -246,6 +246,25 @@ _TABLE_STATS = TableSpec(
     order_by=("TABLE_NAME",),
 )
 
+_PIPE_ACTIVITY = TableSpec(
+    name="account_usage_copy_history",
+    columns=(
+        "PIPE_CATALOG_NAME",
+        "PIPE_SCHEMA_NAME",
+        "PIPE_NAME",
+        "FILE_NAME",
+        "FILE_SIZE",
+        "ROW_COUNT",
+        "STATUS",
+        "LAST_LOAD_TIME",
+        "TABLE_CATALOG_NAME",
+        "TABLE_SCHEMA_NAME",
+        "TABLE_NAME",
+    ),
+    key=("PIPE_CATALOG_NAME", "PIPE_SCHEMA_NAME", "PIPE_NAME"),
+    order_by=("PIPE_NAME",),
+)
+
 
 def spec_for(scope: Scope) -> TableSpec:
     match scope.kind:
@@ -260,6 +279,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _COLUMNS
         case ScopeKind.TABLE_STATS:
             return _TABLE_STATS
+        case ScopeKind.PIPE_ACTIVITY:
+            return _PIPE_ACTIVITY
         case ScopeKind.WAREHOUSES:
             return _WAREHOUSES
         case ScopeKind.ROLES:

@@ -47,6 +47,7 @@ from snowcone.ui.screens.multipicker import MultiPickerScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.screens.search import SearchScreen
 from snowcone.ui.views import (  # noqa: F401 -- registers views
+    pipe_list_view,
     pipe_view,
     table_list_view,
     table_view,

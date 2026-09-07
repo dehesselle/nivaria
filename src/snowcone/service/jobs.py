@@ -140,6 +140,16 @@ def fetch_page(
                 ),
                 None,
             )
+        case ScopeKind.PIPE_ACTIVITY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # A schema's pipe count is bounded, same reasoning as TABLE_STATS.
+            return (
+                gateway.pipe_activity(
+                    scope.database, scope.schema, allow_reconnect=allow_reconnect
+                ),
+                None,
+            )
         case ScopeKind.WAREHOUSES:
             # Small, flat, unpaged lists -- see queries.show_warehouses.
             return gateway.show_warehouses(allow_reconnect=allow_reconnect), None

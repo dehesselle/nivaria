@@ -111,6 +111,7 @@ class FakeGateway:
         warehouses: list[str] | None = None,
         roles: list[str] | None = None,
         table_stats: dict[tuple[str, str], list[Row]] | None = None,
+        pipe_activity: dict[tuple[str, str], list[Row]] | None = None,
     ) -> None:
         self.databases = databases or []
         self.schemas = schemas or {}
@@ -118,12 +119,16 @@ class FakeGateway:
         self.columns = columns or {}
         self.warehouses = warehouses or []
         self.roles = roles or []
-        # Named differently from the table_stats() method below -- an
-        # instance attribute of the same name would shadow it.
+        # Named differently from the table_stats()/pipe_activity() methods
+        # below -- an instance attribute of the same name would shadow them.
         self._table_stats = table_stats or {}
+        self._pipe_activity = pipe_activity or {}
         #: Flip to simulate a warehouse-dependent query failing, e.g. "no
         #: active warehouse" -- table_stats is the first fetch that needs one.
         self.raise_on_table_stats = False
+        #: Flip to simulate the ACCOUNT_USAGE grant being missing, the other
+        #: way pipe_activity's SELECT can fail beyond a missing warehouse.
+        self.raise_on_pipe_activity = False
         #: Every call, so a test can assert *what was fetched*, not merely
         #: what ended up rendered.
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -316,3 +321,14 @@ class FakeGateway:
         if self.raise_on_table_stats:
             raise RuntimeError("No active warehouse selected in the current session")
         return list(self._table_stats.get((database, schema), []))
+
+    def pipe_activity(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("pipe_activity", (database, schema)))
+        if self.raise_on_pipe_activity:
+            raise RuntimeError(
+                "SQL access control error: Insufficient privileges to "
+                "operate on database 'SNOWFLAKE'"
+            )
+        return list(self._pipe_activity.get((database, schema), []))

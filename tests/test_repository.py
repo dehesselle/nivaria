@@ -428,11 +428,19 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _COLUMNS,
         _DATABASES,
         _OBJECT_TABLES,
+        _PIPE_ACTIVITY,
         _SCHEMAS,
         _TABLE_STATS,
     )
 
-    specs = [_DATABASES, _SCHEMAS, _COLUMNS, _TABLE_STATS, *_OBJECT_TABLES.values()]
+    specs = [
+        _DATABASES,
+        _SCHEMAS,
+        _COLUMNS,
+        _TABLE_STATS,
+        _PIPE_ACTIVITY,
+        *_OBJECT_TABLES.values(),
+    ]
     with repo._db.connect() as connection:
         for spec in specs:
             actual = {
@@ -519,3 +527,35 @@ def test_table_stats_columns_round_trip_but_are_unverified(repo) -> None:
     stored = repo.raw_rows(scope)[0]
     assert stored["LAST_DDL"] == "2026-01-01 00:00:00"
     assert stored["LAST_ALTERED"] == "2026-01-02 00:00:00"
+
+
+def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
+    this shape comes from Snowflake's published ACCOUNT_USAGE.COPY_HISTORY
+    documentation, not a probed live account -- see DESIGN.md "Known gaps"."""
+    from snowcone.models import pipe_activity_scope
+
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "MY_PIPE",
+                "FILE_NAME": "orders_1.csv.gz",
+                "FILE_SIZE": 1024,
+                "ROW_COUNT": 42,
+                "STATUS": "Loaded",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+                "TABLE_CATALOG_NAME": "MYDB",
+                "TABLE_SCHEMA_NAME": "PUBLIC",
+                "TABLE_NAME": "ORDERS",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["FILE_NAME"] == "orders_1.csv.gz"
+    assert stored["STATUS"] == "Loaded"
+    assert stored["TABLE_NAME"] == "ORDERS"

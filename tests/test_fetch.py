@@ -117,6 +117,36 @@ def test_table_stats_is_fetched_in_one_shot() -> None:
     assert cursor is None
 
 
+def test_pipe_activity_is_fetched_in_one_shot() -> None:
+    """A schema's pipe count is bounded, same reasoning as table_stats."""
+    from snowcone.models import pipe_activity_scope
+
+    gateway = FakeGateway(
+        pipe_activity={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "PIPE_CATALOG_NAME": "MYDB",
+                    "PIPE_SCHEMA_NAME": "PUBLIC",
+                    "PIPE_NAME": "MY_PIPE",
+                    "FILE_NAME": "orders_1.csv.gz",
+                    "FILE_SIZE": 1024,
+                    "ROW_COUNT": 42,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
+                    "TABLE_CATALOG_NAME": "MYDB",
+                    "TABLE_SCHEMA_NAME": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway, pipe_activity_scope("MYDB", "PUBLIC"), None, limit=1
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
 # -------------------------------------------------------------- end to end
 
 
@@ -712,6 +742,82 @@ def test_a_failing_table_stats_fetch_keeps_previously_cached_stats(repo) -> None
         service.stop()
     assert repo.entry(scope).state is CacheState.ERROR
     assert [row["TABLE_NAME"] for row in repo.raw_rows(scope)] == ["ORDERS"]
+
+
+def test_pipe_activity_scope_reaches_the_right_gateway_call(repo) -> None:
+    from snowcone.models import pipe_activity_scope
+
+    gateway = FakeGateway(
+        pipe_activity={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "PIPE_CATALOG_NAME": "MYDB",
+                    "PIPE_SCHEMA_NAME": "PUBLIC",
+                    "PIPE_NAME": "MY_PIPE",
+                    "FILE_NAME": "orders_1.csv.gz",
+                    "FILE_SIZE": 1024,
+                    "ROW_COUNT": 42,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
+                    "TABLE_CATALOG_NAME": "MYDB",
+                    "TABLE_SCHEMA_NAME": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                }
+            ]
+        }
+    )
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["PIPE_NAME"] for row in repo.raw_rows(scope)] == ["MY_PIPE"]
+    assert [c[0] for c in gateway.calls] == ["pipe_activity"]
+
+
+def test_a_failing_pipe_activity_fetch_keeps_previously_cached_activity(repo) -> None:
+    """ "A failed pass does not sweep" for this scope specifically -- losing
+    the ACCOUNT_USAGE grant or the warehouse mid-browse must not blank out
+    activity that was already fetched successfully."""
+    from snowcone.models import pipe_activity_scope
+
+    gateway = FakeGateway(
+        pipe_activity={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "PIPE_CATALOG_NAME": "MYDB",
+                    "PIPE_SCHEMA_NAME": "PUBLIC",
+                    "PIPE_NAME": "MY_PIPE",
+                    "FILE_NAME": "orders_1.csv.gz",
+                    "FILE_SIZE": 1024,
+                    "ROW_COUNT": 42,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
+                    "TABLE_CATALOG_NAME": "MYDB",
+                    "TABLE_SCHEMA_NAME": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                }
+            ]
+        }
+    )
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    errors: list[str] = []
+    service = make_service(
+        gateway, repo, on_error=lambda s, message: errors.append(message)
+    )
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+
+        gateway.raise_on_pipe_activity = True
+        service.request(scope, Priority.INTERACTIVE)
+        assert wait_until(lambda: bool(errors))
+    finally:
+        service.stop()
+    assert repo.entry(scope).state is CacheState.ERROR
+    assert [row["PIPE_NAME"] for row in repo.raw_rows(scope)] == ["MY_PIPE"]
 
 
 # --------------------------------------------------------- columns-wide prime

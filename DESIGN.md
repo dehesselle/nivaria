@@ -260,9 +260,21 @@ already established for `SHOW COLUMNS`, just literally true this time
 instead of a SHOW result mapped onto that vocabulary.
 
 `information_schema_tables` (`LAST_DDL`, `LAST_ALTERED` on the "Tables (n)"
-list) is the first instance of this and the precedent for the next one —
-pipe COPY history is a likely future candidate of the same shape: its own
-mirror table, its own scope, its own warehouse dependency, blank on failure.
+list) is the first instance of this. `account_usage_copy_history` (Rows,
+Size, Loaded, Status, Target Table, Filename on the "Pipes (n)" list) is the
+second: one row per pipe, its most recent load, read from
+`SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY` rather than `INFORMATION_SCHEMA` —
+the latter's `COPY_HISTORY` table function requires a `TABLE_NAME` argument
+with no schema-wide form, which would mean one round trip per distinct
+target table (worst case one per pipe) every time the list opens, against
+the round-trips-dominate principle below. `ACCOUNT_USAGE.COPY_HISTORY` is an
+ordinary view filterable by `PIPE_CATALOG_NAME`/`PIPE_SCHEMA_NAME`, so one
+query (collapsed to one row per pipe with `QUALIFY`) covers a whole schema's
+pipes at once, the same shape `table_stats` uses for tables. The trade-off:
+it needs `IMPORTED PRIVILEGES` on the `SNOWFLAKE` database (or
+`ACCOUNTADMIN`) and can lag real activity by up to ~2 hours — both are just
+another way this one scope degrades blank, the same as a missing warehouse
+does for `table_stats`, so nothing new had to be built to accommodate them.
 
 One landmine worth naming for whoever builds the next one: `object_kind` on
 a `Scope` is not a general "this is about tables" marker — it specifically
@@ -270,8 +282,9 @@ means "this is a `SHOW`-listing request for one schema", and
 `MainScreen.on_scope_needed` upgrades any scope carrying both a database and
 an object kind into a whole-database `SHOW`-prime. A new SELECT-backed scope
 that happens to also be about one object kind must leave `object_kind` unset
-(`table_stats_scope` and the existing `columns_scope` both do), or it gets
-silently redirected into fetching the wrong thing entirely.
+(`table_stats_scope`, `pipe_activity_scope` and the existing `columns_scope`
+all do), or it gets silently redirected into fetching the wrong thing
+entirely.
 
 ### Round trips dominate; payload is nearly free
 
@@ -918,6 +931,13 @@ Three things about it are worth knowing from inside snowcone:
 - `information_schema_tables`'s `LAST_DDL`/`LAST_ALTERED` columns are
   documentation-only, unverified against a live account, same caveat as the
   two gaps above.
+- `account_usage_copy_history`'s columns are likewise documentation-only,
+  unverified against a live account. It additionally needs `IMPORTED
+  PRIVILEGES` on the `SNOWFLAKE` database (or `ACCOUNTADMIN`) and can lag
+  real pipe activity by up to ~2 hours — neither has been confirmed against a
+  live account either, so the "Pipes (n)" list's activity columns may render
+  blank on an account without that grant even though everything else here
+  works.
 - Stages and tasks appear in the tree but have no Object view yet; they show a
   placeholder.
 - **Multiple databases can now be browsed and searched at once** — this
