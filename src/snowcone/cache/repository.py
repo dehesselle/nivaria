@@ -239,6 +239,13 @@ _COLUMNS = TableSpec(
     order_by=("TABLE_NAME", "ORDINAL_POSITION"),
 )
 
+_TABLE_STATS = TableSpec(
+    name="information_schema_tables",
+    columns=("TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "LAST_DDL", "LAST_ALTERED"),
+    key=("TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME"),
+    order_by=("TABLE_NAME",),
+)
+
 
 def spec_for(scope: Scope) -> TableSpec:
     match scope.kind:
@@ -251,6 +258,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _OBJECT_TABLES[scope.object_kind]
         case ScopeKind.COLUMNS:
             return _COLUMNS
+        case ScopeKind.TABLE_STATS:
+            return _TABLE_STATS
         case ScopeKind.WAREHOUSES:
             return _WAREHOUSES
         case ScopeKind.ROLES:

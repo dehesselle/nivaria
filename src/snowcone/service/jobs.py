@@ -129,6 +129,17 @@ def fetch_page(
                 allow_reconnect=allow_reconnect,
             )
             return rows, None
+        case ScopeKind.TABLE_STATS:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # A schema's table count is bounded, same reasoning as
+            # show_columns being deliberately unpaged.
+            return (
+                gateway.table_stats(
+                    scope.database, scope.schema, allow_reconnect=allow_reconnect
+                ),
+                None,
+            )
         case ScopeKind.WAREHOUSES:
             # Small, flat, unpaged lists -- see queries.show_warehouses.
             return gateway.show_warehouses(allow_reconnect=allow_reconnect), None

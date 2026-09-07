@@ -232,6 +232,47 @@ blob that is unpacked into type/length/precision/scale. The cache keeps
 each field — only the source changed. A type that cannot be parsed degrades to
 "unknown"; a column snowcone cannot describe is still a column worth listing.
 
+### A second source: one new mirror table per SELECT, never a retrofit
+
+`SHOW` remains the strong default above: it needs no warehouse and covers
+almost everything the tree and detail pane show. But some facts genuinely do
+not exist in any `SHOW` output — a table's last-DDL/last-altered timestamp is
+only in `INFORMATION_SCHEMA.TABLES`, an ordinary `SELECT` that needs a
+running warehouse. Rather than treat that as a reason to avoid the feature,
+or as a reason to make the whole detail pane depend on a warehouse, such a
+feature gets its own scope, needing its own warehouse, degrading on its own:
+a failed or missing pass for that one scope renders blank, while everything
+`SHOW`-sourced in the same view keeps showing yesterday's data. This is
+free — a SELECT-backed scope is an ordinary `Scope`/`TableSpec`, so
+`begin_pass`/`write_page`/`finish_pass`/`fail_pass`, the staleness sweep, and
+"a failed pass does not sweep" all apply unmodified. It also gets no special
+treatment from the sweep itself: a scope currently on screen is refreshed on
+the same TTL as everything else, warehouse or not — the sweep already only
+ever touches what is on screen, so there is nothing extra to opt in or out of.
+
+The shape rule is the mirror convention above, applied literally: **never
+retrofit a column onto an existing mirror table** — `schema.sql` is all
+`CREATE TABLE IF NOT EXISTS`, with no migration system, so there is no safe
+path to `ALTER` one. Each new SELECT-backed source instead gets a brand-new
+mirror table, named and shaped like the INFORMATION_SCHEMA view it reads
+(upper-case columns) — the same exception `information_schema_columns`
+already established for `SHOW COLUMNS`, just literally true this time
+instead of a SHOW result mapped onto that vocabulary.
+
+`information_schema_tables` (`LAST_DDL`, `LAST_ALTERED` on the "Tables (n)"
+list) is the first instance of this and the precedent for the next one —
+pipe COPY history is a likely future candidate of the same shape: its own
+mirror table, its own scope, its own warehouse dependency, blank on failure.
+
+One landmine worth naming for whoever builds the next one: `object_kind` on
+a `Scope` is not a general "this is about tables" marker — it specifically
+means "this is a `SHOW`-listing request for one schema", and
+`MainScreen.on_scope_needed` upgrades any scope carrying both a database and
+an object kind into a whole-database `SHOW`-prime. A new SELECT-backed scope
+that happens to also be about one object kind must leave `object_kind` unset
+(`table_stats_scope` and the existing `columns_scope` both do), or it gets
+silently redirected into fetching the wrong thing entirely.
+
 ### Round trips dominate; payload is nearly free
 
 Measured against the reference account: **~187 ms per `SHOW` round trip
@@ -874,6 +915,9 @@ Three things about it are worth knowing from inside snowcone:
 - Paging is unverified for views, pipes, stages and tasks (see above).
 - `SHOW COLUMNS IN DATABASE`/`IN SCHEMA` (column cache priming) are likewise
   unverified against a live account at scale.
+- `information_schema_tables`'s `LAST_DDL`/`LAST_ALTERED` columns are
+  documentation-only, unverified against a live account, same caveat as the
+  two gaps above.
 - Stages and tasks appear in the tree but have no Object view yet; they show a
   placeholder.
 - **Multiple databases can now be browsed and searched at once** — this

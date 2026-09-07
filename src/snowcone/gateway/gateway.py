@@ -92,6 +92,10 @@ class SnowflakeGateway(Protocol):
 
     def show_roles(self, *, allow_reconnect: bool = True) -> list[Row]: ...
 
+    def table_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
 
 class PoolGateway:
     """A gateway that borrows a pool connection per call.
@@ -247,3 +251,12 @@ class PoolGateway:
 
     def show_roles(self, *, allow_reconnect: bool = True) -> list[Row]:
         return self._fetch(queries.show_roles(), allow_reconnect=allow_reconnect)
+
+    def table_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.table_stats(database),
+            (schema, "BASE TABLE"),
+            allow_reconnect=allow_reconnect,
+        )

@@ -71,3 +71,14 @@ def test_show_warehouses_and_roles_are_unpaged() -> None:
 def test_use_role_and_warehouse_quote_the_identifier() -> None:
     assert queries.use_role("SYSADMIN") == 'USE ROLE "SYSADMIN"'
     assert queries.use_warehouse("my_wh") == 'USE WAREHOUSE "my_wh"'
+
+
+def test_table_stats_targets_information_schema_tables_with_bound_params() -> None:
+    """Unlike every SHOW builder above, TABLE_SCHEMA/TABLE_TYPE are left as
+    driver bind-params rather than interpolated -- an ordinary SELECT accepts
+    pyformat params where SHOW's `FROM 'literal'` cannot."""
+    assert queries.table_stats("MYDB") == (
+        "SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, LAST_DDL, LAST_ALTERED "
+        'FROM "MYDB".INFORMATION_SCHEMA.TABLES '
+        "WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = %s"
+    )

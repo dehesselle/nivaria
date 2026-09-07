@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 _AGE_UNITS: tuple[tuple[int, str], ...] = (
     (86400, "d"),
     (3600, "h"),
@@ -77,6 +79,65 @@ def format_data_type(
             return f"{data_type}({datetime_precision})"
         return data_type
     return data_type
+
+
+def _local(value: str) -> datetime:
+    """Parse a stored timestamp and convert it to this machine's local time.
+
+    Snowflake timestamps round-trip through sqlite with their original offset
+    intact (an aware `datetime`'s default adapter includes it), so a value
+    with an offset is a real instant and `astimezone()` converts it
+    correctly. A naive value (no offset -- not expected from the sources this
+    app reads today, but not verified either, see DESIGN.md's "Known gaps")
+    is presumed already local per `datetime.astimezone`'s own documented
+    behaviour, so it passes through with the same wall-clock numbers rather
+    than being silently reinterpreted as some other zone.
+    """
+    return datetime.fromisoformat(value).astimezone()
+
+
+def format_date(value: str | None) -> str:
+    """YYYY-MM-DD in local time, for a cell too narrow for the full timestamp.
+
+    Falls back to the raw value when it doesn't parse, the same
+    degrade-don't-fail convention `format_data_type` uses for an unparseable
+    SHOW COLUMNS type -- a timestamp snowcone cannot format is still a
+    timestamp worth showing.
+    """
+    if not value:
+        return ""
+    try:
+        return _local(value).strftime("%Y-%m-%d")
+    except ValueError:
+        return value
+
+
+def format_timestamp_minutes(value: str | None) -> str:
+    """YYYY-MM-DD HH:MM in local time, same reasoning as `format_date`."""
+    if not value:
+        return ""
+    try:
+        return _local(value).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return value
+
+
+def format_timestamp_full(value: str | None) -> str:
+    """The full-precision local timestamp, for a hover tooltip over a
+    truncated cell.
+
+    Always carries a local UTC offset, even for a naive input: `_local`
+    returns a genuinely aware `datetime` either way (converted for an aware
+    input, tagged with the local zone for a naive one), so `%z` is never
+    blank here -- `.strip()` only guards a hypothetical empty offset, not one
+    that's actually expected in practice.
+    """
+    if not value:
+        return ""
+    try:
+        return _local(value).strftime("%Y-%m-%d %H:%M:%S %z").strip()
+    except ValueError:
+        return value
 
 
 def truncate_middle(text: str, width: int) -> str:

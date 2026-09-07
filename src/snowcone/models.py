@@ -50,6 +50,17 @@ class ScopeKind(StrEnum):
     #: many tables' COLUMNS scopes from one statement, either for a whole
     #: database (schema is None) or for one schema's fallback chunk.
     COLUMNS_PRIME = "columns_prime"
+    #: A schema's tables' LAST_DDL/LAST_ALTERED, sourced by a real SELECT
+    #: against INFORMATION_SCHEMA.TABLES rather than SHOW -- the first
+    #: deliberate exception to SHOW-only (see DESIGN.md). Scoped to
+    #: (database, schema) like OBJECTS, but backed by its own mirror table
+    #: rather than a retrofit onto show_tables, since schema.sql has no
+    #: migration system. Deliberately carries no object_kind: a scope with
+    #: both object_kind and database set gets silently upgraded to a
+    #: whole-database SHOW-prime by MainScreen.on_scope_needed, which would
+    #: fetch SHOW TABLES, not this SELECT -- columns_scope avoids the same
+    #: trap the same way, for a table's own single-object fetch.
+    TABLE_STATS = "table_stats"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
 
@@ -102,6 +113,8 @@ class Scope:
                 if self.schema is None:
                     return f"columns_prime:{self.database}"
                 return f"columns_prime:{self.database}.{self.schema}"
+            case ScopeKind.TABLE_STATS:
+                return f"table_stats:{self.database}.{self.schema}"
             case ScopeKind.WAREHOUSES:
                 return "warehouses"
             case ScopeKind.ROLES:
@@ -133,6 +146,11 @@ def prime_scope(kind: ObjectKind, database: str) -> Scope:
 
 def columns_prime_scope(database: str, schema: str | None = None) -> Scope:
     return Scope(ScopeKind.COLUMNS_PRIME, database=database, schema=schema)
+
+
+def table_stats_scope(database: str, schema: str) -> Scope:
+    # No object_kind -- see ScopeKind.TABLE_STATS's comment.
+    return Scope(ScopeKind.TABLE_STATS, database=database, schema=schema)
 
 
 def warehouses_scope() -> Scope:

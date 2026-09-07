@@ -10,6 +10,7 @@ from snowcone.models import (
     objects_scope,
     roles_scope,
     schemas_scope,
+    table_stats_scope,
     warehouses_scope,
 )
 
@@ -72,6 +73,19 @@ def test_scope_defaults_leave_unused_fields_none() -> None:
     scope = Scope(ScopeKind.DATABASES)
     assert scope.database is None
     assert scope.object_kind is None
+
+
+def test_table_stats_scope_key() -> None:
+    assert table_stats_scope("MYDB", "PUBLIC").key == "table_stats:MYDB.PUBLIC"
+
+
+def test_table_stats_scope_carries_no_object_kind() -> None:
+    """Regression: MainScreen.on_scope_needed upgrades any scope with both
+    object_kind and database set into a whole-database SHOW TABLES prime,
+    regardless of scope.kind -- setting object_kind here would silently
+    misroute every ensure()-triggered fetch of this scope into that prime
+    instead of the INFORMATION_SCHEMA SELECT this scope actually needs."""
+    assert table_stats_scope("MYDB", "PUBLIC").object_kind is None
 
 
 def test_warehouses_and_roles_are_flat_scopes_like_databases() -> None:

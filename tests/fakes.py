@@ -110,6 +110,7 @@ class FakeGateway:
         columns: dict[tuple[str, str, str], list[str]] | None = None,
         warehouses: list[str] | None = None,
         roles: list[str] | None = None,
+        table_stats: dict[tuple[str, str], list[Row]] | None = None,
     ) -> None:
         self.databases = databases or []
         self.schemas = schemas or {}
@@ -117,6 +118,12 @@ class FakeGateway:
         self.columns = columns or {}
         self.warehouses = warehouses or []
         self.roles = roles or []
+        # Named differently from the table_stats() method below -- an
+        # instance attribute of the same name would shadow it.
+        self._table_stats = table_stats or {}
+        #: Flip to simulate a warehouse-dependent query failing, e.g. "no
+        #: active warehouse" -- table_stats is the first fetch that needs one.
+        self.raise_on_table_stats = False
         #: Every call, so a test can assert *what was fetched*, not merely
         #: what ended up rendered.
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -301,3 +308,11 @@ class FakeGateway:
     def show_roles(self, *, allow_reconnect: bool = True) -> list[Row]:
         self.calls.append(("show_roles", ()))
         return [{"name": name, "comment": ""} for name in sorted(self.roles)]
+
+    def table_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("table_stats", (database, schema)))
+        if self.raise_on_table_stats:
+            raise RuntimeError("No active warehouse selected in the current session")
+        return list(self._table_stats.get((database, schema), []))

@@ -93,6 +93,30 @@ def test_warehouses_and_roles_are_fetched_in_one_shot() -> None:
     assert cursor is None
 
 
+def test_table_stats_is_fetched_in_one_shot() -> None:
+    """A schema's table count is bounded, like columns -- no paging needed."""
+    from snowcone.models import table_stats_scope
+
+    gateway = FakeGateway(
+        table_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "TABLE_CATALOG": "MYDB",
+                    "TABLE_SCHEMA": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                    "LAST_DDL": "2026-01-01",
+                    "LAST_ALTERED": "2026-01-02",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway, table_stats_scope("MYDB", "PUBLIC"), None, limit=1
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
 # -------------------------------------------------------------- end to end
 
 
@@ -624,6 +648,70 @@ def test_columns_are_fetched_without_a_warehouse(repo) -> None:
         service.stop()
     assert [c.column_name for c in repo.columns(scope).rows] == ["ID", "TOTAL"]
     assert [c[0] for c in gateway.calls] == ["show_columns"]
+
+
+def test_table_stats_scope_reaches_the_right_gateway_call(repo) -> None:
+    from snowcone.models import table_stats_scope
+
+    gateway = FakeGateway(
+        table_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "TABLE_CATALOG": "MYDB",
+                    "TABLE_SCHEMA": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                    "LAST_DDL": "2026-01-01",
+                    "LAST_ALTERED": "2026-01-02",
+                }
+            ]
+        }
+    )
+    scope = table_stats_scope("MYDB", "PUBLIC")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["TABLE_NAME"] for row in repo.raw_rows(scope)] == ["ORDERS"]
+    assert [c[0] for c in gateway.calls] == ["table_stats"]
+
+
+def test_a_failing_table_stats_fetch_keeps_previously_cached_stats(repo) -> None:
+    """ "A failed pass does not sweep" for this scope specifically -- a session
+    that loses its warehouse mid-browse must not blank out timestamps that
+    were already fetched successfully."""
+    from snowcone.models import table_stats_scope
+
+    gateway = FakeGateway(
+        table_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "TABLE_CATALOG": "MYDB",
+                    "TABLE_SCHEMA": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                    "LAST_DDL": "2026-01-01",
+                    "LAST_ALTERED": "2026-01-02",
+                }
+            ]
+        }
+    )
+    scope = table_stats_scope("MYDB", "PUBLIC")
+    errors: list[str] = []
+    service = make_service(
+        gateway, repo, on_error=lambda s, message: errors.append(message)
+    )
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+
+        gateway.raise_on_table_stats = True
+        service.request(scope, Priority.INTERACTIVE)
+        assert wait_until(lambda: bool(errors))
+    finally:
+        service.stop()
+    assert repo.entry(scope).state is CacheState.ERROR
+    assert [row["TABLE_NAME"] for row in repo.raw_rows(scope)] == ["ORDERS"]
 
 
 # --------------------------------------------------------- columns-wide prime

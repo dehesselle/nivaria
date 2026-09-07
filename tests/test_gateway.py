@@ -182,6 +182,25 @@ def test_show_roles_sends_the_unpaged_statement() -> None:
     assert params is None
 
 
+def test_table_stats_binds_schema_and_table_type_as_parameters() -> None:
+    """The first gateway call that actually populates `params` -- unlike the
+    SHOW builders, TABLE_SCHEMA/TABLE_TYPE are bound, not interpolated."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "TABLE_CATALOG",
+        "TABLE_SCHEMA",
+        "TABLE_NAME",
+        "LAST_DDL",
+        "LAST_ALTERED",
+    ]
+    connection.rows = [("MYDB", "PUBLIC", "ORDERS", "2026-01-01", "2026-01-02")]
+    rows = gateway.table_stats("MYDB", "PUBLIC")
+    statement, params = connection.executed[-1]
+    assert 'FROM "MYDB".INFORMATION_SCHEMA.TABLES' in statement
+    assert params == ("PUBLIC", "BASE TABLE")
+    assert rows[0]["TABLE_NAME"] == "ORDERS"
+
+
 def test_background_priority_retries_but_never_reconnects_unattended() -> None:
     """The retry itself must respect allow_reconnect: a background-priority
     caller whose only connection just failed must not have it replaced by a

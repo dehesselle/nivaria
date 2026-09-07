@@ -16,6 +16,7 @@ from snowcone.models import (
     ObjectRef,
     columns_scope,
     objects_scope,
+    table_stats_scope,
 )
 from snowcone.ui.messages import ScopeNeeded
 from snowcone.ui.views.base import registered_kinds, view_for
@@ -97,6 +98,18 @@ def put_columns(repo: Repository, table: str, *columns: tuple) -> None:
             row.update(rest[0])
         rows.append(row)
     load(repo, columns_scope("MYDB", "PUBLIC", table), rows)
+
+
+def put_table_stats(repo: Repository, table: str, **extra) -> None:
+    row = {
+        "TABLE_CATALOG": "MYDB",
+        "TABLE_SCHEMA": "PUBLIC",
+        "TABLE_NAME": table,
+        "LAST_DDL": "2026-01-01 00:00:00",
+        "LAST_ALTERED": "2026-01-02 00:00:00",
+    }
+    row.update(extra)
+    load(repo, table_stats_scope("MYDB", "PUBLIC"), [row])
 
 
 def put_pipe(repo: Repository, name: str, **extra) -> ObjectRef:
@@ -415,7 +428,55 @@ async def test_the_table_list_view_lists_every_cached_table(repo) -> None:
         assert table.get_cell_at((0, 0)).plain == "CUSTOMERS"
         assert table.get_cell_at((0, 1)).plain == "7"
         assert table.get_cell_at((1, 0)).plain == "ORDERS"
-        assert table.get_cell_at((1, 3)).plain == "2026-01-01 00:00:00"
+        # Truncated to the calendar day -- the full timestamp is a hover
+        # tooltip now, see test_table_list_hover.py.
+        assert table.get_cell_at((1, 3)).plain == "2026-01-01"
+
+
+async def test_table_stats_columns_render_when_the_scope_has_data(repo) -> None:
+    put_table(repo, "ORDERS", created_on="2026-01-01 00:00:00")
+    put_table_stats(
+        repo,
+        "ORDERS",
+        LAST_DDL="2026-03-01 08:00:00",
+        LAST_ALTERED="2026-03-02 09:30:00",
+    )
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 3)).plain == "2026-01-01"
+        assert table.get_cell_at((0, 4)).plain == "2026-03-01"
+        assert table.get_cell_at((0, 5)).plain == "2026-03-02 09:30"
+
+
+async def test_table_stats_columns_are_blank_without_a_successful_stats_pass(
+    repo,
+) -> None:
+    """A missing/failed stats scope must not block the SHOW-sourced columns:
+    the row still renders, just with the two SELECT-sourced cells blank."""
+    put_table(repo, "ORDERS")
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 4)).plain == ""
+        assert table.get_cell_at((0, 5)).plain == ""
+
+
+def test_table_list_view_scopes_includes_the_stats_scope(repo) -> None:
+    """This is what wires the new scope into the background staleness sweep
+    (MainScreen._sweep reads self.detail.scopes()) with no other plumbing."""
+    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    view = TableListView(repo, scope)
+    assert table_stats_scope("MYDB", "PUBLIC") in view.scopes()
 
 
 async def test_moving_between_two_schemas_tables_reuses_the_list_view(repo) -> None:

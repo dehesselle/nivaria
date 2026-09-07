@@ -164,6 +164,24 @@ def show_columns_in_schema(
     return f"SHOW COLUMNS IN SCHEMA {target}{_paging(after, limit)}"
 
 
+def table_stats(database: str) -> str:
+    """LAST_DDL/LAST_ALTERED for every base table in a schema.
+
+    An ordinary SELECT against INFORMATION_SCHEMA.TABLES -- unlike every
+    builder above, this needs a running warehouse (see DESIGN.md's
+    dual-source note). TABLE_SCHEMA and TABLE_TYPE are left as `%s`
+    placeholders for the caller to bind rather than interpolated: unlike
+    `SHOW ... FROM`, an ordinary SELECT accepts the driver's pyformat bind
+    parameters, better injection hygiene than `quote_literal`. Only the
+    database needs `quote_identifier` -- an identifier can't be bound.
+    """
+    target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.TABLES"
+    return (
+        "SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, LAST_DDL, LAST_ALTERED "
+        f"FROM {target} WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = %s"
+    )
+
+
 def _data_type_fields(raw: object) -> dict[str, object]:
     """Unpack SHOW COLUMNS' data_type, which is a JSON string.
 

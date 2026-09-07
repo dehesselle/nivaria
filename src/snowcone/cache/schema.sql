@@ -197,6 +197,28 @@ CREATE TABLE IF NOT EXISTS information_schema_columns (
 CREATE INDEX IF NOT EXISTS information_schema_columns_scope
     ON information_schema_columns(_scope);
 
+-- LAST_DDL/LAST_ALTERED for the "Tables (n)" list, sourced via a real SELECT
+-- against INFORMATION_SCHEMA.TABLES (needs a running warehouse) rather than
+-- SHOW -- see DESIGN.md's dual-source note. LAST_DDL is a pure DDL
+-- timestamp; LAST_ALTERED is the closest available proxy for "last DML" --
+-- it also covers DDL and background metadata operations, so the UI labels
+-- it "Last Altered", not "Last DML". Unlike every SHOW-sourced table above,
+-- this column set is NOT verified against a live account -- it is taken
+-- from Snowflake's published INFORMATION_SCHEMA.TABLES documentation only.
+CREATE TABLE IF NOT EXISTS information_schema_tables (
+    TABLE_CATALOG TEXT NOT NULL,
+    TABLE_SCHEMA  TEXT NOT NULL,
+    TABLE_NAME    TEXT NOT NULL,
+    LAST_DDL      TEXT,
+    LAST_ALTERED  TEXT,
+    _scope        TEXT    NOT NULL,
+    _generation   INTEGER NOT NULL,
+    _fetched_at   REAL    NOT NULL,
+    PRIMARY KEY (TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME)
+);
+CREATE INDEX IF NOT EXISTS information_schema_tables_scope
+    ON information_schema_tables(_scope);
+
 -- The freshness ledger: one row per separately-refreshable scope. This is
 -- what makes a refresh surgical rather than "fetch everything again".
 CREATE TABLE IF NOT EXISTS cache_entry (

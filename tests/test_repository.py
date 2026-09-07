@@ -429,9 +429,10 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _DATABASES,
         _OBJECT_TABLES,
         _SCHEMAS,
+        _TABLE_STATS,
     )
 
-    specs = [_DATABASES, _SCHEMAS, _COLUMNS, *_OBJECT_TABLES.values()]
+    specs = [_DATABASES, _SCHEMAS, _COLUMNS, _TABLE_STATS, *_OBJECT_TABLES.values()]
     with repo._db.connect() as connection:
         for spec in specs:
             actual = {
@@ -492,3 +493,29 @@ def test_a_verified_snowflake_column_survives_a_round_trip(repo) -> None:
     assert stored["is_iceberg"] == "N"
     assert stored["rows"] == 42
     assert "is_immutable" not in stored
+
+
+def test_table_stats_columns_round_trip_but_are_unverified(repo) -> None:
+    """Unlike test_a_verified_snowflake_column_survives_a_round_trip's SHOW
+    TABLES columns, this shape comes from Snowflake's published
+    INFORMATION_SCHEMA.TABLES documentation, not a probed live account -- see
+    DESIGN.md "Known gaps"."""
+    from snowcone.models import table_stats_scope
+
+    scope = table_stats_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "TABLE_CATALOG": "MYDB",
+                "TABLE_SCHEMA": "PUBLIC",
+                "TABLE_NAME": "ORDERS",
+                "LAST_DDL": "2026-01-01 00:00:00",
+                "LAST_ALTERED": "2026-01-02 00:00:00",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["LAST_DDL"] == "2026-01-01 00:00:00"
+    assert stored["LAST_ALTERED"] == "2026-01-02 00:00:00"
