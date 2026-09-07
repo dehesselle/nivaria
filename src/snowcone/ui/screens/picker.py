@@ -23,6 +23,13 @@ from snowcone.fuzzy import highlight, rank
 #: More than a screenful is wasted ranking; the query narrows it anyway.
 MAX_RESULTS = 200
 
+#: Separates multiple hints on the same candidate. Same glyph SearchScreen
+#: uses between an object's kind and a matched column name, but spaced evenly
+#: on both sides here: SearchScreen's "  · " is a connector appended after an
+#: already-spaced "  {kind}" segment, not a `str.join` separator sitting
+#: between two bare strings with nothing else contributing spacing.
+_HINT_SEPARATOR = " · "
+
 
 class PickerScreen(DialogScreen[str]):
     """Pick one string from `candidates`, or dismiss with None."""
@@ -39,7 +46,7 @@ class PickerScreen(DialogScreen[str]):
         title: str = "Pick",
         placeholder: str = "type to filter",
         current: str | None = None,
-        hints: Mapping[str, str] | None = None,
+        hints: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         super().__init__()
         self._candidates = list(candidates)
@@ -135,13 +142,17 @@ class PickerScreen(DialogScreen[str]):
         return text
 
     def _annotation(self, name: str) -> str | None:
-        """Trailing dimmed text for `name`: its hint, its `(current)` marker,
-        or both -- one composed mechanic rather than two parallel ones, since
-        both are just dimmed context appended after the name."""
+        """Trailing dimmed text for `name`: its hints (joined by a middle
+        dot when there is more than one) and its `(current)` marker -- one
+        composed mechanic rather than parallel ones, since both are just
+        dimmed context appended after the name. `(current)` is joined onto
+        the hints with a plain gap rather than the dot: its own parentheses
+        already set it apart, and it is always exactly one thing, never a
+        list to separate."""
         parts = []
-        hint = self._hints.get(name)
-        if hint:
-            parts.append(hint)
+        hints = [hint for hint in self._hints.get(name, ()) if hint]
+        if hints:
+            parts.append(_HINT_SEPARATOR.join(hints))
         if name == self._current:
             parts.append("(current)")
         return "  ".join(parts) if parts else None

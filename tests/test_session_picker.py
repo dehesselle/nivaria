@@ -128,6 +128,28 @@ async def test_the_warehouse_picker_shows_size_as_a_hint(repo) -> None:
     assert prompt.plain == "COMPUTE_WH  X-Small"
 
 
+async def test_the_default_warehouse_shows_a_default_hint(repo) -> None:
+    load(
+        repo,
+        warehouses_scope(),
+        [
+            {"name": "COMPUTE_WH", "comment": "", "size": "X-Small", "is_default": "Y"},
+            {"name": "ETL_WH", "comment": "", "size": "Large", "is_default": "N"},
+        ],
+    )
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    app = Harness(repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await open_via_menu(pilot, "w")
+        options = app.screen.query_one("#picker-results", OptionList)
+        default_prompt = options.get_option_at_index(0).prompt
+        other_prompt = options.get_option_at_index(1).prompt
+    assert default_prompt.plain == "COMPUTE_WH  X-Small · default"
+    assert other_prompt.plain == "ETL_WH  Large"
+
+
 async def test_an_empty_warehouse_cache_requests_a_fetch_instead_of_a_dead_dialog(
     repo,
 ) -> None:

@@ -154,6 +154,7 @@ class Warehouse:
     name: str
     comment: str = ""
     size: str = ""
+    is_default: bool = False
 
 
 @dataclass(frozen=True)

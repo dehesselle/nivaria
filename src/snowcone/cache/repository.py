@@ -206,7 +206,7 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
 
 _WAREHOUSES = TableSpec(
     name="show_warehouses",
-    columns=("name", "comment", "size"),
+    columns=("name", "comment", "size", "is_default"),
     key=("name",),
     order_by=("name",),
 )
@@ -379,6 +379,7 @@ class Repository:
                 name=row["name"],
                 comment=row["comment"] or "",
                 size=row["size"] or "",
+                is_default=row["is_default"] == "Y",
             ),
         )
 

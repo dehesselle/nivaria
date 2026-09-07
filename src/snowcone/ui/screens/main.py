@@ -7,6 +7,7 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from math import ceil
 from typing import ClassVar
 
@@ -24,6 +25,7 @@ from snowcone.models import (
     ObjectRef,
     SchemaRef,
     Scope,
+    Warehouse,
     columns_prime_scope,
     databases_scope,
     prime_scope,
@@ -409,11 +411,24 @@ class MainScreen(Screen):
                 title="Warehouse",
                 placeholder="type to filter warehouses",
                 current=current,
-                hints={row.name: row.size for row in cached.rows if row.size},
+                hints=self._warehouse_hints(cached.rows),
             )
         )
         if chosen is not None and chosen != current:
             self._switch_warehouse(chosen)
+
+    @staticmethod
+    def _warehouse_hints(rows: Sequence[Warehouse]) -> dict[str, list[str]]:
+        """Size and, when set, `default` -- size first, since it is the more
+        common reason to look twice at a row."""
+        hints: dict[str, list[str]] = {}
+        for row in rows:
+            parts = [row.size] if row.size else []
+            if row.is_default:
+                parts.append("default")
+            if parts:
+                hints[row.name] = parts
+        return hints
 
     def action_pick_role(self) -> None:
         self._pick_role()
