@@ -84,7 +84,7 @@ async def test_the_connect_menu_offers_the_documented_entries(repo) -> None:
         labels = [item.label for item in app.screen.query(MenuItem)]
         assert labels == [
             "Open...",
-            "Database ...",
+            "Databases ...",
             "Warehouse ...",
             "Role ...",
             "Pre-warm cache",

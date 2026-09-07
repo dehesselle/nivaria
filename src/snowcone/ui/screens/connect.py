@@ -25,6 +25,7 @@ browser prompts -- there is nothing left for the user to weigh in on, and
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from typing import ClassVar
 
 from tcw.screens import ConfirmScreen
@@ -36,7 +37,6 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
-from snowcone.connections import RecentConnections, RecentEntry
 from snowcone.gateway.pool import (
     AUTHENTICATORS,
     EXTERNAL_BROWSER,
@@ -46,6 +46,7 @@ from snowcone.gateway.pool import (
     Connector,
     ConnectParams,
 )
+from snowcone.profiles import Profile, ProfileStore
 from snowcone.ui.screens.connecting import ConnectingScreen
 
 # OAuth listed first: it is the dialog's default, ahead of the two
@@ -83,15 +84,15 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
 
     def __init__(
         self,
-        recent: RecentConnections | None = None,
+        recent: ProfileStore | None = None,
         *,
         pool_size: int = 3,
         connector: Connector | None = None,
-        prefill: RecentEntry | None = None,
+        prefill: Profile | None = None,
     ) -> None:
         super().__init__()
-        self._recent_store = recent or RecentConnections()
-        self._recent: list[RecentEntry] = self._recent_store.load()
+        self._profile_store = recent or ProfileStore()
+        self._recent: list[Profile] = self._profile_store.load()
         self._pool_size = pool_size
         self._connector = connector
         self._prefill = prefill or (self._recent[0] if self._recent else None)
@@ -109,15 +110,25 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
                 # a short terminal loses field visibility rather than losing
                 # the means to submit or leave.
                 with VerticalScroll(id="connect-fields"):
-                    yield Select(
-                        [
-                            (label, value)
-                            for value, label in _AUTHENTICATOR_LABELS.items()
-                        ],
-                        value=entry.authenticator if entry else OAUTH,
-                        allow_blank=False,
-                        id="authenticator",
-                    )
+                    # Both optional-ish and both short: the name is never
+                    # required, and the authenticator always has a default,
+                    # so pairing them buys back a row the same way role and
+                    # warehouse do below.
+                    with Horizontal(id="connect-identity"):
+                        yield Input(
+                            value=entry.name if entry else "",
+                            placeholder="name",
+                            id="name",
+                        )
+                        yield Select(
+                            [
+                                (label, value)
+                                for value, label in _AUTHENTICATOR_LABELS.items()
+                            ],
+                            value=entry.authenticator if entry else OAUTH,
+                            allow_blank=False,
+                            id="authenticator",
+                        )
                     yield Input(
                         value=entry.account if entry else "",
                         placeholder="account (ORG-ACCOUNT)",
@@ -230,7 +241,8 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     def _value(self, field: str) -> str:
         return self.query_one(f"#{field}", Input).value.strip()
 
-    def _fill_from(self, entry: RecentEntry) -> None:
+    def _fill_from(self, entry: Profile) -> None:
+        self.query_one("#name", Input).value = entry.name
         self.query_one("#authenticator", Select).value = entry.authenticator
         self.query_one("#account", Input).value = entry.account
         self.query_one("#user", Input).value = entry.user
@@ -248,8 +260,8 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     def delete_recent(self, index: int) -> None:
         if not 0 <= index < len(self._recent):
             return
-        self._recent_store.remove(self._recent[index])
-        self._recent = self._recent_store.load()
+        self._profile_store.remove(self._recent[index])
+        self._recent = self._profile_store.load()
         option_list = self.query_one("#recent-list", RecentList)
         option_list.clear_options()
         if self._recent:
@@ -375,8 +387,28 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
 
     def _finish(self, params: ConnectParams, pool: ConnectionPool) -> None:
         # Recorded only now: a connection that never worked is not one worth
-        # offering again next time.
-        self._recent_store.add(RecentEntry.from_params(params))
+        # offering again next time. The previously-remembered database
+        # selection for this identity (if any) is carried forward explicitly:
+        # Profile.from_params has no way to know it -- a bare ConnectParams
+        # carries no database-selection information -- and without this an
+        # ordinary reconnect would silently wipe out
+        # MainScreen._remember_databases's earlier write for the same
+        # identity, since ProfileStore.add replaces the whole record for a
+        # matching identity rather than merging into it. The name, unlike
+        # databases, comes straight from the form just submitted -- it is
+        # an editable field right here, not state owned elsewhere, so
+        # whatever is currently typed (including blank, if cleared) is what
+        # should stick.
+        fresh = Profile.from_params(params)
+        existing = next(
+            (p for p in self._profile_store.load() if p.identity == fresh.identity),
+            None,
+        )
+        databases = existing.databases if existing is not None else ()
+        name = self._value("name")
+        self._profile_store.add(
+            dataclasses.replace(fresh, name=name, databases=databases)
+        )
         self.dismiss(pool)
 
     def _on_key(self, event: events.Key) -> None:

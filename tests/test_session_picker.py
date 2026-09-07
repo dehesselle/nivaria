@@ -263,7 +263,7 @@ async def test_a_successful_role_switch_repoints_the_screen_at_a_new_cache(
         assert app.repo is app.screen.repo
         # Nothing was picked yet under the new identity, so browsing resets --
         # same as a fresh connect, not a database switch.
-        assert app.screen.database is None
+        assert app.screen.databases == []
 
 
 async def test_switching_back_to_a_role_reopens_its_own_warm_cache(repo) -> None:

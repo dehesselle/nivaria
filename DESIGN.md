@@ -36,15 +36,15 @@ Use these names when discussing changes.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                            Menu bar (F9)                                 │
 ├────────────────────┬─────────────────────────────────────────────────────┤
-│ ┌─ MYDB ──────────┐│ Context bar                                         │
-│ │                 │├─────────────────────────────────────────────────────┤
-│ │                 ││                                                     │
+│ ┌─────────────────┐│ Context bar                                         │
+│ │  MYDB (12)      │├─────────────────────────────────────────────────────┤
+│ │  OTHERDB (5)    ││                                                     │
 │ │   Object tree   ││                                                     │
 │ │                 ││              Detail pane                            │
 │ │                 ││        (hosts exactly one Object view)              │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ ^d Database  / Search  r Refresh  F10 Quit  Role  Warehouse  Countdown  (2/5)│
+│ ^d Databases  / Search  r Refresh  F10 Quit  Role  Warehouse  Countdown  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
@@ -56,9 +56,9 @@ terminal:
 │ ┌────────────────────────────────────────────────────────────────────┐   │
 │ │ search objects                                                      │   │
 │ │ ......................................................................│
-│ │  STAGING.STG_CUSTOMER_ORDERS                                 table  │   │
-│ │  SALES.ORDERS                                                  view │   │
-│ │  RAW.LOAD_ORDERS                                               pipe │   │
+│ │  MYDB.STAGING.STG_CUSTOMER_ORDERS                            table  │   │
+│ │  MYDB.SALES.ORDERS                                              view │   │
+│ │  OTHERDB.RAW.LOAD_ORDERS                                       pipe │   │
 │ │  ...                                                                │   │
 │ └────────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -66,11 +66,11 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Database ...** (`d`, `Ctrl+D` shown right-aligned) to open the fuzzy-picker pattern described below over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to do the same over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the current database's column cache in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
-| **Object tree** | The browser. `Schemas (n)` → schema → `Tables (n)` / `Views (n)` / … → object. Its border title is the current database (`(none)` until one is picked); `ctrl+d` opens the **Database picker**, a fuzzy modal over cached databases. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerScreen`, see "The database picker" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerScreen`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
 | **Top pane** | Holds the Context bar. |
 | **Context bar** | Contributed by the active Object view — identity and headline facts about what is selected. |
-| **Search modal** | Find-as-you-type over every cached object in the current database, opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
+| **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
 | **Detail pane** | Hosts exactly one **Object view** at a time, chosen by object kind. |
 | **Object view** | The per-kind detail UI (e.g. Table view, Pipe view). Owns both its detail body and its Context bar contribution. |
 | **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
@@ -271,13 +271,17 @@ A table's columns are fetched lazily by default — one `SHOW COLUMNS IN TABLE`
 per table, only when that table's detail view is opened (see "The Object
 tree" and the registry section below). That leaves most tables in a database
 with no cached columns at all, which is fine for the detail pane but means
-column names are absent from search for anything nobody has personally
-opened.
+column names would be absent from search for anything nobody has personally
+opened — moot for the moment anyway, since column search itself is currently
+disabled entirely (see "Known gaps"); this priming mechanism stays useful for
+the detail pane and is ready to serve search again once that is re-enabled.
 
 **Pre-warm cache** (Connect menu) fixes that on demand — there is no
 automatic trigger, since there was no good signal found for "the user wants
 this now" short of asking. Selecting it fires three background requests at
-once for the current database: the table and view object lists (via the
+once for whatever database the cursor is currently under (multiple databases
+can be selected, so this acts on the focused one, the same convention
+`action_refresh`/`r` uses): the table and view object lists (via the
 existing `DATABASE_PRIME` mechanism above) and a `COLUMNS_PRIME` scope. The
 first two exist so the third has schema and table names to fall back to, not
 as an afterthought — see below.
@@ -436,12 +440,19 @@ browser every time the access token expires.
 > ceiling. macOS Keychain has no equivalent restriction, so this is
 > Windows-only.
 
-**snowcone stores no password anywhere.** Recent connections keep account,
-user, authenticator, role and warehouse only. For SSO and OAuth there is
-nothing to store -- the driver obtains and caches its own credential; for
-password+MFA the driver's own token cache already means the password is typed
-once per machine rather than once per connection. Connections are recorded as
-"recent" only after they have actually worked.
+**snowcone stores no password anywhere.** Each remembered identity is a
+`Profile` (`snowcone/profiles.py`, on disk at `recent.json`): account, user,
+authenticator, role and warehouse, plus the databases last selected for that
+identity's Object tree (see "The Object tree" above) -- UI state riding on
+the same record because it is naturally scoped to the same identity, which is
+also why the type outgrew being just a bundle of connection parameters. For
+SSO and OAuth there is nothing to store -- the driver obtains and caches its
+own credential; for password+MFA the driver's own token cache already means
+the password is typed once per machine rather than once per connection.
+Connections are recorded as "recent" only after they have actually worked --
+but a database selection is written the moment the picker confirms one, live,
+since there is no equivalent "did it work" gate for a UI preference the way
+there is for a connection attempt.
 
 ---
 
@@ -561,12 +572,15 @@ widget in the top pane because search is the primary way to navigate a
 database of thousands of objects, and it earns the room only a modal can take
 without permanently stealing it from the tree and detail pane.
 
-Find-as-you-type over every cached object, column, and schema in the current
+Find-as-you-type over every cached object and schema across every selected
 database, ranked by subsequence matching so `stgord` finds
 `STG_CUSTOMER_ORDERS`. Substring search would not, which is the whole point;
 sqlite's full-text matching cannot express it either, so ranking happens in
 Python over three in-memory corpora — object names, column names (paired with
-their owning object), and schema names.
+their owning object), and schema names. Column search is currently disabled
+— see "Known gaps" — but the corpus and its ranking logic below are otherwise
+described as still live, since the code is unchanged, only its one call site
+in `SearchScreen.on_mount` is commented out.
 
 A trigram/substring index (SQLite's FTS5) was considered as a way to push
 matching into SQL instead. Rejected: it cannot express subsequence matching
@@ -584,7 +598,9 @@ schema lists are cheap (~5ms even at 2000 objects), but the column corpus is
 real work: measured at ~55-75ms for 30k cached columns, and ~700ms at 270k.
 Fetching all three together would mean the cheap ones wait on the slowest —
 splitting them means name and schema matches are usable almost immediately,
-with column matches joining in once their own load lands.
+with column matches joining in once their own load lands (when that load
+runs at all — see "Known gaps": column search's task creation is currently
+commented out, so in practice only two of the three loads fire).
 
 Typing never waits on a load either: ranking proceeds against whatever
 corpus already exists — empty, partial, or complete — and each load re-runs
@@ -592,7 +608,7 @@ the current query itself once it finishes, so the list corrects itself in
 place rather than a keystroke ever blocking on it. **Enter is the one
 exception**: choosing a result and closing the dialog is a commitment a
 still-partial corpus should not get to make, so that path alone waits for
-all three loads first.
+every load that is actually running first.
 
 None of the three corpora carry live staleness tracking, for the same reason:
 there is no widget left mounted for a cache update to mark them stale while
@@ -612,6 +628,15 @@ a `STAGING` schema full of `STG_` tables — and greedy left-to-right matching
 otherwise spends the query's leading characters inside the schema, leaving a
 poor alignment in the name. Without this, `stgord` ranks `STAGING.LOAD_ORDERS`
 *above* `STAGING.STG_CUSTOMER_ORDERS`.
+
+The displayed text also carries a `DATABASE.` prefix ahead of `SCHEMA.NAME`,
+since several databases can be selected at once now — but that prefix is
+added purely at render time (`SearchScreen._option_text`) and deliberately
+excluded from ranking itself. Extending the schema/name qualification to a
+third, database level would spend the query's leading characters on the
+database too, for no benefit: there is no database-repeats-inside-object-name
+ambiguity the way `STAGING`/`STG_` justifies it for schema. Don't assume the
+database participates in match scoring the way the schema does — it doesn't.
 
 Column and schema names are matched against the bare name only — there is no
 schema-repeats-in-object-name ambiguity to resolve for either, so the simpler
@@ -670,7 +695,9 @@ key bindings keep working without being re-implemented.
   (see "`SHOW`, because it needs no warehouse" above) — but role never
   legitimately does. Picked from **Connect > Role ...** / **Warehouse
   ...**, the same fuzzy-picker-over-cached-rows pattern as the database
-  picker, backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
+  picker (`PickerScreen`, single-select -- the database picker is the
+  multi-select sibling, `MultiPickerScreen`, see "The Object tree" above),
+  backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
   — small, flat, unpaged lists, unlike the object mirrors), requested
   eagerly on mount alongside the database list rather than on the picker's
   first open — lazily fetching it there meant the first open ever just
@@ -849,15 +876,27 @@ Three things about it are worth knowing from inside snowcone:
   unverified against a live account at scale.
 - Stages and tasks appear in the tree but have no Object view yet; they show a
   placeholder.
-- Databases are not themselves searchable — only schemas and objects within
-  them. Schemas became searchable once column search made the current
-  database's schema list worth surfacing on its own; databases were not
-  extended to match, since cross-database browsing is out of scope entirely
-  (see below).
+- **Multiple databases can now be browsed and searched at once** — this
+  reverses what used to be a deliberate constraint here ("cross-database
+  browsing is out of scope by design"). The database picker (`ctrl+d`) is a
+  multi-select modal (`MultiPickerScreen`), each selected database gets its
+  own top-level node in the Object tree showing its schema count directly,
+  and search spans every selected database. The concern the old constraint
+  was protecting against — total object counts across many databases getting
+  impractical — is not addressed by anything new here; it simply hasn't been
+  hit yet at the scales this has been exercised against. Treat performance at
+  a large multi-database selection as an open question for a future session,
+  not one this change already answered.
+- Databases still aren't themselves a *searchable hit* the way a schema is —
+  a schema hit reveals and expands it in the tree via `SchemaRef`; there is
+  no equivalent for a database, since selecting or deselecting one is a
+  picker action, not a search result. This part of the old constraint stands.
+- Column search across selected databases is implemented at the repository
+  layer (`Repository.search_column_corpus`, `Sequence[str]`-scoped and ready)
+  but its one call site in `SearchScreen.on_mount` is commented out, not
+  deleted — cross-database column search specifically was judged not ready
+  for prime time yet. Re-enabling it is restoring one call, not writing new
+  code.
 - There is no automatic trigger for column cache priming — no signal was
   found for "the user wants this now" short of asking, so it is a manual
   menu action rather than something that runs on its own.
-- Search covers the current database only, since that is what is cached.
-- Cross-database browsing is out of scope by design: the object counts make it
-  impractical, which is why the database is a one-line selector rather than a
-  level in the tree.

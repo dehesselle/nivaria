@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -37,14 +38,16 @@ class Harness(App[None]):
 
     CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
 
-    def __init__(self, repo: Repository, database: str | None = "MYDB") -> None:
+    def __init__(self, repo: Repository, databases: Sequence[str] = ("MYDB",)) -> None:
         super().__init__()
         self._repo = repo
-        self._database = database
+        self._databases = databases
         self.selected: list[ObjectRef | SchemaRef | None] = []
 
     def on_mount(self) -> None:
-        self.push_screen(SearchScreen(self._repo, self._database), self.selected.append)
+        self.push_screen(
+            SearchScreen(self._repo, self._databases), self.selected.append
+        )
 
 
 def load(repo: Repository, scope, rows) -> None:
@@ -137,7 +140,7 @@ def test_the_corpus_spans_every_object_kind(repo) -> None:
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put(repo, ObjectKind.VIEW, "SALES", "ORDERS_V")
     put(repo, ObjectKind.PIPE, "RAW", "LOAD")
-    corpus = repo.search_corpus("MYDB")
+    corpus = repo.search_corpus(["MYDB"])
     assert sorted(text for text, _ in corpus) == [
         "RAW.LOAD",
         "SALES.ORDERS",
@@ -148,18 +151,28 @@ def test_the_corpus_spans_every_object_kind(repo) -> None:
 def test_the_corpus_carries_the_kind(repo) -> None:
     """A hit has to know which detail view to open."""
     put(repo, ObjectKind.PIPE, "RAW", "LOAD")
-    ((_, ref),) = repo.search_corpus("MYDB")
+    ((_, ref),) = repo.search_corpus(["MYDB"])
     assert ref.kind is ObjectKind.PIPE
 
 
-def test_the_corpus_is_scoped_to_one_database(repo) -> None:
+def test_the_corpus_is_scoped_to_the_given_databases(repo) -> None:
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put(repo, ObjectKind.TABLE, "SALES", "OTHER_ORDERS", database="OTHERDB")
-    assert [text for text, _ in repo.search_corpus("MYDB")] == ["SALES.ORDERS"]
+    put(repo, ObjectKind.TABLE, "SALES", "THIRD_ORDERS", database="THIRDDB")
+    assert [text for text, _ in repo.search_corpus(["MYDB"])] == ["SALES.ORDERS"]
+    assert sorted(text for text, _ in repo.search_corpus(["MYDB", "OTHERDB"])) == [
+        "SALES.ORDERS",
+        "SALES.OTHER_ORDERS",
+    ]
+
+
+def test_an_empty_database_list_has_an_empty_corpus(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    assert repo.search_corpus([]) == []
 
 
 def test_an_unknown_database_has_an_empty_corpus(repo) -> None:
-    assert repo.search_corpus("NOPE") == []
+    assert repo.search_corpus(["NOPE"]) == []
 
 
 # ------------------------------------------------------------ column corpus
@@ -168,7 +181,7 @@ def test_an_unknown_database_has_an_empty_corpus(repo) -> None:
 def test_the_column_corpus_pairs_a_column_with_its_owning_object(repo) -> None:
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "ID", "CUSTOMER_ID")
-    corpus = repo.search_column_corpus("MYDB")
+    corpus = repo.search_column_corpus(["MYDB"])
     assert sorted(column for _, column in corpus) == ["CUSTOMER_ID", "ID"]
     ((ref, _),) = [pair for pair in corpus if pair[1] == "ID"]
     assert ref == ObjectRef(
@@ -179,7 +192,7 @@ def test_the_column_corpus_pairs_a_column_with_its_owning_object(repo) -> None:
 def test_a_view_can_own_columns_too(repo) -> None:
     put(repo, ObjectKind.VIEW, "SALES", "ORDERS_V")
     put_columns(repo, "SALES", "ORDERS_V", "ID")
-    ((ref, column),) = repo.search_column_corpus("MYDB")
+    ((ref, column),) = repo.search_column_corpus(["MYDB"])
     assert ref.kind is ObjectKind.VIEW
     assert column == "ID"
 
@@ -189,19 +202,22 @@ def test_a_column_with_no_known_owning_object_is_excluded(repo) -> None:
     surface, so the corpus is joined back to search_object rather than read
     off information_schema_columns alone."""
     put_columns(repo, "SALES", "GHOST", "ID")
-    assert repo.search_column_corpus("MYDB") == []
+    assert repo.search_column_corpus(["MYDB"]) == []
 
 
-def test_the_column_corpus_is_scoped_to_one_database(repo) -> None:
+def test_the_column_corpus_is_scoped_to_the_given_databases(repo) -> None:
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "ID")
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS", database="OTHERDB")
     put_columns(repo, "SALES", "ORDERS", "OTHER_ID", database="OTHERDB")
-    assert [column for _, column in repo.search_column_corpus("MYDB")] == ["ID"]
+    assert [column for _, column in repo.search_column_corpus(["MYDB"])] == ["ID"]
+    assert sorted(
+        column for _, column in repo.search_column_corpus(["MYDB", "OTHERDB"])
+    ) == ["ID", "OTHER_ID"]
 
 
 def test_an_unknown_database_has_an_empty_column_corpus(repo) -> None:
-    assert repo.search_column_corpus("NOPE") == []
+    assert repo.search_column_corpus(["NOPE"]) == []
 
 
 # ------------------------------------------------------------ schema corpus
@@ -209,24 +225,31 @@ def test_an_unknown_database_has_an_empty_column_corpus(repo) -> None:
 
 def test_the_schema_corpus_lists_every_cached_schema(repo) -> None:
     put_schemas(repo, "SALES", "RAW")
-    assert sorted(s.name for s in repo.search_schema_corpus("MYDB")) == ["RAW", "SALES"]
+    assert sorted(s.name for s in repo.search_schema_corpus(["MYDB"])) == [
+        "RAW",
+        "SALES",
+    ]
 
 
 def test_the_schema_corpus_carries_the_database(repo) -> None:
     put_schemas(repo, "SALES")
-    (schema,) = repo.search_schema_corpus("MYDB")
+    (schema,) = repo.search_schema_corpus(["MYDB"])
     assert schema.database == "MYDB"
     assert schema.name == "SALES"
 
 
-def test_the_schema_corpus_is_scoped_to_one_database(repo) -> None:
+def test_the_schema_corpus_is_scoped_to_the_given_databases(repo) -> None:
     put_schemas(repo, "SALES")
     put_schemas(repo, "OTHER", database="OTHERDB")
-    assert [s.name for s in repo.search_schema_corpus("MYDB")] == ["SALES"]
+    assert [s.name for s in repo.search_schema_corpus(["MYDB"])] == ["SALES"]
+    assert sorted(s.name for s in repo.search_schema_corpus(["MYDB", "OTHERDB"])) == [
+        "OTHER",
+        "SALES",
+    ]
 
 
 def test_an_unknown_database_has_an_empty_schema_corpus(repo) -> None:
-    assert repo.search_schema_corpus("NOPE") == []
+    assert repo.search_schema_corpus(["NOPE"]) == []
 
 
 # ---------------------------------------------------------------- opening
@@ -302,20 +325,57 @@ async def test_the_schema_prefix_does_not_outrank_the_object_name(repo) -> None:
         assert shown(app)[0] == "STAGING.STG_CUSTOMER_ORDERS"
 
 
-async def test_a_column_name_surfaces_its_owning_table(repo) -> None:
+async def test_search_spans_every_selected_database(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "MYDB_ORDERS")
+    put(repo, ObjectKind.TABLE, "SALES", "OTHERDB_ORDERS", database="OTHERDB")
+    app = Harness(repo, databases=("MYDB", "OTHERDB"))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders")
+        assert set(shown(app)) == {"SALES.MYDB_ORDERS", "SALES.OTHERDB_ORDERS"}
+
+
+async def test_the_option_text_is_prefixed_with_the_owning_database(repo) -> None:
+    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders")
+        assert option_text(app, 0).startswith("MYDB.SALES.ORDERS")
+
+
+async def test_a_schema_hit_shows_its_database_prefix_too(repo) -> None:
+    put_schemas(repo, "STAGING")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "stag")
+        assert option_text(app, 0).startswith("MYDB.STAGING")
+
+
+# --------------------------------------------------- column search: disabled
+
+
+async def test_column_search_is_disabled_for_now(repo) -> None:
+    """Cross-database column search is not ready for prime time yet -- the
+    call that would load the column corpus is commented out in
+    SearchScreen.on_mount (see DESIGN.md "Known gaps"), so a query that only
+    matches via a column now surfaces nothing at all."""
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         await pilot.pause()
         await type_query(pilot, app, "custid")
-        assert shown(app) == ["SALES.ORDERS"]
+        assert shown(app) == []
 
 
 async def test_a_query_shorter_than_the_gate_does_not_search_columns(repo) -> None:
     """A short, generic fragment scoring against the whole column corpus is
     the expensive, low-relevance case MIN_COLUMN_QUERY_LENGTH exists to skip
-    -- see search.py."""
+    -- see search.py. Column search is disabled entirely right now anyway
+    (see test_column_search_is_disabled_for_now), so this stays empty either
+    way, but the gate itself is still exercised once the corpus is back."""
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "ID")
     app = Harness(repo)
@@ -325,41 +385,23 @@ async def test_a_query_shorter_than_the_gate_does_not_search_columns(repo) -> No
         assert shown(app) == []
 
 
-async def test_a_query_at_the_gate_length_does_search_columns(repo) -> None:
-    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
-    put_columns(repo, "SALES", "ORDERS", "IDX")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "idx")  # 3 chars, meets the gate
-        assert shown(app) == ["SALES.ORDERS"]
-
-
-async def test_a_column_hit_is_annotated_with_the_matched_column_name(repo) -> None:
-    put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
-    put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "custid")
-        assert "CUSTOMER_ID" in option_text(app, 0)
-
-
-async def test_a_hit_on_the_objects_own_name_is_not_annotated(repo) -> None:
-    """The annotation exists to explain a surprising hit; a table found by
-    its own name needs no such explanation."""
+async def test_a_hit_on_the_objects_own_name_still_works(repo) -> None:
+    """The object corpus is unaffected by column search being disabled."""
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         await pilot.pause()
         await type_query(pilot, app, "orders")
+        assert shown(app) == ["SALES.ORDERS"]
         assert "CUSTOMER_ID" not in option_text(app, 0)
 
 
-async def test_a_name_match_outranks_a_column_match_when_both_hit(repo) -> None:
-    """An object matched by its own name is the more direct hit, so it must
-    not be displaced by a same-object column match on the same query."""
+async def test_a_name_match_is_unaffected_by_a_same_object_column(repo) -> None:
+    """A name match ranks the object regardless of whether a column of the
+    same object also happens to share letters with the query -- moot for
+    ranking purposes while columns are disabled, but the object-name path
+    itself must still work."""
     put(repo, ObjectKind.TABLE, "SALES", "ORD")
     put_columns(repo, "SALES", "ORD", "ORD_STATUS")
     app = Harness(repo)
@@ -410,7 +452,7 @@ async def test_a_schema_and_an_object_can_both_appear_for_the_same_query(repo) -
 
 
 async def test_searching_without_a_database_is_empty_not_an_error(repo) -> None:
-    app = Harness(repo, database=None)
+    app = Harness(repo, databases=())
     async with app.run_test(size=(80, 30)) as pilot:
         await pilot.pause()
         await type_query(pilot, app, "ord")
@@ -462,12 +504,12 @@ async def test_the_corpus_is_built_once_not_on_every_keystroke(repo) -> None:
     each keystroke would be work nobody is waiting on -- and see search.py for
     why there is no live update to react to anyway."""
     put(repo, ObjectKind.TABLE, "SALES", "ORDERS")
-    calls: list[str] = []
+    calls: list[list[str]] = []
     original = repo.search_corpus
 
-    def spy(database):
-        calls.append(database)
-        return original(database)
+    def spy(databases):
+        calls.append(list(databases))
+        return original(databases)
 
     repo.search_corpus = spy
     app = Harness(repo)
@@ -476,7 +518,7 @@ async def test_the_corpus_is_built_once_not_on_every_keystroke(repo) -> None:
         await type_query(pilot, app, "o")
         await type_query(pilot, app, "or")
         await type_query(pilot, app, "ord")
-    assert calls == ["MYDB"]
+    assert calls == [["MYDB"]]
 
 
 async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopens(
@@ -490,9 +532,10 @@ async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopen
         await pilot.pause()
         # Loading is kicked off in on_mount but finishes on its own schedule
         # (see search.py) -- awaited explicitly here so the mutation below is
-        # deterministically *after* the snapshot, not racing it.
+        # deterministically *after* the snapshot, not racing it. Column
+        # loading is disabled (self._columns_loaded stays None), so only the
+        # object and schema loads are awaited.
         await app.screen._objects_loaded
-        await app.screen._columns_loaded
         await app.screen._schemas_loaded
         put(repo, ObjectKind.TABLE, "SALES", "ORDERS", "CUSTOMERS")
         await type_query(pilot, app, "cust")
@@ -507,9 +550,9 @@ def slow_search_corpus(repo: Repository, release: threading.Event) -> None:
     during that window is deterministic instead of racing a fast fixture."""
     original = repo.search_corpus
 
-    def slow(database):
+    def slow(databases):
         release.wait(timeout=2)
-        return original(database)
+        return original(databases)
 
     repo.search_corpus = slow
 
@@ -540,7 +583,6 @@ async def test_the_list_corrects_itself_once_a_slow_load_lands(repo) -> None:
         await type_query(pilot, app, "ord")
         release.set()
         await app.screen._objects_loaded
-        await app.screen._columns_loaded
         await app.screen._schemas_loaded
         await pilot.pause()
         assert shown(app) == ["SALES.ORDERS"]

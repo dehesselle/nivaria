@@ -40,4 +40,10 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
-dev = ["pytest>=9.1.1", "pytest-asyncio>=1.4.0", "tcw", "textual-dev>=1.8.0"]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "tcw",
+    "textual-dev>=1.8.0",
+    "wonderwords>=3.0.1",
+]

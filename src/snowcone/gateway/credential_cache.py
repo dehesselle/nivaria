@@ -106,7 +106,7 @@ if sys.platform == "win32":
 
         @property
         def _cache_file(self) -> Path:
-            # Resolved lazily, like RecentConnections.path, so a test that
+            # Resolved lazily, like ProfileStore.path, so a test that
             # constructs this before pointing paths elsewhere still sees it.
             return self._path if self._path is not None else credential_cache_file()
 

@@ -9,8 +9,8 @@ from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 
 import snowcone.ui.app as app_module
-from snowcone.connections import RecentConnections, RecentEntry
 from snowcone.gateway.pool import EXTERNAL_BROWSER, OAUTH, USERNAME_PASSWORD_MFA
+from snowcone.profiles import Profile, ProfileStore
 from snowcone.ui.screens.connect import ConnectScreen, RecentList
 from snowcone.ui.screens.connecting import ConnectingScreen
 from tests.fakes import FakeConnector
@@ -40,12 +40,12 @@ class Harness(App[None]):
 
 def make_app(tmp_path, *, recent=None, connector=None, pool_size=1) -> Harness:
     screen = ConnectScreen(
-        RecentConnections(tmp_path / "recent.json"),
+        ProfileStore(tmp_path / "recent.json"),
         pool_size=pool_size,
         connector=connector or FakeConnector(),
     )
     if recent:
-        store = RecentConnections(tmp_path / "recent.json")
+        store = ProfileStore(tmp_path / "recent.json")
         for entry in reversed(recent):
             store.add(entry)
         screen = ConnectScreen(
@@ -75,7 +75,7 @@ async def test_the_form_and_the_recents_pane_are_both_present(tmp_path) -> None:
         screen = pilot.app.screen
         assert screen.query_one("#connect-form")
         assert screen.query_one("#connect-recent")
-        for field in ("account", "user", "password", "role", "warehouse"):
+        for field in ("name", "account", "user", "password", "role", "warehouse"):
             assert screen.query_one(f"#{field}", Input)
 
 
@@ -336,8 +336,65 @@ async def test_a_successful_connect_is_recorded_as_recent(tmp_path) -> None:
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
         await settle(pilot)
-    stored = RecentConnections(tmp_path / "recent.json").load()
+    stored = ProfileStore(tmp_path / "recent.json").load()
     assert [e.account for e in stored] == ["ACME"]
+
+
+async def test_a_typed_name_is_recorded_with_the_profile(tmp_path) -> None:
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#name", Input).value = "Prod - Analyst"
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+    stored = ProfileStore(tmp_path / "recent.json").load()
+    assert stored[0].name == "Prod - Analyst"
+
+
+async def test_an_unnamed_connect_is_recorded_with_no_name(tmp_path) -> None:
+    """No name typed -- same behaviour as before this field existed."""
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+    stored = ProfileStore(tmp_path / "recent.json").load()
+    assert stored[0].name == ""
+
+
+async def test_a_named_recent_shows_its_name_in_the_list(tmp_path) -> None:
+    app = make_app(
+        tmp_path,
+        recent=[Profile(account="ACME", user="me", role="ADMIN", name="Prod")],
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        options = pilot.app.screen.query_one("#recent-list", RecentList)
+        label = str(options.get_option_at_index(0).prompt)
+    assert label == "Prod"
+
+
+async def test_a_plain_reconnect_preserves_the_previously_remembered_databases(
+    tmp_path,
+) -> None:
+    """The rearchitecture from RecentEntry to Profile must not introduce a
+    regression: Profile.from_params never populates `databases` (a bare
+    ConnectParams carries none), and ProfileStore.add replaces the whole
+    record for a matching identity -- so a naive rename would mean every
+    ordinary reconnect silently wipes out whatever database selection
+    MainScreen._remember_databases previously wrote for this identity, even
+    though no database picking happens in this dialog at all."""
+    store = ProfileStore(tmp_path / "recent.json")
+    store.add(Profile(account="ACME", user="me", databases=("MYDB", "OTHERDB")))
+    app = make_app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+    stored = ProfileStore(tmp_path / "recent.json").load()
+    assert stored[0].databases == ("MYDB", "OTHERDB")
 
 
 async def test_a_failed_connect_is_not_recorded(tmp_path) -> None:
@@ -348,7 +405,7 @@ async def test_a_failed_connect_is_not_recorded(tmp_path) -> None:
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
         await settle(pilot)
-        assert RecentConnections(tmp_path / "recent.json").load() == []
+        assert ProfileStore(tmp_path / "recent.json").load() == []
 
 
 async def test_a_failed_connect_reports_why_as_a_toast_and_re_enables_the_button(
@@ -448,8 +505,8 @@ async def test_recents_are_listed(tmp_path) -> None:
     app = make_app(
         tmp_path,
         recent=[
-            RecentEntry(account="A", user="me", role="R"),
-            RecentEntry(account="B", user="you"),
+            Profile(account="A", user="me", role="R"),
+            Profile(account="B", user="you"),
         ],
     )
     async with app.run_test(size=(120, 40)) as pilot:
@@ -458,9 +515,12 @@ async def test_recents_are_listed(tmp_path) -> None:
 
 
 async def test_the_form_is_prefilled_from_the_most_recent(tmp_path) -> None:
-    app = make_app(tmp_path, recent=[RecentEntry(account="A", user="me", role="R")])
+    app = make_app(
+        tmp_path, recent=[Profile(account="A", user="me", role="R", name="Prod")]
+    )
     async with app.run_test(size=(120, 40)) as pilot:
         screen = pilot.app.screen
+        assert screen.query_one("#name", Input).value == "Prod"
         assert screen.query_one("#account", Input).value == "A"
         assert screen.query_one("#user", Input).value == "me"
         assert screen.query_one("#role", Input).value == "R"
@@ -472,7 +532,7 @@ async def test_selecting_a_browser_sso_recent_connects_immediately(tmp_path) -> 
     connector = FakeConnector()
     app = make_app(
         tmp_path,
-        recent=[RecentEntry(account="B", user="you", authenticator=EXTERNAL_BROWSER)],
+        recent=[Profile(account="B", user="you", authenticator=EXTERNAL_BROWSER)],
         connector=connector,
         pool_size=1,
     )
@@ -490,9 +550,7 @@ async def test_selecting_a_password_recent_waits_for_the_password(tmp_path) -> N
     connector = FakeConnector()
     app = make_app(
         tmp_path,
-        recent=[
-            RecentEntry(account="B", user="you", authenticator=USERNAME_PASSWORD_MFA)
-        ],
+        recent=[Profile(account="B", user="you", authenticator=USERNAME_PASSWORD_MFA)],
         connector=connector,
         pool_size=1,
     )
@@ -512,7 +570,7 @@ async def test_selecting_an_oauth_recent_connects_immediately(tmp_path) -> None:
     connector = FakeConnector()
     app = make_app(
         tmp_path,
-        recent=[RecentEntry(account="B", user="you", authenticator=OAUTH)],
+        recent=[Profile(account="B", user="you", authenticator=OAUTH)],
         connector=connector,
         pool_size=1,
     )
@@ -532,8 +590,8 @@ async def test_deleting_a_recent_removes_it_from_the_list_and_the_file(
     app = make_app(
         tmp_path,
         recent=[
-            RecentEntry(account="A", user="me"),
-            RecentEntry(account="B", user="me"),
+            Profile(account="A", user="me"),
+            Profile(account="B", user="me"),
         ],
     )
     async with app.run_test(size=(120, 40)) as pilot:
@@ -543,9 +601,7 @@ async def test_deleting_a_recent_removes_it_from_the_list_and_the_file(
         await pilot.press("delete")
         await pilot.pause()
         assert options.option_count == 1
-    assert [e.account for e in RecentConnections(tmp_path / "recent.json").load()] == [
-        "B"
-    ]
+    assert [e.account for e in ProfileStore(tmp_path / "recent.json").load()] == ["B"]
 
 
 # --------------------------------------------------------------- quitting
@@ -618,5 +674,5 @@ async def test_every_field_is_still_reachable_on_a_short_terminal(tmp_path) -> N
         for _ in range(3):
             await pilot.pause()
         screen = pilot.app.screen
-        for field in ("account", "user", "password", "role", "warehouse"):
+        for field in ("name", "account", "user", "password", "role", "warehouse"):
             assert screen.query_one(f"#{field}", Input)

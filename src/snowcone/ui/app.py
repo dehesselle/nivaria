@@ -6,9 +6,9 @@ from textual.app import App
 from snowcone import paths
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
-from snowcone.connections import RecentConnections
 from snowcone.gateway.gateway import PoolGateway
 from snowcone.gateway.pool import ConnectionPool, Connector
+from snowcone.profiles import Profile, ProfileStore
 from snowcone.service.fetch import FetchService
 from snowcone.settings import PAGE_SIZE, POOL_SIZE, config
 from snowcone.ui.messages import CacheUpdated
@@ -26,6 +26,11 @@ class SnowconeApp(App[None]):
         self.pool: ConnectionPool | None = None
         self.fetch: FetchService | None = None
         self.repo: Repository | None = None
+        # One shared instance -- both ConnectScreen and MainScreen read and
+        # write through it, so there is a single source of truth object for
+        # the app's lifetime, not several independently-reloading views onto
+        # the same file.
+        self.profiles = ProfileStore()
 
     def on_mount(self) -> None:
         self._start()
@@ -41,7 +46,7 @@ class SnowconeApp(App[None]):
         """
         pool = await self.push_screen_wait(
             ConnectScreen(
-                RecentConnections(),
+                self.profiles,
                 pool_size=config.get(POOL_SIZE),
                 connector=self._connector,
             )
@@ -54,7 +59,16 @@ class SnowconeApp(App[None]):
         # push, not switch: push_screen_wait has already popped the connect
         # screen, so the stack top here is the default screen and switching
         # would try to pop a result callback it never had.
-        await self.push_screen(MainScreen(self.repo, self.fetch, pool))
+        screen = MainScreen(self.repo, self.fetch, pool, self.profiles)
+        await self.push_screen(screen)
+        # Restore whatever databases were selected the last time this
+        # identity was browsed -- a picker confirmation is what *records* a
+        # selection (MainScreen._remember_databases), not this; re-recording
+        # an unchanged restore would also incorrectly refresh role/warehouse
+        # on every plain startup.
+        profile = self._matching_profile(pool)
+        if profile is not None and profile.databases:
+            screen.set_databases(list(profile.databases))
 
     async def open_connect(self) -> None:
         """Reopen the connect dialog and swap in the resulting pool.
@@ -66,7 +80,7 @@ class SnowconeApp(App[None]):
         """
         pool = await self.push_screen_wait(
             ConnectScreen(
-                RecentConnections(),
+                self.profiles,
                 pool_size=config.get(POOL_SIZE),
                 connector=self._connector,
             )
@@ -84,10 +98,21 @@ class SnowconeApp(App[None]):
             # same reset applies: whatever was on screen belonged to the old
             # identity's cache.
             self.screen.set_repo(self.repo)
+            profile = self._matching_profile(pool)
+            if profile is not None and profile.databases:
+                self.screen.set_databases(list(profile.databases))
         if old_fetch is not None:
             old_fetch.stop()
         if old_pool is not None:
             old_pool.close()
+
+    def _matching_profile(self, pool: ConnectionPool) -> Profile | None:
+        """The stored profile for `pool`'s identity, if any -- used to
+        restore a previously remembered database selection."""
+        fresh = Profile.from_params(pool.params)
+        return next(
+            (p for p in self.profiles.load() if p.identity == fresh.identity), None
+        )
 
     def _open_repo(self, pool: ConnectionPool) -> Repository:
         """The cache for whatever identity `pool.params` currently describes.

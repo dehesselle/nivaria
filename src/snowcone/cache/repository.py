@@ -455,19 +455,26 @@ class Repository:
             ).fetchone()
         return dict(row) if row is not None else None
 
-    def search_corpus(self, database: str) -> list[tuple[str, ObjectRef]]:
-        """Every searchable object in a database as (text, ref) pairs.
+    def search_corpus(self, databases: Sequence[str]) -> list[tuple[str, ObjectRef]]:
+        """Every searchable object across `databases` as (text, ref) pairs.
 
         The text is `SCHEMA.NAME`, so typing "sales.ord" narrows by schema and
         object together. Ranking happens in Python: sqlite can match
         substrings but not subsequences, and "stgord" finding
-        STG_CUSTOMER_ORDERS is the whole point.
+        STG_CUSTOMER_ORDERS is the whole point. The owning database is not
+        baked into this text -- search.py adds it as a display-only prefix,
+        since letting it compete for the query's leading characters the way
+        schema does would dilute matching for no benefit (see DESIGN.md).
         """
+        if not databases:
+            return []
+        placeholders = ", ".join("?" for _ in databases)
         with self._db.connect() as connection:
             rows = connection.execute(
                 "SELECT database_name, schema_name, name, kind FROM search_object "
-                "WHERE database_name = ? ORDER BY schema_name, name",
-                (database,),
+                f"WHERE database_name IN ({placeholders}) "
+                "ORDER BY database_name, schema_name, name",
+                tuple(databases),
             ).fetchall()
         corpus: list[tuple[str, ObjectRef]] = []
         for row in rows:
@@ -488,8 +495,10 @@ class Repository:
             )
         return corpus
 
-    def search_column_corpus(self, database: str) -> list[tuple[ObjectRef, str]]:
-        """Every cached column in a database, paired with its owning object.
+    def search_column_corpus(
+        self, databases: Sequence[str]
+    ) -> list[tuple[ObjectRef, str]]:
+        """Every cached column across `databases`, paired with its owning object.
 
         Joined back to `search_object` rather than read off
         `information_schema_columns` alone, so a column only surfaces if its
@@ -497,20 +506,29 @@ class Repository:
         column row from a since-dropped table cannot spuriously appear. Only
         TABLE/VIEW ever have columns, but the join excludes other kinds
         regardless of whether that ever actually matters.
+
+        Currently unused -- SearchScreen.on_mount's call into this is
+        commented out, cross-database column search not being ready for
+        prime time yet (see DESIGN.md "Known gaps"). Kept multi-database-
+        ready anyway, so re-enabling it later is restoring one call, not
+        writing new code.
         """
+        if not databases:
+            return []
+        placeholders = ", ".join("?" for _ in databases)
         with self._db.connect() as connection:
             rows = connection.execute(
-                """
-                SELECT o.schema_name, o.name, o.kind, c.COLUMN_NAME
+                f"""
+                SELECT o.database_name, o.schema_name, o.name, o.kind, c.COLUMN_NAME
                 FROM information_schema_columns c
                 JOIN search_object o
                   ON o.database_name = c.TABLE_CATALOG
                  AND o.schema_name  = c.TABLE_SCHEMA
                  AND o.name         = c.TABLE_NAME
-                WHERE c.TABLE_CATALOG = ? AND o.kind IN ('TABLE', 'VIEW')
-                ORDER BY o.schema_name, o.name, c.ORDINAL_POSITION
+                WHERE c.TABLE_CATALOG IN ({placeholders}) AND o.kind IN ('TABLE', 'VIEW')
+                ORDER BY o.database_name, o.schema_name, o.name, c.ORDINAL_POSITION
                 """,
-                (database,),
+                tuple(databases),
             ).fetchall()
         # One ObjectRef per column here would mean one allocation per column
         # rather than per table -- 15-20x more than necessary at a typical
@@ -519,10 +537,10 @@ class Repository:
         # already groups every column under its owner, so consecutive rows
         # sharing a key can just reuse the previous ObjectRef instead.
         corpus: list[tuple[ObjectRef, str]] = []
-        current_key: tuple[str, str] | None = None
+        current_key: tuple[str, str, str] | None = None
         current_ref: ObjectRef | None = None
         for row in rows:
-            key = (row["schema_name"], row["name"])
+            key = (row["database_name"], row["schema_name"], row["name"])
             if key != current_key:
                 current_key = key
                 try:
@@ -532,7 +550,7 @@ class Repository:
                 else:
                     current_ref = ObjectRef(
                         kind=kind,
-                        database=database,
+                        database=row["database_name"],
                         schema=row["schema_name"],
                         name=row["name"],
                     )
@@ -540,17 +558,20 @@ class Repository:
                 corpus.append((current_ref, row["COLUMN_NAME"]))
         return corpus
 
-    def search_schema_corpus(self, database: str) -> list[SchemaRef]:
-        """Every cached schema in a database, for the search modal.
+    def search_schema_corpus(self, databases: Sequence[str]) -> list[SchemaRef]:
+        """Every cached schema across `databases`, for the search modal.
 
         Schemas are already flat and singly-sourced (`show_schemas`), unlike
         objects and columns, so this is a thin wrapper over `schemas()`
         rather than its own query -- kept anyway, so the modal reads three
         parallel `search_*_corpus` methods instead of building one of its
-        three corpora by hand.
+        three corpora by hand. Looping per database rather than one combined
+        query: `schemas()` is already a cheap cached per-database lookup, not
+        a fresh round trip each time.
         """
         return [
             SchemaRef(database=database, name=row.name)
+            for database in databases
             for row in self.schemas(schemas_scope(database)).rows
         ]
 

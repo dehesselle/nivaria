@@ -1,6 +1,12 @@
-"""The object search modal: find-as-you-type over every cached object,
-column, and schema in the current database, given the room a modal can take
-instead of a sliver of the top pane.
+"""The object search modal: find-as-you-type over every cached object and
+schema across every currently selected database, given the room a modal can
+take instead of a sliver of the top pane.
+
+Column search is currently disabled -- see `on_mount`'s commented-out
+`_load_columns()` call and DESIGN.md "Known gaps". The reader, the ranking
+logic below, and `MIN_COLUMN_QUERY_LENGTH` are left in place for when it is
+re-enabled; this docstring still describes them as if live, since the code
+they describe is unchanged, just not currently invoked.
 
 Both corpora are built once, when the dialog opens, from whatever is in the
 cache right then -- there is no long-lived widget for a background cache
@@ -11,21 +17,22 @@ pane either (the same is already true of the database picker). Closing and
 reopening picks up whatever changed in between, which is the same cost a
 keystroke used to pay to notice a stale corpus.
 
-Loading is kicked off in `on_mount` as two independent tasks, neither awaited
-there, and both real work rather than a formality: the object corpus alone is
-cheap (~5ms even at 2000 objects), but the column corpus was measured at
-~55-75ms for 30k cached columns -- and fetching both together meant the cheap
-one waited on the expensive one every time, since a single call blocks on
-whichever finishes last. Split, name matches become available almost as soon
-as the dialog paints, with column matches joining in once their own load
-lands. `_run_query` does not wait for either: a fast typist would feel that
-wait on every keystroke while a load is still pending, so ranking proceeds
-against whatever corpus already exists -- empty, object-only, or however far
-along the column load has gotten -- and each load re-runs the last query once
-it lands, so the list corrects itself in place rather than a keystroke ever
+Loading is kicked off in `on_mount` as independent tasks, none awaited there
+and all real work rather than a formality: the object corpus alone is cheap
+(~5ms even at 2000 objects), but the column corpus was measured at ~55-75ms
+for 30k cached columns -- and fetching them together meant the cheap ones
+waited on the expensive one every time, since a single call blocks on
+whichever finishes last. Split, name and schema matches become available
+almost as soon as the dialog paints, with column matches joining in once
+their own load lands (when that load runs at all -- see above, it is
+currently disabled). `_run_query` does not wait for any of them: a fast
+typist would feel that wait on every keystroke while a load is still
+pending, so ranking proceeds against whatever corpus already exists --
+empty, partial, or complete -- and each load re-runs the last query once it
+lands, so the list corrects itself in place rather than a keystroke ever
 blocking on it. Enter is the one exception: choosing a result and closing the
 dialog is a commitment a still-partial corpus should not get to make, so that
-path alone waits for both loads first.
+path alone waits for every (live) load first.
 
 Ranking itself also skips the column corpus below `MIN_COLUMN_QUERY_LENGTH`
 characters: a short, generic fragment scores against every cached column for
@@ -36,6 +43,7 @@ measured), real per-keystroke latency -- see that constant for the number.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from typing import ClassVar
 
 from rich.text import Text
@@ -80,10 +88,10 @@ class SearchScreen(DialogScreen[Hit]):
         Binding("down", "to_results", "Results", show=False),
     ]
 
-    def __init__(self, repo: Repository, database: str | None) -> None:
+    def __init__(self, repo: Repository, databases: Sequence[str]) -> None:
         super().__init__()
         self.repo = repo
-        self.database = database
+        self.databases = list(databases)
         self._corpus: list[tuple[str, ObjectRef]] = []
         self._column_corpus: list[tuple[ObjectRef, str]] = []
         self._schema_corpus: list[SchemaRef] = []
@@ -108,9 +116,12 @@ class SearchScreen(DialogScreen[Hit]):
         self._objects_loaded: asyncio.Task[None] = asyncio.create_task(
             self._load_objects()
         )
-        self._columns_loaded: asyncio.Task[None] = asyncio.create_task(
-            self._load_columns()
-        )
+        # Column search is disabled for now -- cross-database column search
+        # is not ready for prime time. The reader (_read_columns), _rank's
+        # column-handling logic, and MIN_COLUMN_QUERY_LENGTH are all left in
+        # place; only this call is commented out. See DESIGN.md "Known gaps".
+        self._columns_loaded: asyncio.Task[None] | None = None
+        # self._columns_loaded = asyncio.create_task(self._load_columns())
         self._schemas_loaded: asyncio.Task[None] = asyncio.create_task(
             self._load_schemas()
         )
@@ -119,7 +130,8 @@ class SearchScreen(DialogScreen[Hit]):
         # Otherwise a slow load still in flight when the dialog closes would
         # resume after unmount and touch widgets that no longer exist.
         self._objects_loaded.cancel()
-        self._columns_loaded.cancel()
+        if self._columns_loaded is not None:
+            self._columns_loaded.cancel()
         self._schemas_loaded.cancel()
 
     async def _load_objects(self) -> None:
@@ -136,15 +148,16 @@ class SearchScreen(DialogScreen[Hit]):
 
     def _read_objects(self) -> list[tuple[str, ObjectRef]]:
         """Pure: no widget access, so safe to call from a thread."""
-        return self.repo.search_corpus(self.database) if self.database else []
+        return self.repo.search_corpus(self.databases) if self.databases else []
 
     def _read_columns(self) -> list[tuple[ObjectRef, str]]:
-        """Pure: no widget access, so safe to call from a thread."""
-        return self.repo.search_column_corpus(self.database) if self.database else []
+        """Pure: no widget access, so safe to call from a thread. Currently
+        unreachable -- see on_mount's commented-out _load_columns() call."""
+        return self.repo.search_column_corpus(self.databases) if self.databases else []
 
     def _read_schemas(self) -> list[SchemaRef]:
         """Pure: no widget access, so safe to call from a thread."""
-        return self.repo.search_schema_corpus(self.database) if self.database else []
+        return self.repo.search_schema_corpus(self.databases) if self.databases else []
 
     async def _refresh_if_typing(self) -> None:
         # A quick typist can have a query in the box before either load
@@ -178,7 +191,8 @@ class SearchScreen(DialogScreen[Hit]):
         # this one waits for all three loads rather than risk picking (or
         # closing on) a result ranked against one still partially empty.
         await self._objects_loaded
-        await self._columns_loaded
+        if self._columns_loaded is not None:
+            await self._columns_loaded
         await self._schemas_loaded
         await self._run_query()
         self._choose(0)
@@ -320,8 +334,11 @@ class SearchScreen(DialogScreen[Hit]):
         style = f"bold {accent}" if accent else "bold"
         text = Text()
         if isinstance(ref, SchemaRef):
-            # No prefix to qualify it with -- a schema search is already
-            # scoped to one database, so there is nothing else to show.
+            # The database is a plain, unhighlighted prefix -- several can be
+            # active at once now, so it has to be shown, but it never
+            # competed for ranking (see rank_qualified below), so there is
+            # nothing to highlight in it.
+            text.append(f"{ref.database}.", style="dim")
             for run, matched in highlight(ref.name, hit.positions):
                 text.append(run, style=style if matched else "")
             text.append("  schema", style="dim")
@@ -329,6 +346,13 @@ class SearchScreen(DialogScreen[Hit]):
         # A column-matched hit's positions are relative to the column name,
         # not "schema.name", so there is nothing to highlight there.
         name_positions = hit.positions if column is None else ()
+        # Database prefix added at render time only, deliberately outside
+        # rank_qualified's schema/name qualification below -- extending
+        # ranking to a third level would spend the query's leading
+        # characters on the database too, and there is no
+        # database-repeats-inside-object-name ambiguity the way schema/
+        # STAGING.STG_ has to justify that cost.
+        text.append(f"{ref.database}.", style="dim")
         for run, matched in highlight(f"{ref.schema}.{ref.name}", name_positions):
             text.append(run, style=style if matched else "")
         text.append(f"  {ref.kind.value.lower()}", style="dim")

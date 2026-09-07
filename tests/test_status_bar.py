@@ -258,7 +258,7 @@ async def test_the_countdown_describes_the_focused_scope(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
         node = tree.root.children[0]
@@ -296,7 +296,7 @@ async def test_an_object_leaf_reports_the_list_it_came_from(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
         tree.root.children[0].expand()
@@ -380,7 +380,7 @@ async def test_the_sweep_refreshes_only_stale_visible_scopes(repo) -> None:
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen.set_database("MYDB")
+            screen.set_databases(["MYDB"])
             await pilot.pause()
             fetch.requests.clear()
             screen._sweep()
@@ -407,7 +407,7 @@ async def test_the_sweep_requests_at_background_priority(repo) -> None:
         app = Harness(repo, fetch)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.screen.set_database("MYDB")
+            app.screen.set_databases(["MYDB"])
             await pilot.pause()
             fetch.requests.clear()
             age_by(repo, schemas_scope("MYDB"), 120)
@@ -426,7 +426,7 @@ async def test_a_ttl_of_zero_disables_the_sweep(repo) -> None:
         app = Harness(repo, fetch)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.screen.set_database("MYDB")
+            app.screen.set_databases(["MYDB"])
             await pilot.pause()
             fetch.requests.clear()
             app.screen._sweep()

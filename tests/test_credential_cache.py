@@ -75,7 +75,7 @@ def test_deleting_a_missing_entry_raises_the_keyring_contract_error(tmp_path) ->
 
 def test_a_missing_cache_file_means_no_entries_not_a_crash(tmp_path) -> None:
     """Every store in snowcone degrades to empty rather than failing --
-    consistent with RecentConnections and the sqlite cache."""
+    consistent with ProfileStore and the sqlite cache."""
     cache = DpapiFileKeyring(tmp_path / "does-not-exist.json")
     assert cache.get_password("snowflake", "alice") is None
 

@@ -19,9 +19,12 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
+from snowcone.profiles import ProfileStore
 from snowcone.ui.screens.main import CacheUpdated, MainScreen
+from snowcone.ui.screens.multipicker import MultiPickerScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.widgets.object_tree import ObjectTree
+from tests.fakes import make_pool
 
 
 class RecordingFetch:
@@ -57,13 +60,23 @@ class RecordingFetch:
 class Harness(App[None]):
     CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
 
-    def __init__(self, repo: Repository, fetch: RecordingFetch) -> None:
+    def __init__(
+        self,
+        repo: Repository,
+        fetch: RecordingFetch,
+        pool=None,
+        profiles: ProfileStore | None = None,
+    ) -> None:
         super().__init__()
         self._repo = repo
         self._fetch = fetch
+        self._pool = pool
+        self._profiles = profiles
 
     def on_mount(self) -> None:
-        self.push_screen(MainScreen(self._repo, self._fetch))
+        self.push_screen(
+            MainScreen(self._repo, self._fetch, self._pool, self._profiles)
+        )
 
 
 @pytest.fixture
@@ -125,8 +138,7 @@ async def test_no_database_is_selected_initially(repo) -> None:
     app = Harness(repo, fetch)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        tree = app.screen.query_one(ObjectTree)
-        assert tree.border_title == "(none)"
+        assert app.screen.databases == []
 
 
 # ----------------------------------------------------------------- routing
@@ -139,16 +151,16 @@ async def test_a_cache_update_reaches_only_the_tree_node_it_names(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
         node = tree.root.children[0]
-        assert node.label.plain == "Schemas (1)"
+        assert node.label.plain == "MYDB (1)"
 
         put_schemas(repo, "MYDB", "AAA", "BBB")
         screen.post_message(CacheUpdated(schemas_scope("MYDB"), True))
         await pilot.pause()
-        assert node.label.plain == "Schemas (2)"
+        assert node.label.plain == "MYDB (2)"
 
 
 async def test_an_update_for_an_unshown_scope_is_ignored(repo) -> None:
@@ -159,13 +171,11 @@ async def test_an_update_for_an_unshown_scope_is_ignored(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         screen.post_message(CacheUpdated(schemas_scope("SOMETHING_ELSE"), True))
         await pilot.pause()
-        assert (
-            screen.query_one(ObjectTree).root.children[0].label.plain == "Schemas (1)"
-        )
+        assert screen.query_one(ObjectTree).root.children[0].label.plain == "MYDB (1)"
 
 
 async def test_an_objects_request_is_upgraded_to_a_database_prime(repo) -> None:
@@ -176,7 +186,7 @@ async def test_an_objects_request_is_upgraded_to_a_database_prime(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
         tree.root.children[0].expand()
@@ -194,7 +204,7 @@ async def test_an_interactive_need_outranks_a_visible_one(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
         tree.root.children[0].expand()
@@ -209,7 +219,7 @@ async def test_an_interactive_need_outranks_a_visible_one(repo) -> None:
 # ---------------------------------------------------------------- database
 
 
-async def test_choosing_a_database_updates_the_tree_title_and_contents(repo) -> None:
+async def test_choosing_a_database_updates_the_tree_contents(repo) -> None:
     put_databases(repo, "ALPHA", "BETA")
     put_schemas(repo, "BETA", "S1", "S2")
     fetch = RecordingFetch()
@@ -217,24 +227,40 @@ async def test_choosing_a_database_updates_the_tree_title_and_contents(repo) -> 
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("BETA")
+        screen.set_databases(["BETA"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
-        assert tree.border_title == "BETA"
-        assert tree.root.children[0].label.plain == "Schemas (2)"
+        assert tree.root.children[0].label.plain == "BETA (2)"
 
 
-async def test_switching_database_cancels_the_old_ones_work(repo) -> None:
-    """A sweep for a database nobody is looking at any more is pure waste."""
+async def test_multiple_databases_can_be_selected_at_once(repo) -> None:
+    put_databases(repo, "ALPHA", "BETA")
+    put_schemas(repo, "ALPHA", "S1")
+    put_schemas(repo, "BETA", "S2")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["ALPHA", "BETA"])
+        await pilot.pause()
+        assert screen.databases == ["ALPHA", "BETA"]
+        tree = screen.query_one(ObjectTree)
+        assert [child.data.key for child in tree.root.children] == ["ALPHA", "BETA"]
+
+
+async def test_switching_database_cancels_only_the_removed_ones_work(repo) -> None:
+    """A sweep for a database nobody is looking at any more is pure waste --
+    but a database that stays selected must not lose its queued work."""
     put_databases(repo, "ALPHA", "BETA")
     fetch = RecordingFetch()
     app = Harness(repo, fetch)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("ALPHA")
+        screen.set_databases(["ALPHA", "BETA"])
         await pilot.pause()
-        screen.set_database("BETA")
+        screen.set_databases(["BETA"])
         await pilot.pause()
     assert fetch.cancelled == ["called"]
 
@@ -246,14 +272,14 @@ async def test_reselecting_the_same_database_does_nothing(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("ALPHA")
+        screen.set_databases(["ALPHA"])
         await pilot.pause()
-        screen.set_database("ALPHA")
+        screen.set_databases(["ALPHA"])
         await pilot.pause()
     assert fetch.cancelled == []
 
 
-async def test_ctrl_d_opens_the_picker(repo) -> None:
+async def test_ctrl_d_opens_the_multipicker(repo) -> None:
     put_databases(repo, "ALPHA", "BETA")
     fetch = RecordingFetch()
     app = Harness(repo, fetch)
@@ -261,7 +287,7 @@ async def test_ctrl_d_opens_the_picker(repo) -> None:
         await pilot.pause()
         await pilot.press("ctrl+d")
         await settle(pilot)
-        assert isinstance(app.screen, PickerScreen)
+        assert isinstance(app.screen, MultiPickerScreen)
 
 
 async def test_picking_from_the_dialog_selects_the_database(repo) -> None:
@@ -276,9 +302,46 @@ async def test_picking_from_the_dialog_selects_the_database(repo) -> None:
         await settle(pilot)
         app.screen.query_one("#picker-query", Input).value = "BETA"
         await settle(pilot)
-        await pilot.press("enter")
+        await pilot.press("down")  # from the query box into the results list
+        await pilot.press("space")  # toggles the highlighted row (BETA)
         await settle(pilot)
-        assert main.database == "BETA"
+        await pilot.press("enter")  # confirms -- intercepted, not a toggle
+        await settle(pilot)
+        assert main.databases == ["BETA"]
+
+
+async def test_multiple_databases_can_be_picked_at_once(repo) -> None:
+    put_databases(repo, "ALPHA", "BETA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        main = app.screen
+        await pilot.press("ctrl+d")
+        await settle(pilot)
+        await pilot.click("#multipicker-all")
+        await settle(pilot)
+        await pilot.click("#multipicker-ok")
+        await settle(pilot)
+        assert main.databases == ["ALPHA", "BETA"]
+
+
+async def test_picking_databases_persists_them_to_the_profile(repo, tmp_path) -> None:
+    put_databases(repo, "ALPHA", "BETA")
+    fetch = RecordingFetch()
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    store = ProfileStore(tmp_path / "recent.json")
+    app = Harness(repo, fetch, pool=pool, profiles=store)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+d")
+        await settle(pilot)
+        await pilot.click("#multipicker-all")
+        await settle(pilot)
+        await pilot.click("#multipicker-ok")
+        await settle(pilot)
+    assert store.load()[0].databases == ("ALPHA", "BETA")
 
 
 async def test_the_picker_is_not_opened_with_nothing_to_show(repo) -> None:
@@ -305,7 +368,7 @@ async def test_refresh_targets_the_scope_under_the_cursor(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
         tree.root.children[0].expand()
@@ -327,7 +390,7 @@ async def test_refresh_on_an_object_leaf_asks_for_nothing(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         fetch.requests.clear()
         screen.action_refresh()
@@ -499,7 +562,7 @@ async def test_selecting_a_table_fills_the_detail_pane(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree, tables = await drill_to_tables(app, pilot, screen)
         tree.move_cursor(tables.children[0])
@@ -515,7 +578,7 @@ async def test_the_context_bar_follows_the_view(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree, tables = await drill_to_tables(app, pilot, screen)
         tree.move_cursor(tables.children[0])
@@ -533,14 +596,14 @@ async def test_switching_database_clears_the_detail_pane(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree, tables = await drill_to_tables(app, pilot, screen)
         tree.move_cursor(tables.children[0])
         await settle(pilot)
         assert screen.detail.view is not None
 
-        screen.set_database("OTHER")
+        screen.set_databases(["OTHER"])
         await settle(pilot)
         assert screen.detail.view is None
         assert len(screen.query("#context-title")) == 0
@@ -575,7 +638,7 @@ async def test_the_sweep_covers_the_detail_pane_too(repo) -> None:
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen.set_database("MYDB")
+            screen.set_databases(["MYDB"])
             await pilot.pause()
             tree, tables = await drill_to_tables(app, pilot, screen)
             tree.move_cursor(tables.children[0])
@@ -619,7 +682,7 @@ async def test_switching_between_object_kinds_rebuilds_the_context(repo) -> None
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await pilot.pause()
         tree = screen.query_one(ObjectTree)
         tree.root.children[0].expand()
@@ -673,7 +736,7 @@ async def test_a_search_hit_reveals_in_the_tree_and_fills_the_detail(repo) -> No
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await settle(pilot)
 
         await pilot.press("slash")
@@ -689,6 +752,33 @@ async def test_a_search_hit_reveals_in_the_tree_and_fills_the_detail(repo) -> No
         assert tree.cursor_node.data.key == "STG_CUSTOMER_ORDERS"
 
 
+async def test_search_is_scoped_to_every_selected_database(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "STG_MYDB_ORDERS")
+    put_schemas(repo, "OTHERDB", "BBB")
+    put_tables(repo, "OTHERDB", "BBB", "STG_OTHERDB_ORDERS")
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB", "OTHERDB"])
+        await settle(pilot)
+
+        await pilot.press("slash")
+        await settle(pilot)
+        app.screen.query_one("#search-query", Input).value = "stgorders"
+        await settle(pilot)
+        from textual.widgets import OptionList
+
+        results = app.screen.query_one("#search-results", OptionList)
+        shown = {
+            results.get_option_at_index(i).prompt.plain
+            for i in range(results.option_count)
+        }
+    assert any("MYDB.AAA.STG_MYDB_ORDERS" in text for text in shown)
+    assert any("OTHERDB.BBB.STG_OTHERDB_ORDERS" in text for text in shown)
+
+
 async def test_a_schema_search_hit_reveals_and_expands_it_in_the_tree(repo) -> None:
     """A schema has no detail view (see SchemaRef) -- selecting one reveals
     and expands it in the tree instead of touching the detail pane."""
@@ -698,7 +788,7 @@ async def test_a_schema_search_hit_reveals_and_expands_it_in_the_tree(repo) -> N
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await settle(pilot)
 
         await pilot.press("slash")
@@ -722,7 +812,7 @@ async def test_escape_closes_the_search_modal_without_choosing(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = app.screen
-        screen.set_database("MYDB")
+        screen.set_databases(["MYDB"])
         await settle(pilot)
 
         await pilot.press("slash")

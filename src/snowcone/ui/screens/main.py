@@ -7,6 +7,7 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 from math import ceil
 from typing import ClassVar
@@ -30,9 +31,9 @@ from snowcone.models import (
     databases_scope,
     prime_scope,
     roles_scope,
-    schemas_scope,
     warehouses_scope,
 )
+from snowcone.profiles import Profile, ProfileStore
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import Priority
 from snowcone.settings import CACHE_TTL, config
@@ -42,6 +43,7 @@ from snowcone.ui.messages import (
     ObjectSelected,
     ScopeNeeded,
 )
+from snowcone.ui.screens.multipicker import MultiPickerScreen
 from snowcone.ui.screens.picker import PickerScreen
 from snowcone.ui.screens.search import SearchScreen
 from snowcone.ui.views import (  # noqa: F401 -- registers views
@@ -53,8 +55,6 @@ from snowcone.ui.widgets.detail_pane import DetailPane
 from snowcone.ui.widgets.object_tree import ObjectTree
 from snowcone.ui.widgets.status_bar import StatusFooter
 from snowcone.version import VERSION
-
-NO_DATABASE = "(none)"
 
 #: How often the status indicators are recomputed. Fast enough that a burst of
 #: pool activity is visible rather than blinking past between ticks, and cheap
@@ -71,7 +71,7 @@ class MainScreen(Screen):
     # No F9 here: `MenuBar` installs its own binding on whichever screen it
     # is mounted on, so the key and its footer entry come with the widget.
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("ctrl+d", "pick_database", "Database", show=False),
+        Binding("ctrl+d", "pick_databases", "Databases", show=False),
         Binding("ctrl+r", "pick_role", "Role", show=False),
         Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
         Binding("slash", "search", "Search"),
@@ -84,12 +84,14 @@ class MainScreen(Screen):
         repo: Repository,
         fetch: FetchService | None = None,
         pool: ConnectionPool | None = None,
+        profiles: ProfileStore | None = None,
     ) -> None:
         super().__init__()
         self.repo = repo
         self.fetch = fetch
         self.pool = pool
-        self.database: str | None = None
+        self.profiles = profiles or ProfileStore()
+        self.databases: list[str] = []
         self._frame = 0
         self._context_view = None
 
@@ -104,7 +106,7 @@ class MainScreen(Screen):
                 yield MenuItem("Open...", id="open", mnemonic="o")
                 yield MenuSeparator()
                 yield MenuItem(
-                    "Database ...", id="database", mnemonic="d", shortcut="Ctrl+D"
+                    "Databases ...", id="database", mnemonic="d", shortcut="Ctrl+D"
                 )
                 yield MenuItem(
                     "Warehouse ...", id="warehouse", mnemonic="w", shortcut="Ctrl+W"
@@ -119,7 +121,6 @@ class MainScreen(Screen):
                 )
         with Vertical(id="left"):
             tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
-            tree.border_title = NO_DATABASE
             yield tree
         with Vertical(id="right"):
             with Vertical(id="context"):
@@ -156,8 +157,9 @@ class MainScreen(Screen):
             if node.data is not None and node.data.scope is not None:
                 return node.data.scope
             node = node.parent
-        if self.database is not None:
-            return schemas_scope(self.database)
+        # No single canonical database to prefer here any more -- multiple
+        # can be selected. Only affects the brief pre-navigation window
+        # before the cursor lands anywhere.
         return databases_scope()
 
     def _tick(self) -> None:
@@ -207,7 +209,7 @@ class MainScreen(Screen):
 
     @work
     async def action_search(self) -> None:
-        hit = await self.app.push_screen_wait(SearchScreen(self.repo, self.database))
+        hit = await self.app.push_screen_wait(SearchScreen(self.repo, self.databases))
         if hit is None:
             return
         if isinstance(hit, SchemaRef):
@@ -235,7 +237,7 @@ class MainScreen(Screen):
 
     @on(MenuItem.Pressed, "#database")
     def _menu_database(self) -> None:
-        self._pick_database()
+        self._pick_databases()
 
     @on(MenuItem.Pressed, "#warehouse")
     def _menu_warehouse(self) -> None:
@@ -325,46 +327,45 @@ class MainScreen(Screen):
         `SnowconeApp.switch_repo`. Whatever was on screen was read out of the
         old identity's cache file and cannot simply be relabelled against the
         new one (a different file entirely), so this resets browsing state
-        the same way a fresh connect would: no database selected, nothing in
+        the same way a fresh connect would: no databases selected, nothing in
         the detail pane. Search reads the cache fresh each time it opens, so
         there is nothing to repoint there.
         """
         self.repo = repo
-        self.database = None
+        self.databases = []
         self.tree.set_repo(repo)
         self.detail.set_repo(repo)
         self._context_view = None
         self._rebuild_context(None)
 
-    # -------------------------------------------------------------- database
+    # ------------------------------------------------------------- databases
 
-    def set_database(self, database: str | None) -> None:
-        if database == self.database:
+    def set_databases(self, databases: list[str]) -> None:
+        if databases == self.databases:
             return
-        previous = self.database
-        self.database = database
-        if self.fetch is not None and previous is not None:
-            # Whatever was still queued for the old database is work nobody is
-            # looking at any more.
-            self.fetch.cancel_where(lambda scope: scope.database == previous)
-        self.tree.border_title = database or NO_DATABASE
-        self.tree.set_database(database)
+        removed = set(self.databases) - set(databases)
+        self.databases = databases
+        if self.fetch is not None and removed:
+            # Whatever was still queued for a removed database is work
+            # nobody is looking at any more.
+            self.fetch.cancel_where(lambda scope: scope.database in removed)
+        self.tree.set_databases(databases)
         self.detail.clear()
         self._context_view = None
         self._rebuild_context(None)
 
-    def action_pick_database(self) -> None:
-        self._pick_database()
+    def action_pick_databases(self) -> None:
+        self._pick_databases()
 
     @work
-    async def _pick_database(self) -> None:
-        await self.pick_database()
+    async def _pick_databases(self) -> None:
+        await self.pick_databases()
 
-    async def pick_database(self) -> None:
+    async def pick_databases(self) -> None:
         """Open the database picker.
 
         Not decorated itself: both callers -- the `ctrl+d` binding and the
-        menu item -- already wrap it in `_pick_database`, and
+        menu item -- already wrap it in `_pick_databases`, and
         `push_screen_wait` needs exactly one worker context, not two.
         """
         cached = self.repo.databases(databases_scope())
@@ -375,15 +376,41 @@ class MainScreen(Screen):
             self.notify("Loading databases...", timeout=3)
             return
         chosen = await self.app.push_screen_wait(
-            PickerScreen(
+            MultiPickerScreen(
                 [row.name for row in cached.rows],
-                title="Database",
+                title="Databases",
                 placeholder="type to filter databases",
-                current=self.database,
+                current=self.databases,
             )
         )
         if chosen is not None:
-            self.set_database(chosen)
+            self.set_databases(chosen)
+            self._remember_databases(chosen)
+
+    def _remember_databases(self, databases: list[str]) -> None:
+        """Fold the just-picked selection into this identity's Profile.
+
+        Deliberately separate from set_databases: that method is also called
+        by the set_repo reset path (an empty list, on a role switch or
+        reconnect), and there is nothing to remember about *that* -- only an
+        actual picker confirmation should write anything.
+
+        Not deferred to the next successful connect the way a brand-new
+        Profile is (see ConnectScreen._finish): the pool here is already a
+        working connection, so there is no "does this even work" gate left
+        to wait on -- this is a live UI preference riding on the same
+        record. ProfileStore.add's identity-based promotion also refreshes
+        role/warehouse to whatever is currently live, which is a deliberate,
+        desirable side effect of reusing that method rather than an
+        accident: the record should describe this session as it actually is
+        now.
+        """
+        if self.pool is None:
+            return
+        profile = dataclasses.replace(
+            Profile.from_params(self.pool.params), databases=tuple(databases)
+        )
+        self.profiles.add(profile)
 
     # ------------------------------------------------------ warehouse / role
 
@@ -395,7 +422,7 @@ class MainScreen(Screen):
         await self.pick_warehouse()
 
     async def pick_warehouse(self) -> None:
-        """Open the warehouse picker. See `pick_database` for why this is
+        """Open the warehouse picker. See `pick_databases` for why this is
         not itself a worker."""
         if self.pool is None:
             return
@@ -438,7 +465,7 @@ class MainScreen(Screen):
         await self.pick_role()
 
     async def pick_role(self) -> None:
-        """Open the role picker. See `pick_database` for why this is not
+        """Open the role picker. See `pick_databases` for why this is not
         itself a worker."""
         if self.pool is None:
             return
@@ -460,7 +487,13 @@ class MainScreen(Screen):
             self._switch_role(chosen)
 
     def prewarm_cache(self) -> None:
-        """Warm columns for the current database, from the Connect menu.
+        """Warm columns for whatever database the cursor is under, from the
+        Connect menu.
+
+        Multiple databases can be selected now, so this acts on the one the
+        cursor is currently within -- the same "whatever's under cursor"
+        convention `action_refresh` already uses -- rather than requiring
+        exactly one database ever be selected.
 
         Fires the table/view object primes alongside the columns prime,
         rather than the columns prime alone: the columns-prime fallback tiers
@@ -471,10 +504,10 @@ class MainScreen(Screen):
         nobody watching, so it must never jump ahead of interactive/visible
         work or trigger an unattended reconnect.
         """
-        if self.pool is None or self.database is None:
+        database = self.focused_scope().database
+        if self.pool is None or database is None:
             self.notify("Select a database first", severity="warning")
             return
-        database = self.database
         self._request(prime_scope(ObjectKind.TABLE, database), Priority.BACKGROUND)
         self._request(prime_scope(ObjectKind.VIEW, database), Priority.BACKGROUND)
         self._request(columns_prime_scope(database), Priority.BACKGROUND)
@@ -554,6 +587,6 @@ class MainScreen(Screen):
         node = self.tree.cursor_node
         scope = node.data.scope if node is not None and node.data else None
         if scope is None:
-            scope = databases_scope() if self.database is None else None
+            scope = databases_scope() if not self.databases else None
         if scope is not None:
             self._request(scope, Priority.INTERACTIVE)

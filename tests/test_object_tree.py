@@ -74,24 +74,24 @@ def keys(node) -> list[str]:
 
 async def open_tree(app: Harness, pilot, database: str = "MYDB") -> ObjectTree:
     tree = app.query_one(ObjectTree)
-    tree.set_database(database)
+    tree.set_databases([database])
     await pilot.pause()
     return tree
 
 
-def schemas_node(tree: ObjectTree):
+def database_node(tree: ObjectTree):
     return tree.root.children[0]
 
 
 # ------------------------------------------------------------------ shape
 
 
-async def test_a_database_starts_with_a_counted_schemas_node(repo) -> None:
+async def test_a_database_node_shows_its_schema_count(repo) -> None:
     put_schemas(repo, "MYDB", "AAA", "BBB", "CCC")
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        assert schemas_node(tree).label.plain == "Schemas (3)"
+        assert database_node(tree).label.plain == "MYDB (3)"
 
 
 async def test_schemas_appear_only_once_expanded(repo) -> None:
@@ -101,7 +101,7 @@ async def test_schemas_appear_only_once_expanded(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         assert len(node.children) == 0
         node.expand()
         await pilot.pause()
@@ -114,9 +114,9 @@ async def test_a_schema_offers_a_category_per_object_kind(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schema = schemas_node(tree).children[0]
+        schema = database_node(tree).children[0]
         schema.expand()
         await pilot.pause()
         assert keys(schema) == ["TABLE", "VIEW", "PIPE", "STAGE", "TASK"]
@@ -129,15 +129,91 @@ async def test_objects_appear_under_their_category(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schema = schemas_node(tree).children[0]
+        schema = database_node(tree).children[0]
         schema.expand()
         await pilot.pause()
         tables = schema.children[0]
         tables.expand()
         await pilot.pause()
         assert keys(tables) == ["CUSTOMERS", "ORDERS"]
+
+
+# ------------------------------------------------------------------ multi-db
+
+
+async def test_multiple_databases_each_get_their_own_top_level_node(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHERDB", "ZZZ")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = app.query_one(ObjectTree)
+        tree.set_databases(["MYDB", "OTHERDB"])
+        await pilot.pause()
+        assert keys(tree.root) == ["MYDB", "OTHERDB"]
+        assert tree.root.children[0].label.plain == "MYDB (1)"
+        assert tree.root.children[1].label.plain == "OTHERDB (1)"
+
+
+async def test_a_new_database_appends_without_disturbing_existing_nodes(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHERDB", "ZZZ")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        node = database_node(tree)
+        node.expand()
+        await pilot.pause()
+        tree.move_cursor(node.children[0])
+        await pilot.pause()
+
+        tree.set_databases(["MYDB", "OTHERDB"])
+        await pilot.pause()
+
+        assert keys(tree.root) == ["MYDB", "OTHERDB"]
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "AAA"
+
+
+async def test_removing_one_database_from_the_selection_moves_the_cursor_off_it_first(
+    repo,
+) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHERDB", "ZZZ")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = app.query_one(ObjectTree)
+        tree.set_databases(["MYDB", "OTHERDB"])
+        await pilot.pause()
+        tree.move_cursor(tree.root.children[0])
+        await pilot.pause()
+        assert tree.cursor_node.data.key == "MYDB"
+
+        tree.set_databases(["OTHERDB"])
+        await pilot.pause()
+
+        assert keys(tree.root) == ["OTHERDB"]
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "OTHERDB"
+
+
+async def test_reselecting_the_same_set_of_databases_touches_nothing(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        node = database_node(tree)
+        node.expand()
+        await pilot.pause()
+        tree.move_cursor(node.children[0])
+        await pilot.pause()
+
+        tree.set_databases(["MYDB"])
+        await pilot.pause()
+
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "AAA"
 
 
 # ------------------------------------------------------------ cursor safety
@@ -149,7 +225,7 @@ async def test_an_unchanged_refresh_does_not_move_the_cursor(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         tree.move_cursor(node.children[2])
@@ -168,7 +244,7 @@ async def test_removing_another_node_leaves_the_cursor_alone(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         tree.move_cursor(node.children[2])
@@ -187,7 +263,7 @@ async def test_an_added_node_leaves_the_cursor_alone(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         tree.move_cursor(node.children[0])
@@ -209,7 +285,7 @@ async def test_a_mid_order_insert_rebuilds_but_restores_the_cursor(repo) -> None
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         tree.move_cursor(node.children[1])
@@ -231,7 +307,7 @@ async def test_the_cursor_survives_a_rebuild_while_deep_in_the_tree(repo) -> Non
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         schema = node.children[0]
@@ -261,7 +337,7 @@ async def test_removing_the_cursors_own_node_lands_on_the_next_sibling(repo) -> 
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         tree.move_cursor(node.children[1])
@@ -280,7 +356,7 @@ async def test_removing_the_last_node_falls_back_to_the_previous(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         tree.move_cursor(node.children[1])
@@ -301,7 +377,7 @@ async def test_expansion_survives_a_rebuild(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        node = schemas_node(tree)
+        node = database_node(tree)
         node.expand()
         await pilot.pause()
         node.children[0].expand()
@@ -325,9 +401,9 @@ async def test_a_count_change_only_relabels(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schema = schemas_node(tree).children[0]
+        schema = database_node(tree).children[0]
         schema.expand()
         await pilot.pause()
         tables = schema.children[0]
@@ -367,9 +443,9 @@ async def test_expanding_a_schema_asks_for_each_category(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schemas_node(tree).children[0].expand()
+        database_node(tree).children[0].expand()
         await pilot.pause()
     requested = dict(app.needed)
     assert requested["tables:MYDB.AAA"] is False
@@ -383,9 +459,9 @@ async def test_only_materialised_scopes_are_offered_to_the_sweep(repo) -> None:
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
         assert [s.key for s in tree.visible_scopes()] == ["schemas:MYDB"]
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schemas_node(tree).children[0].expand()
+        database_node(tree).children[0].expand()
         await pilot.pause()
         scopes = {s.key for s in tree.visible_scopes()}
     assert "tables:MYDB.AAA" in scopes
@@ -407,9 +483,9 @@ async def test_highlighting_an_object_announces_it(repo) -> None:
     app = Listening(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schema = schemas_node(tree).children[0]
+        schema = database_node(tree).children[0]
         schema.expand()
         await pilot.pause()
         tables = schema.children[0]
@@ -436,9 +512,9 @@ async def test_a_schema_node_announces_nothing(repo) -> None:
     app = Listening(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        tree.move_cursor(schemas_node(tree).children[0])
+        tree.move_cursor(database_node(tree).children[0])
         await pilot.pause()
     assert seen == []
 
@@ -460,9 +536,9 @@ async def test_highlighting_a_category_node_announces_its_scope(repo) -> None:
     app = Listening(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schema = schemas_node(tree).children[0]
+        schema = database_node(tree).children[0]
         schema.expand()
         await pilot.pause()
         tree.move_cursor(schema.children[0])
@@ -479,15 +555,15 @@ async def test_switching_database_clears_the_tree(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        assert keys(schemas_node(tree)) == ["AAA"]
+        assert keys(database_node(tree)) == ["AAA"]
 
-        tree.set_database("OTHER")
+        tree.set_databases(["OTHER"])
         await pilot.pause()
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        assert keys(schemas_node(tree)) == ["ZZZ"]
+        assert keys(database_node(tree)) == ["ZZZ"]
         assert [s.key for s in tree.visible_scopes()] == ["schemas:OTHER"]
 
 
@@ -498,9 +574,9 @@ async def test_an_object_name_with_markup_is_not_interpreted(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        schemas_node(tree).expand()
+        database_node(tree).expand()
         await pilot.pause()
-        schema = schemas_node(tree).children[0]
+        schema = database_node(tree).children[0]
         schema.expand()
         await pilot.pause()
         tables = schema.children[0]
@@ -564,3 +640,19 @@ async def test_reveal_schema_fails_for_an_unknown_schema(repo) -> None:
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
         assert not tree.reveal_schema(SchemaRef(database="MYDB", name="NOPE"))
+
+
+async def test_reveal_schema_finds_the_right_database_among_several_selected(
+    repo,
+) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHERDB", "BBB")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = app.query_one(ObjectTree)
+        tree.set_databases(["MYDB", "OTHERDB"])
+        await pilot.pause()
+        assert tree.reveal_schema(SchemaRef(database="OTHERDB", name="BBB"))
+        await pilot.pause()
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "BBB"

@@ -71,6 +71,15 @@ ConnectScreen {
     scrollbar-size-vertical: 1;
 }
 
+#connect-identity {
+    height: auto;
+}
+
+#connect-identity Input,
+#connect-identity Select {
+    width: 1fr;
+}
+
 #connect-optional {
     height: auto;
 }
@@ -134,7 +143,8 @@ Button.button-gray {
    the library's -- tcw ships layout and leaves colour alone. */
 ConfirmScreen #confirm-no,
 SettingsScreen #settings-apply,
-SettingsScreen #settings-cancel {
+SettingsScreen #settings-cancel,
+MultiPickerScreen #multipicker-cancel {
     background: $surface-lighten-3;
 
     &:hover {
@@ -144,7 +154,8 @@ SettingsScreen #settings-cancel {
 
 /* ---- picker modal ----------------------------------------------------- */
 
-PickerScreen > #dialog {
+PickerScreen > #dialog,
+MultiPickerScreen > #dialog {
     width: 70;
     max-height: 80%;
 }
@@ -156,6 +167,21 @@ PickerScreen > #dialog {
 #picker-results {
     height: auto;
     max-height: 20;
+}
+
+/* MultiPickerScreen only: PickerScreen has no button row. */
+MultiPickerScreen #buttons {
+    margin-top: 1;
+}
+
+/* Textual's Button defaults to min-width: 16 even when compact, which is
+   more than "All"/"None"/"Ok"/"Cancel" ever need -- four of them plus
+   margins came within a few cells of the dialog's own width, leaving no
+   visible gap for align-horizontal: right (inherited from DialogScreen) to
+   show. Trimmed by 4 to 12, still comfortably wider than the longest label
+   ("Cancel") needs. */
+MultiPickerScreen #buttons Button {
+    min-width: 12;
 }
 
 /* ---- connecting modal --------------------------------------------------- */
