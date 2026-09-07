@@ -131,16 +131,16 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
                         )
                     yield Input(
                         value=entry.account if entry else "",
-                        placeholder="account (ORG-ACCOUNT)",
+                        placeholder="account *",
                         id="account",
                     )
                     yield Input(
                         value=entry.user if entry else "",
-                        placeholder="user",
+                        placeholder="user *",
                         id="user",
                     )
                     yield Input(
-                        placeholder="password",
+                        placeholder="password *",
                         password=True,
                         id="password",
                     )
@@ -230,7 +230,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         needs_password = self._authenticator == USERNAME_PASSWORD_MFA
         password.disabled = not needs_password
         password.placeholder = (
-            "password" if needs_password else "handled by your identity provider"
+            "password *" if needs_password else "handled by your identity provider"
         )
 
     @property
