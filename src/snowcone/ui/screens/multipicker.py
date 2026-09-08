@@ -29,6 +29,17 @@ MAX_RESULTS = 200
 _CHECKED = "☑ "
 _UNCHECKED = "☐ "
 
+# Not Textual's own Checkbox: it's a standalone mounted widget, and OptionList
+# renders options through a virtualized render_line rather than one child
+# widget per row -- using real Checkboxes here would mean mounting/unmounting
+# up to MAX_RESULTS of them on every keystroke instead of swapping Text.
+# Not SelectionList either, despite it wrapping OptionList the same way this
+# does: its selected state lives on the *current* option objects --
+# clear_options() wipes self._selected outright, and removing an option
+# (_pre_remove_option) auto-deselects it -- so it cannot represent "checked,
+# currently filtered out of view", which is exactly what _checked/_shown
+# below need every time a query re-filters the list.
+
 
 class _MultiPickerResults(OptionList):
     """The results list. Its own activation (Enter, or a click -- OptionList
