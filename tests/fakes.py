@@ -114,6 +114,9 @@ class FakeGateway:
         pipe_activity: dict[tuple[str, str], list[Row]] | None = None,
         pipe_activity_history: dict[tuple[str, str, str], list[Row]] | None = None,
         pipe_history: dict[tuple[str, str, str, str], list[Row]] | None = None,
+        task_activity: dict[tuple[str, str], list[Row]] | None = None,
+        task_activity_history: dict[tuple[str, str, str], list[Row]] | None = None,
+        task_history: dict[tuple[str, str, str], list[Row]] | None = None,
         grants_schema: dict[tuple[str, str], list[Row]] | None = None,
         grants_database: dict[str, list[Row]] | None = None,
         tag_references_schema: dict[tuple[str, str], list[Row]] | None = None,
@@ -134,6 +137,12 @@ class FakeGateway:
         self._pipe_activity_history = pipe_activity_history or {}
         #: Keyed by (target_catalog, target_schema, target_table, pipe_name).
         self._pipe_history = pipe_history or {}
+        self._task_activity = task_activity or {}
+        #: Keyed by (database, schema, task_name).
+        self._task_activity_history = task_activity_history or {}
+        #: Keyed by (database, schema, task_name) directly -- unlike
+        #: _pipe_history, task_history needs no resolved target table.
+        self._task_history = task_history or {}
         self._grants_schema = grants_schema or {}
         self._grants_database = grants_database or {}
         self._tag_references_schema = tag_references_schema or {}
@@ -149,6 +158,14 @@ class FakeGateway:
         self.raise_on_pipe_activity_history = False
         #: Flip to simulate pipe_history's SELECT failing (e.g. no warehouse).
         self.raise_on_pipe_history = False
+        #: Flip to simulate the ACCOUNT_USAGE grant being missing, same as
+        #: raise_on_pipe_activity above but for task_activity's SELECT.
+        self.raise_on_task_activity = False
+        #: Flip to simulate task_activity_history's SELECT failing, same as
+        #: raise_on_task_activity above.
+        self.raise_on_task_activity_history = False
+        #: Flip to simulate task_history's SELECT failing (e.g. no warehouse).
+        self.raise_on_task_history = False
         #: Flip to simulate tag_references' SELECT failing for lack of an
         #: active warehouse -- show_grants_on_schema/_database need no such
         #: flag, since SHOW GRANTS is metadata-layer like show_warehouses/
@@ -395,6 +412,54 @@ class FakeGateway:
         if self.raise_on_pipe_history:
             raise RuntimeError("No active warehouse selected in the current session")
         return list(self._pipe_history.get(key, []))
+
+    def task_activity(
+        self,
+        database: str,
+        schema: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        self.calls.append(("task_activity", (database, schema, fetch_days)))
+        if self.raise_on_task_activity:
+            raise RuntimeError(
+                "SQL access control error: Insufficient privileges to "
+                "operate on database 'SNOWFLAKE'"
+            )
+        return list(self._task_activity.get((database, schema), []))
+
+    def task_activity_history(
+        self,
+        database: str,
+        schema: str,
+        task: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        key = (database, schema, task)
+        self.calls.append(("task_activity_history", (*key, fetch_days)))
+        if self.raise_on_task_activity_history:
+            raise RuntimeError(
+                "SQL access control error: Insufficient privileges to "
+                "operate on database 'SNOWFLAKE'"
+            )
+        return list(self._task_activity_history.get(key, []))
+
+    def task_history(
+        self,
+        database: str,
+        schema: str,
+        task: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        key = (database, schema, task)
+        self.calls.append(("task_history", key))
+        if self.raise_on_task_history:
+            raise RuntimeError("No active warehouse selected in the current session")
+        return list(self._task_history.get(key, []))
 
     def show_grants_on_schema(
         self, database: str, schema: str, *, allow_reconnect: bool = True

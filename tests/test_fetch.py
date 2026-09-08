@@ -297,6 +297,88 @@ def test_pipe_history_without_a_resolved_target_raises() -> None:
         )
 
 
+def test_task_activity_is_fetched_in_one_shot() -> None:
+    """A schema's task count is bounded, same reasoning as pipe_activity."""
+    from snowcone.models import task_activity_scope
+
+    gateway = FakeGateway(
+        task_activity={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "NAME": "REFRESH_ORDERS",
+                    "DATABASE_NAME": "MYDB",
+                    "SCHEMA_NAME": "PUBLIC",
+                    "QUERY_ID": "01ab-query-id",
+                    "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "STATE": "SUCCEEDED",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway, task_activity_scope("MYDB", "PUBLIC"), None, limit=1
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
+def test_task_activity_history_is_fetched_in_one_shot() -> None:
+    """One task's full backfill is likewise bounded and unpaged -- no
+    resolution needed, same reasoning as pipe_activity_history."""
+    from snowcone.models import task_activity_history_scope
+
+    gateway = FakeGateway(
+        task_activity_history={
+            ("MYDB", "PUBLIC", "REFRESH_ORDERS"): [
+                {
+                    "NAME": "REFRESH_ORDERS",
+                    "DATABASE_NAME": "MYDB",
+                    "SCHEMA_NAME": "PUBLIC",
+                    "QUERY_ID": "01ab-query-id",
+                    "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "STATE": "SUCCEEDED",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway,
+        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"),
+        None,
+        limit=1,
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
+def test_task_history_is_fetched_in_one_shot_with_no_target_resolution() -> None:
+    """Unlike pipe_history, this needs no `pipe_target`-style extra parameter
+    at all: DATABASE_NAME/SCHEMA_NAME/TASK_NAME come straight off the scope,
+    so calling fetch_page with nothing extra must simply succeed."""
+    from snowcone.models import task_history_scope
+
+    gateway = FakeGateway(
+        task_history={
+            ("MYDB", "PUBLIC", "REFRESH_ORDERS"): [
+                {
+                    "NAME": "REFRESH_ORDERS",
+                    "QUERY_ID": "01ab-query-id",
+                    "SCHEDULED_TIME": "2026-03-01T08:00:00+00:00",
+                    "STATE": "SUCCEEDED",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway,
+        task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"),
+        None,
+        limit=1,
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
 # -------------------------------------------------------------- end to end
 
 
@@ -1082,6 +1164,129 @@ def test_pipe_history_fails_gracefully_with_no_pipe_activity_data_cached(repo) -
     finally:
         service.stop()
     assert repo.entry(scope).state is CacheState.ERROR
+
+
+def test_task_activity_scope_reaches_the_right_gateway_call(repo) -> None:
+    from snowcone.models import task_activity_scope
+
+    gateway = FakeGateway(
+        task_activity={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "NAME": "REFRESH_ORDERS",
+                    "DATABASE_NAME": "MYDB",
+                    "SCHEMA_NAME": "PUBLIC",
+                    "QUERY_ID": "01ab-query-id",
+                    "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "STATE": "SUCCEEDED",
+                }
+            ]
+        }
+    )
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["NAME"] for row in repo.raw_rows(scope)] == ["REFRESH_ORDERS"]
+    assert [c[0] for c in gateway.calls] == ["task_activity"]
+
+
+def test_a_failing_task_activity_fetch_keeps_previously_cached_activity(repo) -> None:
+    """Same "a failed pass does not sweep" guarantee as pipe_activity's own
+    test -- losing the ACCOUNT_USAGE grant or the warehouse mid-browse must
+    not blank out activity that was already fetched successfully."""
+    from snowcone.models import task_activity_scope
+
+    gateway = FakeGateway(
+        task_activity={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "NAME": "REFRESH_ORDERS",
+                    "DATABASE_NAME": "MYDB",
+                    "SCHEMA_NAME": "PUBLIC",
+                    "QUERY_ID": "01ab-query-id",
+                    "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "STATE": "SUCCEEDED",
+                }
+            ]
+        }
+    )
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    errors: list[str] = []
+    service = make_service(
+        gateway, repo, on_error=lambda s, message: errors.append(message)
+    )
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+
+        gateway.raise_on_task_activity = True
+        service.request(scope, Priority.INTERACTIVE)
+        assert wait_until(lambda: bool(errors))
+    finally:
+        service.stop()
+    assert repo.entry(scope).state is CacheState.ERROR
+    assert [row["NAME"] for row in repo.raw_rows(scope)] == ["REFRESH_ORDERS"]
+
+
+def test_task_activity_history_scope_reaches_the_right_gateway_call(repo) -> None:
+    from snowcone.models import task_activity_history_scope
+
+    gateway = FakeGateway(
+        task_activity_history={
+            ("MYDB", "PUBLIC", "REFRESH_ORDERS"): [
+                {
+                    "NAME": "REFRESH_ORDERS",
+                    "DATABASE_NAME": "MYDB",
+                    "SCHEMA_NAME": "PUBLIC",
+                    "QUERY_ID": "01ab-query-id",
+                    "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "STATE": "SUCCEEDED",
+                }
+            ]
+        }
+    )
+    scope = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["NAME"] for row in repo.raw_rows(scope)] == ["REFRESH_ORDERS"]
+    assert [c[0] for c in gateway.calls] == ["task_activity_history"]
+
+
+def test_task_history_scope_reaches_the_right_gateway_call(repo) -> None:
+    """Unlike pipe_history, this needs no sibling scope to resolve a target
+    from first -- DATABASE_NAME/SCHEMA_NAME/TASK_NAME come straight off the
+    scope, so requesting it alone is enough to complete the pass."""
+    from snowcone.models import task_history_scope
+
+    gateway = FakeGateway(
+        task_history={
+            ("MYDB", "PUBLIC", "REFRESH_ORDERS"): [
+                {
+                    "NAME": "REFRESH_ORDERS",
+                    "QUERY_ID": "01ab-query-id",
+                    "SCHEDULED_TIME": "2026-03-01T08:00:00+00:00",
+                    "STATE": "SUCCEEDED",
+                }
+            ]
+        }
+    )
+    scope = task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["NAME"] for row in repo.raw_rows(scope)] == ["REFRESH_ORDERS"]
+    assert [c[0] for c in gateway.calls] == ["task_history"]
 
 
 # --------------------------------------------------------- columns-wide prime

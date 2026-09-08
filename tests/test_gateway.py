@@ -310,6 +310,117 @@ def test_pipe_history_binds_pipe_name_and_qualifies_the_target_table() -> None:
     assert rows[0]["FILE_NAME"] == "orders_9.csv.gz"
 
 
+def test_task_activity_binds_database_and_schema_as_parameters() -> None:
+    """Same shape as pipe_activity, against ACCOUNT_USAGE.TASK_HISTORY."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "NAME",
+        "DATABASE_NAME",
+        "SCHEMA_NAME",
+        "QUERY_ID",
+        "SCHEDULED_TIME",
+        "QUERY_START_TIME",
+        "COMPLETED_TIME",
+        "STATE",
+        "ERROR_CODE",
+        "ERROR_MESSAGE",
+    ]
+    connection.rows = [
+        (
+            "REFRESH_ORDERS",
+            "MYDB",
+            "PUBLIC",
+            "01ab-query-id",
+            "2026-01-02T03:04:05+00:00",
+            "2026-01-02T03:04:06+00:00",
+            "2026-01-02T03:04:10+00:00",
+            "SUCCEEDED",
+            None,
+            None,
+        )
+    ]
+    rows = gateway.task_activity("MYDB", "PUBLIC", 90)
+    statement, params = connection.executed[-1]
+    assert "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY" in statement
+    assert "DATEADD('day', -90," in statement
+    assert params == ("MYDB", "PUBLIC")
+    assert rows[0]["NAME"] == "REFRESH_ORDERS"
+
+
+def test_task_activity_history_binds_database_schema_and_task_as_parameters() -> None:
+    """The per-task backfill: same source as task_activity, plus a third
+    bound NAME param instead of a QUALIFY reduction."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "NAME",
+        "DATABASE_NAME",
+        "SCHEMA_NAME",
+        "QUERY_ID",
+        "SCHEDULED_TIME",
+        "QUERY_START_TIME",
+        "COMPLETED_TIME",
+        "STATE",
+        "ERROR_CODE",
+        "ERROR_MESSAGE",
+    ]
+    connection.rows = [
+        (
+            "REFRESH_ORDERS",
+            "MYDB",
+            "PUBLIC",
+            "01ab-query-id",
+            "2026-01-02T03:04:05+00:00",
+            "2026-01-02T03:04:06+00:00",
+            "2026-01-02T03:04:10+00:00",
+            "SUCCEEDED",
+            None,
+            None,
+        )
+    ]
+    rows = gateway.task_activity_history("MYDB", "PUBLIC", "REFRESH_ORDERS", 90)
+    statement, params = connection.executed[-1]
+    assert "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY" in statement
+    assert "QUALIFY" not in statement
+    assert params == ("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    assert rows[0]["NAME"] == "REFRESH_ORDERS"
+
+
+def test_task_history_calls_the_table_function_with_no_bound_params() -> None:
+    """Unlike pipe_history, DATABASE_NAME/SCHEMA_NAME/TASK_NAME are direct
+    named arguments, so there is nothing left to bind. The function name
+    itself is still database-qualified, same as pipe_history qualifies
+    COPY_HISTORY -- see queries.task_history's docstring."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "NAME",
+        "QUERY_ID",
+        "SCHEDULED_TIME",
+        "QUERY_START_TIME",
+        "COMPLETED_TIME",
+        "STATE",
+        "ERROR_CODE",
+        "ERROR_MESSAGE",
+    ]
+    connection.rows = [
+        (
+            "REFRESH_ORDERS",
+            "01ab-query-id",
+            "2026-03-01T08:00:00+00:00",
+            "2026-03-01T08:00:01+00:00",
+            "2026-03-01T08:00:05+00:00",
+            "SUCCEEDED",
+            None,
+            None,
+        )
+    ]
+    rows = gateway.task_history("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    statement, params = connection.executed[-1]
+    assert 'FROM TABLE("MYDB".INFORMATION_SCHEMA.TASK_HISTORY(' in statement
+    assert "TASK_NAME => 'REFRESH_ORDERS'" in statement
+    assert params is None
+    assert rows[0]["NAME"] == "REFRESH_ORDERS"
+
+
 def test_background_priority_retries_but_never_reconnects_unattended() -> None:
     """The retry itself must respect allow_reconnect: a background-priority
     caller whose only connection just failed must not have it replaced by a

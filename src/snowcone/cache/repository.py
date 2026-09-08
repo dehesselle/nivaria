@@ -317,6 +317,63 @@ _PIPE_HISTORY = TableSpec(
     order_by=("LAST_LOAD_TIME",),
 )
 
+_TASK_ACTIVITY = TableSpec(
+    name="account_usage_task_history",
+    columns=(
+        "NAME",
+        "DATABASE_NAME",
+        "SCHEMA_NAME",
+        "QUERY_ID",
+        "SCHEDULED_TIME",
+        "QUERY_START_TIME",
+        "COMPLETED_TIME",
+        "STATE",
+        "ERROR_CODE",
+        "ERROR_MESSAGE",
+    ),
+    # One row per task (the QUALIFY in queries.task_activity keeps only the
+    # latest), not per historical run -- see ScopeKind.TASK_ACTIVITY.
+    key=("DATABASE_NAME", "SCHEMA_NAME", "NAME", "QUERY_ID"),
+    order_by=("NAME", "SCHEDULED_TIME"),
+)
+
+_TASK_ACTIVITY_HISTORY = TableSpec(
+    name="account_usage_task_history_detail",
+    columns=(
+        "NAME",
+        "DATABASE_NAME",
+        "SCHEMA_NAME",
+        "QUERY_ID",
+        "SCHEDULED_TIME",
+        "QUERY_START_TIME",
+        "COMPLETED_TIME",
+        "STATE",
+        "ERROR_CODE",
+        "ERROR_MESSAGE",
+    ),
+    # _scope disambiguates by task -- same reasoning as _TASK_HISTORY below.
+    key=("_scope", "QUERY_ID"),
+    order_by=("SCHEDULED_TIME",),
+)
+
+_TASK_HISTORY = TableSpec(
+    name="information_schema_task_history",
+    columns=(
+        "NAME",
+        "QUERY_ID",
+        "SCHEDULED_TIME",
+        "QUERY_START_TIME",
+        "COMPLETED_TIME",
+        "STATE",
+        "ERROR_CODE",
+        "ERROR_MESSAGE",
+    ),
+    # _scope disambiguates by task -- the physical table holds every task's
+    # rows together, same as every other mirror table.
+    key=("_scope", "QUERY_ID"),
+    order_by=("SCHEDULED_TIME",),
+)
+
 _GRANTS = TableSpec(
     name="show_grants",
     columns=(
@@ -371,6 +428,12 @@ def spec_for(scope: Scope) -> TableSpec:
             return _PIPE_ACTIVITY_HISTORY
         case ScopeKind.PIPE_HISTORY:
             return _PIPE_HISTORY
+        case ScopeKind.TASK_ACTIVITY:
+            return _TASK_ACTIVITY
+        case ScopeKind.TASK_ACTIVITY_HISTORY:
+            return _TASK_ACTIVITY_HISTORY
+        case ScopeKind.TASK_HISTORY:
+            return _TASK_HISTORY
         case ScopeKind.GRANTS:
             return _GRANTS
         case ScopeKind.TAG_REFERENCES:

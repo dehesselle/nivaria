@@ -321,6 +321,111 @@ def pipe_history(target_catalog: str, target_schema: str, target_table: str) -> 
     )
 
 
+def task_activity(fetch_days: int) -> str:
+    """Every task's *latest* run in a schema, back to `fetch_days` ago.
+
+    SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY, filtered to one schema's tasks and
+    reduced to one row per task with QUALIFY -- the same shape `pipe_activity`
+    uses, and for the same reason: a schema full of frequently-running tasks
+    could return unboundedly many historical rows for a query that only ever
+    gets collapsed back down to one row per task in Python anyway (see
+    `task_list_view.py`). A single task's full history (for its own detail
+    view) is `task_activity_history` below instead -- lazy, per task, not
+    part of this query.
+
+    `fetch_days` comes from the "task history fetch window" setting, read
+    fresh at fetch time. Like `pipe_activity`, this needs a running warehouse
+    (unverified -- see DESIGN.md) and IMPORTED PRIVILEGES on the SNOWFLAKE
+    database (or ACCOUNTADMIN); either gap just fails this one scope, same as
+    a missing warehouse does for `table_stats`.
+    """
+    return (
+        "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
+        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
+        "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s "
+        f"AND SCHEDULED_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        "QUALIFY ROW_NUMBER() OVER (PARTITION BY NAME ORDER BY SCHEDULED_TIME DESC) = 1"
+    )
+
+
+def task_activity_history(fetch_days: int) -> str:
+    """One task's full ACCOUNT_USAGE run history, back to `fetch_days` ago.
+
+    The backfill half of a single task's detail view -- `task_activity` above
+    deliberately only keeps the latest row per task, so a task's own "Run
+    history" tab needs this instead, scoped to just that one task and fetched
+    lazily only once that task's view is opened (`TaskView`), never eagerly
+    for a whole schema. Like `pipe_activity_history`, this needs no
+    target-table resolution: ACCOUNT_USAGE.TASK_HISTORY already carries NAME
+    as an ordinary column, so this is just one more bound `%s` alongside
+    `task_activity`'s two.
+    """
+    return (
+        "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
+        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
+        "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND NAME = %s "
+        f"AND SCHEDULED_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP())"
+    )
+
+
+#: Snowflake's own hard retention limit for INFORMATION_SCHEMA.TASK_HISTORY --
+#: a platform constant, not a preference, so it is not a Setting. Shorter than
+#: PIPE_HISTORY_RETENTION_DAYS' 14 days. This is also why
+#: ScopeKind.TASK_ACTIVITY_HISTORY's TTL override (models.py) stays one day
+#: under this: the two sources must jointly cover every day with no gap.
+TASK_HISTORY_RETENTION_DAYS = 7
+
+
+def task_history(database: str, schema: str, task: str) -> str:
+    """One task's near-real-time run history, the last 7 days.
+
+    INFORMATION_SCHEMA.TASK_HISTORY, a table function that -- unlike
+    INFORMATION_SCHEMA.COPY_HISTORY -- accepts TASK_NAME/DATABASE_NAME/
+    SCHEMA_NAME directly as named arguments, all of which a task's own Scope
+    already carries. So unlike `pipe_history`, this needs no side-channel
+    target resolution before it can be called at all.
+
+    The function name itself is still database-qualified
+    (`quote_identifier(database).INFORMATION_SCHEMA.TASK_HISTORY`), same as
+    `pipe_history` qualifies COPY_HISTORY -- confirmed against a live account:
+    an unqualified `INFORMATION_SCHEMA.TASK_HISTORY` resolves against whatever
+    database happens to be current in the session, which the connection pool
+    never sets (only USE ROLE/USE WAREHOUSE are ever issued -- see "The
+    connection pool" in DESIGN.md), so it fails with "invalid identifier
+    INFORMATION_SCHEMA.TASK_HISTORY" regardless of which database the task
+    actually lives in. The DATABASE_NAME/SCHEMA_NAME named arguments below are
+    a separate thing -- they filter the function's *output*, not its own
+    name resolution.
+
+    Every named argument here is a table-function argument, not an ordinary
+    SELECT's WHERE clause -- whether the driver's pyformat bind works inside
+    one is untested, so all of them are quote_literal'd/computed as plain SQL
+    text instead, the same reasoning `pipe_history` already documents. There
+    is therefore no bound `%s` parameter at all here, unlike `pipe_history`,
+    where PIPE_NAME filters the function's *output* rather than being a named
+    argument itself.
+
+    RESULT_LIMIT is set to the function's own maximum (10000) to avoid
+    truncation within the 7-day window -- a task history light enough to fit
+    on screen is never anywhere near that many rows in practice.
+    """
+    target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.TASK_HISTORY"
+    return (
+        "SELECT NAME, QUERY_ID, SCHEDULED_TIME, QUERY_START_TIME, COMPLETED_TIME, "
+        "STATE, ERROR_CODE, ERROR_MESSAGE "
+        f"FROM TABLE({target}("
+        f"DATABASE_NAME => {quote_literal(database)}, "
+        f"SCHEMA_NAME => {quote_literal(schema)}, "
+        f"TASK_NAME => {quote_literal(task)}, "
+        "RESULT_LIMIT => 10000, "
+        "SCHEDULED_TIME_RANGE_START => DATEADD('day', "
+        f"-{TASK_HISTORY_RETENTION_DAYS}, CURRENT_TIMESTAMP())"
+        "))"
+    )
+
+
 def _data_type_fields(raw: object) -> dict[str, object]:
     """Unpack SHOW COLUMNS' data_type, which is a JSON string.
 

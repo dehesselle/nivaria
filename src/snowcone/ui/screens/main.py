@@ -52,6 +52,8 @@ from snowcone.ui.views import (  # noqa: F401 -- registers views
     pipe_view,
     table_list_view,
     table_view,
+    task_list_view,
+    task_view,
 )
 from snowcone.ui.widgets.detail_pane import DetailPane
 from snowcone.ui.widgets.object_tree import ObjectTree

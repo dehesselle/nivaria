@@ -17,6 +17,9 @@ from snowcone.models import (
     scope_ttl,
     table_stats_scope,
     tag_references_scope,
+    task_activity_history_scope,
+    task_activity_scope,
+    task_history_scope,
     warehouses_scope,
 )
 
@@ -129,6 +132,42 @@ def test_pipe_history_scope_carries_no_object_kind() -> None:
     assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").object_kind is None
 
 
+def test_task_activity_scope_key() -> None:
+    assert task_activity_scope("MYDB", "PUBLIC").key == "task_activity:MYDB.PUBLIC"
+
+
+def test_task_activity_scope_carries_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert task_activity_scope("MYDB", "PUBLIC").object_kind is None
+
+
+def test_task_activity_history_scope_key() -> None:
+    assert (
+        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS").key
+        == "task_activity_history:MYDB.PUBLIC.REFRESH_ORDERS"
+    )
+
+
+def test_task_activity_history_scope_carries_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert (
+        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS").object_kind
+        is None
+    )
+
+
+def test_task_history_scope_key() -> None:
+    assert (
+        task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS").key
+        == "task_history:MYDB.PUBLIC.REFRESH_ORDERS"
+    )
+
+
+def test_task_history_scope_carries_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS").object_kind is None
+
+
 def test_a_schema_level_grants_scope_and_a_database_level_grants_scope_have_different_keys() -> (
     None
 ):
@@ -189,6 +228,27 @@ def test_scope_ttl_extends_pipe_activity_historys_refresh_too() -> None:
     )
     assert effective > ordinary
     assert effective == 13 * 86400
+
+
+def test_scope_ttl_does_not_extend_task_activitys_refresh() -> None:
+    """Deliberately not the same override as PIPE_ACTIVITY: a task can run
+    every few minutes, so this stays on the caller's ordinary cadence -- see
+    models.py's _TTL_OVERRIDES comment."""
+    ordinary = 900
+    assert scope_ttl(task_activity_scope("MYDB", "PUBLIC"), ordinary) == ordinary
+
+
+def test_scope_ttl_extends_task_activity_historys_refresh_past_the_ordinary_cadence() -> (
+    None
+):
+    """6 days, one short of INFORMATION_SCHEMA.TASK_HISTORY's 7-day
+    retention -- see models.py's _TTL_OVERRIDES comment."""
+    ordinary = 900
+    effective = scope_ttl(
+        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"), ordinary
+    )
+    assert effective > ordinary
+    assert effective == 6 * 86400
 
 
 def test_warehouses_and_roles_are_flat_scopes_like_databases() -> None:

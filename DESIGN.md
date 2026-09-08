@@ -760,6 +760,54 @@ pipe, the same data this view already showed before it had tabs.
 `invalid_reason` costs no new scope here either: it is already mirrored onto
 the same `SHOW PIPES` rows this view reads for the Name column.
 
+A task's own view (`TaskView`) follows the same shape as `PipeView` --
+**Run history** (Snowsight's own term, matching what its task detail page
+calls this) and **Definition** (the task's raw SQL statement, unformatted),
+mnemonic-switchable `r`/`d` -- backed by the same dual-source pattern
+`PipeView`'s Load history uses, just against `SNOWFLAKE.ACCOUNT_USAGE.
+TASK_HISTORY` (a task's full backfill, `TASK_ACTIVITY_HISTORY`) and
+`INFORMATION_SCHEMA.TASK_HISTORY` (near-real-time, but limited to Snowflake's
+own hard 7-day retention for that function -- shorter than `COPY_HISTORY`'s
+14) merged by `QUERY_ID`, Snowflake's own identifier for a single run. One
+real divergence from `PipeView`: `INFORMATION_SCHEMA.TASK_HISTORY` accepts
+`TASK_NAME`/`DATABASE_NAME`/`SCHEMA_NAME` as direct named arguments, unlike
+`COPY_HISTORY`'s `TABLE_NAME`, which a pipe does not carry itself and which
+`PipeView` resolves through `Repository.pipe_target_table` as a result. A
+task's own `ObjectRef` already has everything `TASK_HISTORY` needs, so
+`TaskView` has no analogous resolution step and no gating on `scopes()` --
+both history scopes are always requested once the view is open.
+
+`queries.task_history` still database-qualifies the function name itself
+(`"<database>".INFORMATION_SCHEMA.TASK_HISTORY(...)`, the same way
+`pipe_history` qualifies `COPY_HISTORY`) even though `DATABASE_NAME` is also
+one of its named arguments -- those are two different things. This was a
+real incident, not a defensive guess: an unqualified `INFORMATION_SCHEMA.
+TASK_HISTORY` resolves against whichever database happens to be current in
+the session, and the connection pool never sets one (only `USE ROLE`/`USE
+WAREHOUSE` are ever issued -- see "The connection pool"), so the first
+version of this query failed on a real account with "invalid identifier
+INFORMATION_SCHEMA.TASK_HISTORY" regardless of which database the task
+actually lived in -- silently, since the schema-wide `ACCOUNT_USAGE`-backed
+half of the merge still returned data and the failure only surfaced as an
+error toast.
+
+The "Tasks (n)" category node (`TaskListView`) is deliberately **not**
+tabbed the way `PipeListView` is: there is only one thing to show for a
+schema's tasks today, so it is a single `DataTable`, the same shape
+`TableListView` uses. Its columns merge `SHOW TASKS` (Name, Warehouse,
+Schedule, State -- `state` is Snowflake's own started/suspended wording,
+shown verbatim per the mirror-don't-reinterpret rule above, not relabelled
+into invented vocabulary) with `TASK_ACTIVITY` (`SNOWFLAKE.ACCOUNT_USAGE.
+TASK_HISTORY`, reduced to each task's latest run by the same
+`QUALIFY ROW_NUMBER()` technique `PIPE_ACTIVITY` uses, for the same scale
+reason: an unreduced query over a schema of frequently-running tasks risks
+the same kind of hang the ~400-pipe incident above describes) for Last Run
+and Last Run Status. Unlike `PIPE_ACTIVITY`, `TASK_ACTIVITY` carries **no**
+TTL override (see `scope_ttl` below) -- a task can run every few minutes, so
+a multi-day-stale "last run" column here would be actively misleading, not
+merely questionable the way `PIPE_ACTIVITY`'s own inherited override already
+admits it is.
+
 A **schema** or **database** node is a further departure from the registry
 above: neither has an `ObjectKind`, so neither `ObjectView` nor `CategoryView`
 fits, and there is exactly one view per node kind rather than one of several
@@ -1135,11 +1183,22 @@ Three things about it are worth knowing from inside snowcone:
   `ACCOUNTADMIN`/`SECURITYADMIN` — a role without one of those sees a
   shorter (or empty) Grants tab, which is Snowflake's own visibility rule,
   not a bug or an incomplete fetch.
+- `account_usage_task_history`'s, `account_usage_task_history_detail`'s and
+  `information_schema_task_history`'s columns are likewise documentation-only
+  and unverified against a live account, same caveat as
+  `account_usage_copy_history`/`information_schema_copy_history` above. The
+  `ACCOUNT_USAGE`-backed pair additionally need `IMPORTED PRIVILEGES` on the
+  `SNOWFLAKE` database (or `ACCOUNTADMIN`) and can lag real task activity by
+  up to ~45 minutes per Snowflake's published docs (not independently
+  confirmed). Whether `INFORMATION_SCHEMA.TASK_HISTORY` needs a running
+  warehouse to query at all is likewise assumed, not documented or verified
+  -- by analogy with every other `INFORMATION_SCHEMA` table function here
+  (`COPY_HISTORY`, `TAG_REFERENCES`), not confirmed against a live account.
 - The tree/Detail drag-resize (see "Screen anatomy") does not persist across
   sessions, and does not re-clamp an already-narrow pane if the terminal is
   then resized smaller -- both accepted, ported as-is from sibling project
   snakecam's identical mechanism, not engineered around.
-- Stages and tasks appear in the tree but have no Object view yet; they show a
+- Stages appear in the tree but have no Object view yet; they show a
   placeholder.
 - **Multiple databases can now be browsed and searched at once** — this
   reverses what used to be a deliberate constraint here ("cross-database

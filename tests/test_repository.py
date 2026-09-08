@@ -16,6 +16,8 @@ from snowcone.models import (
     pipe_activity_scope,
     roles_scope,
     schemas_scope,
+    task_activity_history_scope,
+    task_activity_scope,
     warehouses_scope,
 )
 
@@ -432,6 +434,32 @@ def test_pipe_activitys_ttl_override_outlasts_the_ordinary_sweep_interval(repo) 
     assert repo.stale_scopes(0.01, [ordinary, pipes]) == [ordinary]
 
 
+def test_task_activitys_ttl_does_not_outlast_the_ordinary_sweep_interval(repo) -> None:
+    """Deliberately not the same override as PIPE_ACTIVITY: a task can run
+    every few minutes, so this stays on the ordinary cadence -- see
+    ScopeKind.TASK_ACTIVITY's comment."""
+    ordinary = databases_scope()
+    tasks = task_activity_scope("MYDB", "PUBLIC")
+    load(repo, ordinary, db_rows("ACME"))
+    load(repo, tasks, [])
+    time.sleep(0.02)
+    assert set(repo.stale_scopes(0.01, [ordinary, tasks])) == {ordinary, tasks}
+
+
+def test_task_activity_historys_ttl_override_outlasts_the_ordinary_sweep_interval(
+    repo,
+) -> None:
+    """6-day floor (models.scope_ttl), same reasoning as PIPE_ACTIVITY_
+    HISTORY's own test above -- see ScopeKind.TASK_ACTIVITY_HISTORY's
+    comment."""
+    ordinary = databases_scope()
+    history = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    load(repo, ordinary, db_rows("ACME"))
+    load(repo, history, [])
+    time.sleep(0.02)
+    assert repo.stale_scopes(0.01, [ordinary, history]) == [ordinary]
+
+
 # ------------------------------------------- schema.sql / TableSpec agreement
 
 
@@ -450,6 +478,9 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _SCHEMAS,
         _TABLE_STATS,
         _TAG_REFERENCES,
+        _TASK_ACTIVITY,
+        _TASK_ACTIVITY_HISTORY,
+        _TASK_HISTORY,
     )
 
     specs = [
@@ -460,6 +491,9 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _PIPE_ACTIVITY,
         _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
+        _TASK_ACTIVITY,
+        _TASK_ACTIVITY_HISTORY,
+        _TASK_HISTORY,
         _GRANTS,
         _TAG_REFERENCES,
         *_OBJECT_TABLES.values(),
@@ -867,3 +901,135 @@ def test_pipe_history_columns_round_trip_but_are_unverified(repo) -> None:
     stored = repo.raw_rows(scope)[0]
     assert stored["FILE_NAME"] == "orders_9.csv.gz"
     assert stored["STATUS"] == "Loaded"
+
+
+def test_task_activity_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
+    this shape comes from Snowflake's published ACCOUNT_USAGE.TASK_HISTORY
+    documentation, not a probed live account -- see DESIGN.md "Known gaps"."""
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "NAME": "REFRESH_ORDERS",
+                "DATABASE_NAME": "MYDB",
+                "SCHEMA_NAME": "PUBLIC",
+                "QUERY_ID": "01ab-query-id",
+                "SCHEDULED_TIME": "2026-01-02 03:04:05",
+                "QUERY_START_TIME": "2026-01-02 03:04:06",
+                "COMPLETED_TIME": "2026-01-02 03:04:10",
+                "STATE": "SUCCEEDED",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["NAME"] == "REFRESH_ORDERS"
+    assert stored["STATE"] == "SUCCEEDED"
+
+
+def test_task_activity_table_can_hold_more_than_one_task_per_run(repo) -> None:
+    """The mirror table's PK is (database, schema, task, QUERY_ID), not just
+    (database, schema, task) -- queries.task_activity's QUALIFY means only
+    one row per task is ever fetched in practice now, but the wider key is
+    still what lets a pass that advances a task's latest run insert the new
+    row under its own key rather than collide with the previous one, which
+    finish_pass then sweeps away as stale. (A single task's full history
+    lives in account_usage_task_history_detail instead -- see
+    _TASK_ACTIVITY_HISTORY.)"""
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "NAME": "REFRESH_ORDERS",
+                "DATABASE_NAME": "MYDB",
+                "SCHEMA_NAME": "PUBLIC",
+                "QUERY_ID": "01ab-query-id-1",
+                "SCHEDULED_TIME": "2026-01-02 03:04:05",
+                "STATE": "SUCCEEDED",
+            },
+            {
+                "NAME": "REFRESH_TOTALS",
+                "DATABASE_NAME": "MYDB",
+                "SCHEMA_NAME": "PUBLIC",
+                "QUERY_ID": "01ab-query-id-2",
+                "SCHEDULED_TIME": "2026-01-02 03:05:05",
+                "STATE": "FAILED",
+            },
+        ],
+    )
+    stored = repo.raw_rows(scope)
+    assert {row["NAME"] for row in stored} == {"REFRESH_ORDERS", "REFRESH_TOTALS"}
+
+
+def test_task_activity_history_columns_round_trip(repo) -> None:
+    """The per-task backfill mirror -- same column shape as account_usage_
+    task_history, same unverified-against-a-live-account caveat."""
+    scope = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "NAME": "REFRESH_ORDERS",
+                "DATABASE_NAME": "MYDB",
+                "SCHEMA_NAME": "PUBLIC",
+                "QUERY_ID": "01ab-query-id",
+                "SCHEDULED_TIME": "2026-01-02 03:04:05",
+                "STATE": "SUCCEEDED",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["NAME"] == "REFRESH_ORDERS"
+    assert stored["STATE"] == "SUCCEEDED"
+
+
+def test_task_activity_history_is_scoped_per_task_not_per_schema(repo) -> None:
+    """Unlike account_usage_task_history (one _scope per schema),
+    account_usage_task_history_detail is one _scope per task -- a row cached
+    for one task must not be visible from another task's scope."""
+    load(
+        repo,
+        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_OTHER"),
+        [
+            {
+                "NAME": "REFRESH_OTHER",
+                "QUERY_ID": "01ab-other",
+                "SCHEDULED_TIME": "2026-01-02 03:04:05",
+            }
+        ],
+    )
+    assert (
+        repo.raw_rows(task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"))
+        == []
+    )
+
+
+def test_task_history_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as the other two SELECT-backed mirrors: this shape comes
+    from Snowflake's published INFORMATION_SCHEMA.TASK_HISTORY documentation,
+    not a probed live account -- see DESIGN.md "Known gaps"."""
+    from snowcone.models import task_history_scope
+
+    scope = task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "NAME": "REFRESH_ORDERS",
+                "QUERY_ID": "01ab-query-id",
+                "SCHEDULED_TIME": "2026-03-01 08:00:00",
+                "QUERY_START_TIME": "2026-03-01 08:00:01",
+                "COMPLETED_TIME": "2026-03-01 08:00:05",
+                "STATE": "SUCCEEDED",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["NAME"] == "REFRESH_ORDERS"
+    assert stored["STATE"] == "SUCCEEDED"

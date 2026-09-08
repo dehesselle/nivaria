@@ -23,6 +23,8 @@ __all__ = [
     "PIPE_HISTORY_FETCH_DAYS",
     "PIPE_HISTORY_SHOW_DAYS",
     "POOL_SIZE",
+    "TASK_HISTORY_FETCH_DAYS",
+    "TASK_HISTORY_SHOW_DAYS",
     "Setting",
     "config",
 ]
@@ -85,6 +87,31 @@ PIPE_HISTORY_SHOW_DAYS = Setting(
     label="pipe history display window (days)",
     description=(
         "How many days of a pipe's load history to show in its detail view. "
+        "Can be smaller than the fetch window above to keep the list short "
+        "while still keeping older rows cached for later."
+    ),
+    group="Cache",
+    default=90,
+)
+
+TASK_HISTORY_FETCH_DAYS = Setting(
+    key="task_history_fetch_days",
+    label="task history fetch window (days)",
+    description=(
+        "How many days of task run history to pull from "
+        "SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY per schema, kept in the cache "
+        "regardless of how much of it the task detail view actually shows -- "
+        "see 'task history display window' below."
+    ),
+    group="Cache",
+    default=90,
+)
+
+TASK_HISTORY_SHOW_DAYS = Setting(
+    key="task_history_show_days",
+    label="task history display window (days)",
+    description=(
+        "How many days of a task's run history to show in its detail view. "
         "Can be smaller than the fetch window above to keep the list short "
         "while still keeping older rows cached for later."
     ),

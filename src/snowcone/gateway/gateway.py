@@ -141,6 +141,34 @@ class SnowflakeGateway(Protocol):
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
+    def task_activity(
+        self,
+        database: str,
+        schema: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
+
+    def task_activity_history(
+        self,
+        database: str,
+        schema: str,
+        task: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
+
+    def task_history(
+        self,
+        database: str,
+        schema: str,
+        task: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
+
 
 class PoolGateway:
     """A gateway that borrows a pool connection per call.
@@ -381,5 +409,48 @@ class PoolGateway:
         return self._fetch(
             queries.pipe_history(target_catalog, target_schema, target_table),
             (pipe_name,),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def task_activity(
+        self,
+        database: str,
+        schema: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        return self._fetch(
+            queries.task_activity(fetch_days),
+            (database, schema),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def task_activity_history(
+        self,
+        database: str,
+        schema: str,
+        task: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        return self._fetch(
+            queries.task_activity_history(fetch_days),
+            (database, schema, task),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def task_history(
+        self,
+        database: str,
+        schema: str,
+        task: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        return self._fetch(
+            queries.task_history(database, schema, task),
+            (),
             allow_reconnect=allow_reconnect,
         )

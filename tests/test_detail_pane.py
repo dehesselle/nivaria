@@ -24,8 +24,11 @@ from snowcone.models import (
     pipe_history_scope,
     table_stats_scope,
     tag_references_scope,
+    task_activity_history_scope,
+    task_activity_scope,
+    task_history_scope,
 )
-from snowcone.settings import PIPE_HISTORY_SHOW_DAYS, config
+from snowcone.settings import PIPE_HISTORY_SHOW_DAYS, TASK_HISTORY_SHOW_DAYS, config
 from snowcone.ui.messages import ObjectSelected, ScopeNeeded
 from snowcone.ui.views.base import registered_kinds, view_for
 from snowcone.ui.views.pipe_list_view import PipeListView
@@ -33,6 +36,8 @@ from snowcone.ui.views.pipe_view import PipeView
 from snowcone.ui.views.schema_view import DatabaseView, SchemaView
 from snowcone.ui.views.table_list_view import TableListView
 from snowcone.ui.views.table_view import TableView, ViewView
+from snowcone.ui.views.task_list_view import TaskListView
+from snowcone.ui.views.task_view import TaskView
 from snowcone.ui.widgets.detail_pane import DetailPane
 
 
@@ -229,6 +234,104 @@ def put_pipe_history(repo: Repository, pipe: str, **extra) -> None:
     )
 
 
+def put_task(repo: Repository, name: str, **extra) -> ObjectRef:
+    row = {
+        "database_name": "MYDB",
+        "schema_name": "PUBLIC",
+        "name": name,
+        "definition": "INSERT INTO t SELECT * FROM s",
+        "owner": "LOADER",
+        "warehouse": "MYWH",
+        "schedule": "5 MINUTE",
+        "state": "started",
+        "comment": "",
+    }
+    row.update(extra)
+    existing = repo.raw_rows(objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC"))
+    load(
+        repo,
+        objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC"),
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+    return ObjectRef(ObjectKind.TASK, "MYDB", "PUBLIC", name)
+
+
+def put_task_activity(repo: Repository, task: str, **extra) -> None:
+    row = {
+        "NAME": task,
+        "DATABASE_NAME": "MYDB",
+        "SCHEMA_NAME": "PUBLIC",
+        "QUERY_ID": "01ab-query-id",
+        "SCHEDULED_TIME": "2026-01-02 03:04:05",
+        "QUERY_START_TIME": "2026-01-02 03:04:06",
+        "COMPLETED_TIME": "2026-01-02 03:04:10",
+        "STATE": "SUCCEEDED",
+    }
+    row.update(extra)
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+
+
+def put_task_activity_history(repo: Repository, task: str, **extra) -> None:
+    """Seeds a single task's ACCOUNT_USAGE backfill scope -- what TaskView's
+    Run History tab actually merges, unlike the schema-wide put_task_activity
+    above (which TaskListView reads)."""
+    row = {
+        "NAME": task,
+        "DATABASE_NAME": "MYDB",
+        "SCHEMA_NAME": "PUBLIC",
+        "QUERY_ID": "01ab-query-id",
+        "SCHEDULED_TIME": "2026-01-02 03:04:05",
+        "QUERY_START_TIME": "2026-01-02 03:04:06",
+        "COMPLETED_TIME": "2026-01-02 03:04:10",
+        "STATE": "SUCCEEDED",
+    }
+    row.update(extra)
+    scope = task_activity_history_scope("MYDB", "PUBLIC", task)
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+
+
+def put_task_history(repo: Repository, task: str, **extra) -> None:
+    row = {
+        "NAME": task,
+        "QUERY_ID": "02cd-query-id",
+        "SCHEDULED_TIME": "2026-03-01 08:00:00",
+        "QUERY_START_TIME": "2026-03-01 08:00:01",
+        "COMPLETED_TIME": "2026-03-01 08:00:05",
+        "STATE": "SUCCEEDED",
+    }
+    row.update(extra)
+    scope = task_history_scope("MYDB", "PUBLIC", task)
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+
+
 def put_grant(repo: Repository, database: str, schema: str | None, **extra) -> None:
     row = {
         "created_on": "2026-01-01 00:00:00",
@@ -283,10 +386,16 @@ def test_every_kind_the_tree_shows_has_a_view_or_is_known_missing() -> None:
     assert view_for(ObjectKind.TABLE) is TableView
     assert view_for(ObjectKind.VIEW) is ViewView
     assert view_for(ObjectKind.PIPE) is PipeView
+    assert view_for(ObjectKind.TASK) is TaskView
 
 
 def test_registration_is_by_object_kind() -> None:
-    assert {ObjectKind.TABLE, ObjectKind.VIEW, ObjectKind.PIPE} <= registered_kinds()
+    assert {
+        ObjectKind.TABLE,
+        ObjectKind.VIEW,
+        ObjectKind.PIPE,
+        ObjectKind.TASK,
+    } <= registered_kinds()
 
 
 def test_registering_a_duplicate_kind_is_refused() -> None:
@@ -794,6 +903,269 @@ def test_pipe_view_scopes_excludes_history_until_a_target_is_resolvable(repo) ->
     assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS") in view.scopes()
 
 
+# --------------------------------------------------------------- task view
+
+
+async def test_a_task_shows_run_history_not_columns(repo) -> None:
+    """A different shape entirely -- which is what the registry is for."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#task-history", DataTable)
+        assert len(pane.query("#detail-columns")) == 0
+
+
+async def test_opening_a_task_requests_both_history_scopes_unconditionally(
+    repo,
+) -> None:
+    """Unlike PipeView, there is no target-table resolution gate here: both
+    task_activity_history_scope and task_history_scope are requested the
+    moment the view opens, since DATABASE_NAME/SCHEMA_NAME/TASK_NAME already
+    come straight off this task's own ref."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+    assert task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS").key in (
+        app.needed
+    )
+    assert task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS").key in app.needed
+
+
+async def test_a_tasks_history_table_is_empty_with_nothing_cached(repo) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#task-history", DataTable).row_count == 0
+
+
+def _days_ago_iso(days: float) -> str:
+    """Same relative-timestamp trick as pipe view's _days_ago -- these tests
+    filter by the show window against the real current time."""
+    return (datetime.now().astimezone() - timedelta(days=days)).isoformat()
+
+
+async def test_a_tasks_history_table_lists_rows_from_both_sources(repo) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-old",
+        SCHEDULED_TIME=_days_ago_iso(60),
+    )
+    put_task_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-new",
+        SCHEDULED_TIME=_days_ago_iso(5),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#task-history", DataTable)
+        assert table.row_count == 2
+        # Sorted newest first.
+        assert table.get_cell_at((0, 3)).plain == "SUCCEEDED"
+
+
+async def test_a_tasks_history_ignores_another_tasks_activity_rows(repo) -> None:
+    """account_usage_task_history_detail is scoped per task -- a row cached
+    for another task must never leak into this one's history table."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    put_task_activity_history(repo, "REFRESH_OTHER", QUERY_ID="q-other")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#task-history", DataTable).row_count == 0
+
+
+async def test_the_near_real_time_source_wins_on_an_overlapping_query_id(repo) -> None:
+    """Merged by QUERY_ID alone -- the near-real-time source is inserted
+    last, so an identical id from the backfill is overlaid rather than
+    duplicated."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    when = _days_ago_iso(10)
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-1",
+        SCHEDULED_TIME=when,
+        STATE="EXECUTING",
+    )
+    put_task_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-1",
+        SCHEDULED_TIME=when,
+        STATE="SUCCEEDED",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#task-history", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 3)).plain == "SUCCEEDED"
+
+
+async def test_rows_older_than_the_task_show_window_are_hidden_but_stay_cached(
+    repo,
+) -> None:
+    """Same display-vs-fetch-window split as pipe view -- see settings.
+    TASK_HISTORY_SHOW_DAYS."""
+    config.set(TASK_HISTORY_SHOW_DAYS, 30)
+    ref = put_task(repo, "REFRESH_ORDERS")
+    old = datetime.now().astimezone() - timedelta(days=31)
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-ancient",
+        SCHEDULED_TIME=old.isoformat(),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#task-history", DataTable).row_count == 0
+    # Still in the cache -- only hidden from this paint.
+    assert repo.raw_rows(
+        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    )
+
+
+async def test_the_highlighted_rows_error_shows_in_the_task_history_detail_panel(
+    repo,
+) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        SCHEDULED_TIME=_days_ago_iso(1),
+        ERROR_CODE=100132,
+        ERROR_MESSAGE="Numeric value 'x' is not recognized",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        panel = pane.query_one("#task-history-detail", Static)
+        assert panel.display
+        assert "100132" in str(panel.render())
+        assert "Numeric value 'x' is not recognized" in str(panel.render())
+
+
+async def test_a_task_row_with_no_error_leaves_the_history_detail_panel_hidden(
+    repo,
+) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    put_task_activity_history(repo, "REFRESH_ORDERS", SCHEDULED_TIME=_days_ago_iso(1))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        panel = pane.query_one("#task-history-detail", Static)
+        assert not panel.display
+
+
+async def test_highlighting_a_different_task_history_row_updates_the_detail_panel(
+    repo,
+) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-bad",
+        SCHEDULED_TIME=_days_ago_iso(1),
+        ERROR_CODE=1,
+        ERROR_MESSAGE="boom",
+    )
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-good",
+        SCHEDULED_TIME=_days_ago_iso(2),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#task-history", DataTable)
+        panel = pane.query_one("#task-history-detail", Static)
+        # Newest first: row 0 is "q-bad", the errored one.
+        assert panel.display
+        table.move_cursor(row=1)
+        await pilot.pause()
+        assert not panel.display
+        table.move_cursor(row=0)
+        await pilot.pause()
+        assert panel.display
+
+
+async def test_the_definition_tab_shows_the_tasks_raw_sql(repo) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS", definition="INSERT INTO t SELECT * FROM s")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert (
+            pane.query_one("#task-definition", TextArea).text
+            == "INSERT INTO t SELECT * FROM s"
+        )
+
+
+async def test_the_task_definition_tab_falls_back_when_uncached(repo) -> None:
+    ref = ObjectRef(ObjectKind.TASK, "MYDB", "PUBLIC", "GHOST")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#task-definition", TextArea).text == "-- not cached"
+
+
+async def test_the_task_tab_mnemonic_actions_switch_tabs(repo) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        tabs = view.query_one(TabbedContent)
+        assert tabs.active == "tab-history"
+        view.action_show_tab("definition")
+        assert tabs.active == "tab-definition"
+        view.action_show_tab("history")
+        assert tabs.active == "tab-history"
+
+
+def test_task_view_scopes_always_includes_all_three_task_scopes(repo) -> None:
+    """Unlike PipeView, nothing here is gated on a resolved target -- see the
+    module docstring's reasoning."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    view = TaskView(repo, ref)
+    assert task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS") in (
+        view.scopes()
+    )
+    assert task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS") in view.scopes()
+
+
 # --------------------------------------------------------------- table list
 
 
@@ -1075,10 +1447,151 @@ async def test_pressing_enter_on_a_pipe_row_selects_it(repo) -> None:
     assert app.selected == [ObjectRef(ObjectKind.PIPE, "MYDB", "PUBLIC", "LOAD_ORDERS")]
 
 
+# ---------------------------------------------------------------- task list
+
+
+async def test_selecting_a_tasks_category_mounts_the_task_list_view(repo) -> None:
+    put_task(repo, "REFRESH_ORDERS")
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        assert isinstance(pane.view, TaskListView)
+
+
+async def test_the_task_list_view_has_no_tabs(repo) -> None:
+    """Explicitly not tabbed like PipeListView -- there is only one thing to
+    show for a schema's tasks right now."""
+    put_task(repo, "REFRESH_ORDERS")
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        assert len(pane.query(TabbedContent)) == 0
+
+
+async def test_the_task_list_view_lists_every_cached_task(repo) -> None:
+    put_task(repo, "REFRESH_ORDERS", warehouse="MYWH", schedule="5 MINUTE")
+    put_task(repo, "REFRESH_TOTALS", warehouse="OTHERWH", schedule="1 HOUR")
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((0, 0)).plain == "REFRESH_ORDERS"
+        assert table.get_cell_at((0, 1)).plain == "MYWH"
+        assert table.get_cell_at((0, 2)).plain == "5 MINUTE"
+        assert table.get_cell_at((1, 0)).plain == "REFRESH_TOTALS"
+
+
+async def test_the_state_column_shows_snowflakes_own_wording_unmodified(repo) -> None:
+    """DESIGN.md's "mirror Snowflake, don't reinterpret it" rule -- the raw
+    show_tasks.state value is shown verbatim, not relabelled."""
+    put_task(repo, "REFRESH_ORDERS", state="suspended")
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 3)).plain == "suspended"
+
+
+async def test_state_and_last_run_status_stay_visually_distinct(repo) -> None:
+    """A suspended-but-last-succeeded task and an enabled-but-last-failed task
+    must be distinguishable -- State (show_tasks.state) and Last Run Status
+    (the merged activity STATE) are different vocabularies from different
+    columns, not the same field shown twice."""
+    put_task(repo, "REFRESH_ORDERS", state="suspended")
+    put_task_activity(repo, "REFRESH_ORDERS", STATE="SUCCEEDED")
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 3)).plain == "suspended"
+        assert table.get_cell_at((0, 5)).plain == "SUCCEEDED"
+
+
+async def test_task_activity_columns_render_when_the_scope_has_data(repo) -> None:
+    put_task(repo, "REFRESH_ORDERS")
+    put_task_activity(
+        repo,
+        "REFRESH_ORDERS",
+        SCHEDULED_TIME="2026-03-01 08:00:00",
+        STATE="FAILED",
+    )
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 4)).plain == "2026-03-01 08:00"
+        assert table.get_cell_at((0, 5)).plain == "FAILED"
+
+
+async def test_task_activity_columns_are_blank_without_a_successful_activity_pass(
+    repo,
+) -> None:
+    """A missing/failed activity scope must not block the SHOW-sourced
+    columns: the row still renders, just with the activity cells blank."""
+    put_task(repo, "REFRESH_ORDERS")
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 4)).plain == ""
+        assert table.get_cell_at((0, 5)).plain == ""
+
+
+def test_task_list_view_scopes_includes_the_activity_scope(repo) -> None:
+    """This is what wires the new scope into the background staleness sweep
+    (MainScreen._sweep reads self.detail.scopes()) with no other plumbing."""
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    view = TaskListView(repo, scope)
+    assert task_activity_scope("MYDB", "PUBLIC") in view.scopes()
+
+
+async def test_pressing_enter_on_a_task_row_selects_it(repo) -> None:
+    """See test_pressing_enter_on_a_table_row_selects_it -- same handler,
+    same reasoning."""
+    put_task(repo, "REFRESH_ORDERS")
+    scope = objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.selected == [
+        ObjectRef(ObjectKind.TASK, "MYDB", "PUBLIC", "REFRESH_ORDERS")
+    ]
+
+
 async def test_an_unregistered_category_kind_shows_a_placeholder(repo) -> None:
-    """Only Tables and Pipes have list views so far; the other category kinds
-    fall back to the same placeholder convention as an unregistered object
-    kind."""
+    """Only Tables, Pipes and Tasks have list views so far; the other
+    category kinds fall back to the same placeholder convention as an
+    unregistered object kind."""
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)

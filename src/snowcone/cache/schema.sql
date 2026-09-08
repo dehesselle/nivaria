@@ -315,6 +315,100 @@ CREATE TABLE IF NOT EXISTS information_schema_copy_history (
 CREATE INDEX IF NOT EXISTS information_schema_copy_history_scope
     ON information_schema_copy_history(_scope);
 
+-- Every task's latest run in a schema (bounded by the "task history fetch
+-- window" setting), sourced via a real SELECT against
+-- SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY (needs a running warehouse) rather
+-- than SHOW -- see DESIGN.md's dual-source note, the same pattern
+-- account_usage_copy_history established. Needs IMPORTED PRIVILEGES on the
+-- SNOWFLAKE database (or ACCOUNTADMIN) and can lag real activity by up to
+-- ~45 minutes -- either gap just leaves these columns blank, same as a
+-- missing warehouse does. This column set is NOT verified against a live
+-- account -- it is taken from Snowflake's published ACCOUNT_USAGE.
+-- TASK_HISTORY documentation only.
+--
+-- One row per task -- reduced from one row per historical run by a QUALIFY
+-- in queries.task_activity, keeping only each task's latest. QUERY_ID is
+-- part of the primary key (alongside NAME) rather than NAME alone, so a
+-- task's next run lands under a new key and the previous row sweeps away as
+-- stale via the ordinary generation sweep, the same mechanism
+-- account_usage_copy_history already relies on. A single task's own full
+-- history is account_usage_task_history_detail below, fetched separately
+-- and lazily.
+CREATE TABLE IF NOT EXISTS account_usage_task_history (
+    NAME              TEXT NOT NULL,
+    DATABASE_NAME     TEXT NOT NULL,
+    SCHEMA_NAME       TEXT NOT NULL,
+    QUERY_ID          TEXT NOT NULL,
+    SCHEDULED_TIME    TEXT,
+    QUERY_START_TIME  TEXT,
+    COMPLETED_TIME    TEXT,
+    STATE             TEXT,
+    ERROR_CODE        TEXT,
+    ERROR_MESSAGE     TEXT,
+    _scope            TEXT    NOT NULL,
+    _generation       INTEGER NOT NULL,
+    _fetched_at       REAL    NOT NULL,
+    PRIMARY KEY (DATABASE_NAME, SCHEMA_NAME, NAME, QUERY_ID)
+);
+CREATE INDEX IF NOT EXISTS account_usage_task_history_scope
+    ON account_usage_task_history(_scope);
+
+-- One task's full ACCOUNT_USAGE.TASK_HISTORY backfill (bounded by the "task
+-- history fetch window" setting, same source and window as
+-- account_usage_task_history above, just not collapsed to the latest row).
+-- Scoped per task, like information_schema_task_history below, and fetched
+-- just as lazily -- only once that task's detail view is open. This is a
+-- separate table rather than the same one under a different _scope value,
+-- for the same reason account_usage_copy_history_detail is separate from
+-- account_usage_copy_history: the schema-wide table's primary key has no
+-- _scope column, since it never needed one before. This column set is
+-- likewise NOT verified against a live account.
+CREATE TABLE IF NOT EXISTS account_usage_task_history_detail (
+    NAME              TEXT,
+    DATABASE_NAME     TEXT,
+    SCHEMA_NAME       TEXT,
+    QUERY_ID          TEXT,
+    SCHEDULED_TIME    TEXT,
+    QUERY_START_TIME  TEXT,
+    COMPLETED_TIME    TEXT,
+    STATE             TEXT,
+    ERROR_CODE        TEXT,
+    ERROR_MESSAGE     TEXT,
+    _scope            TEXT    NOT NULL,
+    _generation       INTEGER NOT NULL,
+    _fetched_at       REAL    NOT NULL,
+    PRIMARY KEY (_scope, QUERY_ID)
+);
+CREATE INDEX IF NOT EXISTS account_usage_task_history_detail_scope
+    ON account_usage_task_history_detail(_scope);
+
+-- One task's near-real-time run history (the last 7 days -- Snowflake's own
+-- hard retention limit for the function backing this, shorter than
+-- information_schema_copy_history's 14), sourced via a real SELECT against
+-- INFORMATION_SCHEMA.TASK_HISTORY. Scoped per task, like
+-- information_schema_copy_history is scoped per pipe -- _scope disambiguates
+-- which task's rows these are, since the physical table holds every task's
+-- history together. Unlike information_schema_copy_history, no target-table
+-- resolution is needed to fetch this: the function accepts TASK_NAME/
+-- DATABASE_NAME/SCHEMA_NAME as direct named arguments. This column set is
+-- likewise NOT verified against a live account.
+CREATE TABLE IF NOT EXISTS information_schema_task_history (
+    NAME              TEXT,
+    QUERY_ID          TEXT,
+    SCHEDULED_TIME    TEXT,
+    QUERY_START_TIME  TEXT,
+    COMPLETED_TIME    TEXT,
+    STATE             TEXT,
+    ERROR_CODE        TEXT,
+    ERROR_MESSAGE     TEXT,
+    _scope            TEXT    NOT NULL,
+    _generation       INTEGER NOT NULL,
+    _fetched_at       REAL    NOT NULL,
+    PRIMARY KEY (_scope, QUERY_ID)
+);
+CREATE INDEX IF NOT EXISTS information_schema_task_history_scope
+    ON information_schema_task_history(_scope);
+
 -- Every grant on one schema or one database (schema-level and database-level
 -- rows share this one physical table, disambiguated by _scope, same shape
 -- either way -- SHOW GRANTS ON SCHEMA/DATABASE both return this exact column

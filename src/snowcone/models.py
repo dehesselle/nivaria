@@ -86,6 +86,35 @@ class ScopeKind(StrEnum):
     #: SELECT against INFORMATION_SCHEMA.COPY_HISTORY. Scoped to one pipe like
     #: COLUMNS is scoped to one table -- see `pipe_history_scope`.
     PIPE_HISTORY = "pipe_history"
+    #: Every task's *latest* run in a schema (bounded by the "task history
+    #: fetch window" setting), sourced by a real SELECT against
+    #: SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY rather than SHOW -- the same
+    #: dual-source pattern PIPE_ACTIVITY established (see DESIGN.md), just
+    #: against a different ACCOUNT_USAGE view. Scoped to (database, schema)
+    #: like PIPE_ACTIVITY, but backed by its own mirror table. Deliberately
+    #: carries no object_kind, for the same reason PIPE_ACTIVITY does not.
+    #: Reduced to one row per task in SQL (see queries.task_activity) -- a
+    #: single task's own full run history is TASK_ACTIVITY_HISTORY below.
+    #: Unlike PIPE_ACTIVITY, this carries no TTL override (see scope_ttl
+    #: below): a task can run every few minutes, so a multi-day-stale "last
+    #: run" column here would be actively misleading, not just questionable
+    #: the way PIPE_ACTIVITY's own inherited override already admits it is.
+    TASK_ACTIVITY = "task_activity"
+    #: One task's full ACCOUNT_USAGE.TASK_HISTORY backfill (bounded by the
+    #: "task history fetch window" setting, same as TASK_ACTIVITY), scoped to
+    #: one task like TASK_HISTORY below -- fetched lazily, only once that
+    #: task's detail view is open. No target-table resolution is needed to
+    #: fetch this: ACCOUNT_USAGE.TASK_HISTORY has an ordinary NAME column.
+    TASK_ACTIVITY_HISTORY = "task_activity_history"
+    #: One task's near-real-time run history (the last 7 days -- Snowflake's
+    #: own hard retention limit for the function backing it, shorter than
+    #: PIPE_HISTORY's 14), sourced by a real SELECT against
+    #: INFORMATION_SCHEMA.TASK_HISTORY. Scoped to one task like PIPE_HISTORY
+    #: is scoped to one pipe -- see `task_history_scope`. Unlike PIPE_HISTORY,
+    #: this needs no target-table resolution to fetch: the function accepts
+    #: TASK_NAME/DATABASE_NAME/SCHEMA_NAME as direct named arguments, all of
+    #: which a task's own Scope already carries.
+    TASK_HISTORY = "task_history"
     #: Every grant on one schema or one database (schema is None), sourced by
     #: SHOW GRANTS ON SCHEMA/DATABASE -- metadata layer, needs no warehouse,
     #: same as every plain SHOW scope. Deliberately carries no object_kind:
@@ -164,6 +193,14 @@ class Scope:
                 )
             case ScopeKind.PIPE_HISTORY:
                 return f"pipe_history:{self.database}.{self.schema}.{self.table}"
+            case ScopeKind.TASK_ACTIVITY:
+                return f"task_activity:{self.database}.{self.schema}"
+            case ScopeKind.TASK_ACTIVITY_HISTORY:
+                return (
+                    f"task_activity_history:{self.database}.{self.schema}.{self.table}"
+                )
+            case ScopeKind.TASK_HISTORY:
+                return f"task_history:{self.database}.{self.schema}.{self.table}"
             case ScopeKind.GRANTS:
                 if self.schema is None:
                     return f"grants:{self.database}"
@@ -229,6 +266,25 @@ def pipe_history_scope(database: str, schema: str, pipe: str) -> Scope:
     return Scope(ScopeKind.PIPE_HISTORY, database=database, schema=schema, table=pipe)
 
 
+def task_activity_scope(database: str, schema: str) -> Scope:
+    # No object_kind -- see ScopeKind.TASK_ACTIVITY's comment.
+    return Scope(ScopeKind.TASK_ACTIVITY, database=database, schema=schema)
+
+
+def task_activity_history_scope(database: str, schema: str, task: str) -> Scope:
+    # `table` holds the task's name -- same reuse `pipe_activity_history_scope`
+    # makes for the pipe's name.
+    return Scope(
+        ScopeKind.TASK_ACTIVITY_HISTORY, database=database, schema=schema, table=task
+    )
+
+
+def task_history_scope(database: str, schema: str, task: str) -> Scope:
+    # `table` holds the task's name here -- same reuse `pipe_history_scope`
+    # makes for the pipe's name.
+    return Scope(ScopeKind.TASK_HISTORY, database=database, schema=schema, table=task)
+
+
 def grants_scope(database: str, schema: str | None = None) -> Scope:
     # No object_kind -- see ScopeKind.GRANTS's comment. schema=None means a
     # database-level grants scope, schema set means schema-level -- same
@@ -260,6 +316,11 @@ def roles_scope() -> Scope:
 _TTL_OVERRIDES: dict[ScopeKind, float] = {
     ScopeKind.PIPE_ACTIVITY: 13 * 86400,
     ScopeKind.PIPE_ACTIVITY_HISTORY: 13 * 86400,
+    # 6 days, one short of INFORMATION_SCHEMA.TASK_HISTORY's 7-day retention
+    # (`gateway.queries.TASK_HISTORY_RETENTION_DAYS`) -- same margin reasoning
+    # as PIPE_ACTIVITY_HISTORY's 13/14 pair above. TASK_ACTIVITY deliberately
+    # carries no override -- see its own comment on ScopeKind.TASK_ACTIVITY.
+    ScopeKind.TASK_ACTIVITY_HISTORY: 6 * 86400,
 }
 
 

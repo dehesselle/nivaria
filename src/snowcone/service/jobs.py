@@ -22,7 +22,7 @@ from typing import Any
 from snowcone.gateway.gateway import SnowflakeGateway
 from snowcone.gateway.queries import MAX_PAGE_SIZE
 from snowcone.models import Scope, ScopeKind
-from snowcone.settings import PIPE_HISTORY_FETCH_DAYS, config
+from snowcone.settings import PIPE_HISTORY_FETCH_DAYS, TASK_HISTORY_FETCH_DAYS, config
 
 _sequence = itertools.count()
 
@@ -197,6 +197,55 @@ def fetch_page(
                     target_catalog,
                     target_schema,
                     target_table,
+                    scope.table,
+                    allow_reconnect=allow_reconnect,
+                ),
+                None,
+            )
+        case ScopeKind.TASK_ACTIVITY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # Bounded by task count, not by history depth -- see
+            # queries.task_activity's QUALIFY.
+            fetch_days = config.get(TASK_HISTORY_FETCH_DAYS)
+            return (
+                gateway.task_activity(
+                    scope.database,
+                    scope.schema,
+                    fetch_days,
+                    allow_reconnect=allow_reconnect,
+                ),
+                None,
+            )
+        case ScopeKind.TASK_ACTIVITY_HISTORY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            assert scope.table is not None  # the task's name
+            # Bounded to one task's history -- no target-table resolution
+            # needed, unlike PIPE_HISTORY: ACCOUNT_USAGE.TASK_HISTORY has an
+            # ordinary NAME column to filter on directly.
+            fetch_days = config.get(TASK_HISTORY_FETCH_DAYS)
+            return (
+                gateway.task_activity_history(
+                    scope.database,
+                    scope.schema,
+                    scope.table,
+                    fetch_days,
+                    allow_reconnect=allow_reconnect,
+                ),
+                None,
+            )
+        case ScopeKind.TASK_HISTORY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            assert scope.table is not None  # the task's name
+            # Unlike PIPE_HISTORY, TASK_NAME/DATABASE_NAME/SCHEMA_NAME are
+            # direct named arguments a task's own Scope already carries, so
+            # no resolved target parameter is needed here at all.
+            return (
+                gateway.task_history(
+                    scope.database,
+                    scope.schema,
                     scope.table,
                     allow_reconnect=allow_reconnect,
                 ),

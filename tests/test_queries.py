@@ -131,3 +131,54 @@ def test_pipe_history_targets_information_schema_copy_history() -> None:
         ")) "
         "WHERE PIPE_NAME = %s"
     )
+
+
+def test_task_activity_targets_account_usage_task_history_with_bound_params() -> None:
+    """Same shape as pipe_activity, against ACCOUNT_USAGE.TASK_HISTORY
+    instead: DATABASE_NAME/SCHEMA_NAME bind as ordinary params, QUALIFY
+    collapses the result to each task's latest run."""
+    assert queries.task_activity(90) == (
+        "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
+        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
+        "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s "
+        "AND SCHEDULED_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "QUALIFY ROW_NUMBER() OVER (PARTITION BY NAME ORDER BY SCHEDULED_TIME DESC) = 1"
+    )
+
+
+def test_task_activity_history_targets_one_task_with_bound_params() -> None:
+    """The per-task backfill: same source and window as task_activity, but
+    filtered to one NAME instead of QUALIFY-reduced."""
+    assert queries.task_activity_history(90) == (
+        "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
+        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
+        "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND NAME = %s "
+        "AND SCHEDULED_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP())"
+    )
+
+
+def test_task_history_targets_information_schema_task_history_with_named_args() -> None:
+    """Unlike pipe_history, DATABASE_NAME/SCHEMA_NAME/TASK_NAME are all
+    accepted as direct named arguments -- so this statement has no bound `%s`
+    parameter at all, and no WHERE tail. The function name itself is still
+    database-qualified, same as pipe_history qualifies COPY_HISTORY: a bare
+    INFORMATION_SCHEMA.TASK_HISTORY resolves against whatever database
+    happens to be current in the session, which the pool never sets -- see
+    queries.task_history's docstring for the real-account error this caused
+    before being qualified."""
+    statement = queries.task_history("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    assert statement == (
+        "SELECT NAME, QUERY_ID, SCHEDULED_TIME, QUERY_START_TIME, COMPLETED_TIME, "
+        "STATE, ERROR_CODE, ERROR_MESSAGE "
+        'FROM TABLE("MYDB".INFORMATION_SCHEMA.TASK_HISTORY('
+        "DATABASE_NAME => 'MYDB', "
+        "SCHEMA_NAME => 'PUBLIC', "
+        "TASK_NAME => 'REFRESH_ORDERS', "
+        "RESULT_LIMIT => 10000, "
+        "SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP())"
+        "))"
+    )
+    assert "%s" not in statement
+    assert "WHERE" not in statement
