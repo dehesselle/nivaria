@@ -95,6 +95,25 @@ def show_objects_in_database(
     return f"SHOW {kind.plural.upper()} IN DATABASE {scope}{_paging(after, limit)}"
 
 
+def show_materialized_views(
+    database: str,
+    schema: str,
+    *,
+    after: str | None = None,
+    limit: int = 1000,
+) -> str:
+    """Row/byte stats for materialized views in a schema.
+
+    SHOW VIEWS never returns rows/bytes, even for materialized views (see
+    schema.sql's show_views) -- SHOW MATERIALIZED VIEWS is Snowflake's
+    separate command for that, with its own column set that does. Metadata
+    layer like every other SHOW builder here, so unlike `table_stats`/
+    `view_stats` this needs no warehouse.
+    """
+    scope = f"{quote_identifier(database)}.{quote_identifier(schema)}"
+    return f"SHOW MATERIALIZED VIEWS IN SCHEMA {scope}{_paging(after, limit)}"
+
+
 def show_warehouses() -> str:
     """Every warehouse in one call.
 
@@ -174,12 +193,28 @@ def table_stats(database: str) -> str:
     `SHOW ... FROM`, an ordinary SELECT accepts the driver's pyformat bind
     parameters, better injection hygiene than `quote_literal`. Only the
     database needs `quote_identifier` -- an identifier can't be bound.
+
+    Also the statement `view_stats` below binds against, with `TABLE_TYPE`
+    bound to `"VIEW"` instead of `"BASE TABLE"` -- INFORMATION_SCHEMA.TABLES
+    lists views too, with the same LAST_DDL/LAST_ALTERED columns.
     """
     target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.TABLES"
     return (
         "SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, LAST_DDL, LAST_ALTERED "
         f"FROM {target} WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = %s"
     )
+
+
+def view_stats(database: str) -> str:
+    """LAST_DDL/LAST_ALTERED for every view in a schema.
+
+    The exact same statement as `table_stats` -- TABLE_TYPE is a bound `%s`,
+    not baked into the SQL text, so the two differ only in what the caller
+    binds ("BASE TABLE" vs "VIEW"). Kept as its own function anyway, so
+    `PoolGateway.view_stats` reads as its own capability rather than a caller
+    silently repurposing `table_stats`.
+    """
+    return table_stats(database)
 
 
 def show_grants_on_schema(database: str, schema: str) -> str:

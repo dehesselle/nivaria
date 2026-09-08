@@ -96,6 +96,14 @@ class SnowflakeGateway(Protocol):
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
 
+    def view_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
+    def materialized_view_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
     def show_grants_on_schema(
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
@@ -331,6 +339,27 @@ class PoolGateway:
         return self._fetch(
             queries.table_stats(database),
             (schema, "BASE TABLE"),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def view_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.view_stats(database),
+            (schema, "VIEW"),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def materialized_view_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        # Unpaged, like table_stats -- a schema's materialized-view count is
+        # bounded, same reasoning show_columns/show_grants_on_schema use.
+        return self._fetch(
+            queries.show_materialized_views(
+                database, schema, limit=queries.MAX_PAGE_SIZE
+            ),
             allow_reconnect=allow_reconnect,
         )
 

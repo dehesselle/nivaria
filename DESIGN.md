@@ -808,6 +808,37 @@ a multi-day-stale "last run" column here would be actively misleading, not
 merely questionable the way `PIPE_ACTIVITY`'s own inherited override already
 admits it is.
 
+A view's own view (`ViewView`) is tabbed the same way `PipeView`/`TaskView`
+are, but for a different reason: it is the first kind that is genuinely
+**both** shapes the registry already has, not a third shape of its own -- a
+real column list, like a table (`ColumnsView`, `table_view.py`, reused here
+directly rather than duplicated), *and* one defining SQL statement, like a
+pipe or task (`show_views.text`, mirrored the same way `show_pipes.
+definition`/`show_tasks.definition` are, read the same way through
+`Repository.object_detail` with no scope of its own). Columns and Definition,
+mnemonic-switchable `c`/`d`.
+
+The "Views (n)" category node (`ViewListView`) stays a single `DataTable`
+like `TableListView`, **not** tabbed like `PipeListView`/`TaskListView` --
+a view carries no per-row status or activity concept those tabs exist for.
+Its columns are `TableListView`'s own shape (Name, Rows, Size, Created, Last
+DDL, Last Altered, Comment) plus Materialized, merging three scopes: the base
+`SHOW VIEWS` scope for Name/Created/Comment/Materialized (already fetched for
+the tree); `VIEW_STATS` for Last DDL/Last Altered, the exact
+`INFORMATION_SCHEMA.TABLES` statement `TABLE_STATS` uses, just bound to
+`TABLE_TYPE = 'VIEW'`; and `MATERIALIZED_VIEW_STATS` for Rows/Size, sourced
+from `SHOW MATERIALIZED VIEWS` -- a distinct Snowflake command from `SHOW
+VIEWS`, with its own column set that actually carries row/byte stats, which
+`SHOW VIEWS` never does even for materialized views. `MATERIALIZED_VIEW_STATS`
+is the first dual-source scope sourced from a second `SHOW` rather than an
+`INFORMATION_SCHEMA` `SELECT`, so -- unlike `TABLE_STATS`/`VIEW_STATS`/
+`PIPE_ACTIVITY`/`TASK_ACTIVITY`/`TAG_REFERENCES` -- it needs no warehouse and
+degrades the same way every other SHOW-sourced scope does, not the way a
+missing-warehouse SELECT does. Only materialized views ever appear in its
+rows, so a regular view simply has no match on merge; Materialized itself is
+shown because it is the only thing that explains why most rows' Rows/Size are
+blank -- by Snowflake design, not a cache miss.
+
 A **schema** or **database** node is a further departure from the registry
 above: neither has an `ObjectKind`, so neither `ObjectView` nor `CategoryView`
 fits, and there is exactly one view per node kind rather than one of several

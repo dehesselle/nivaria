@@ -18,6 +18,7 @@ from snowcone.models import (
     SchemaRef,
     columns_scope,
     grants_scope,
+    materialized_view_stats_scope,
     objects_scope,
     pipe_activity_history_scope,
     pipe_activity_scope,
@@ -27,6 +28,7 @@ from snowcone.models import (
     task_activity_history_scope,
     task_activity_scope,
     task_history_scope,
+    view_stats_scope,
 )
 from snowcone.settings import PIPE_HISTORY_SHOW_DAYS, TASK_HISTORY_SHOW_DAYS, config
 from snowcone.ui.messages import ObjectSelected, ScopeNeeded
@@ -35,9 +37,11 @@ from snowcone.ui.views.pipe_list_view import PipeListView
 from snowcone.ui.views.pipe_view import PipeView
 from snowcone.ui.views.schema_view import DatabaseView, SchemaView
 from snowcone.ui.views.table_list_view import TableListView
-from snowcone.ui.views.table_view import TableView, ViewView
+from snowcone.ui.views.table_view import TableView
 from snowcone.ui.views.task_list_view import TaskListView
 from snowcone.ui.views.task_view import TaskView
+from snowcone.ui.views.view_list_view import ViewListView
+from snowcone.ui.views.view_view import ViewView
 from snowcone.ui.widgets.detail_pane import DetailPane
 
 
@@ -129,6 +133,53 @@ def put_table_stats(repo: Repository, table: str, **extra) -> None:
     }
     row.update(extra)
     load(repo, table_stats_scope("MYDB", "PUBLIC"), [row])
+
+
+def put_view(repo: Repository, name: str, **extra) -> ObjectRef:
+    row = {
+        "database_name": "MYDB",
+        "schema_name": "PUBLIC",
+        "name": name,
+        "comment": "",
+        "text": "SELECT * FROM t",
+        "is_secure": "false",
+        "is_materialized": "false",
+    }
+    row.update(extra)
+    existing = repo.raw_rows(objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC"))
+    load(
+        repo,
+        objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC"),
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+    return ObjectRef(ObjectKind.VIEW, "MYDB", "PUBLIC", name)
+
+
+def put_view_stats(repo: Repository, view: str, **extra) -> None:
+    row = {
+        "TABLE_CATALOG": "MYDB",
+        "TABLE_SCHEMA": "PUBLIC",
+        "TABLE_NAME": view,
+        "LAST_DDL": "2026-01-01 00:00:00",
+        "LAST_ALTERED": "2026-01-02 00:00:00",
+    }
+    row.update(extra)
+    load(repo, view_stats_scope("MYDB", "PUBLIC"), [row])
+
+
+def put_materialized_view_stats(repo: Repository, view: str, **extra) -> None:
+    row = {
+        "database_name": "MYDB",
+        "schema_name": "PUBLIC",
+        "name": view,
+        "rows": 42,
+        "bytes": 8192,
+    }
+    row.update(extra)
+    load(repo, materialized_view_stats_scope("MYDB", "PUBLIC"), [row])
 
 
 def put_pipe(repo: Repository, name: str, **extra) -> ObjectRef:
@@ -574,6 +625,71 @@ async def test_the_pane_reports_the_scopes_it_reads(repo) -> None:
         pane.show(ref)
         await pilot.pause()
         assert [s.key for s in pane.scopes()] == ["columns:MYDB.PUBLIC.ORDERS"]
+
+
+# --------------------------------------------------------------- view view
+
+
+async def test_the_view_columns_tab_is_active_by_default(repo) -> None:
+    ref = put_view(repo, "ORDERS_V")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.view.query_one(TabbedContent).active == "tab-columns"
+
+
+async def test_the_view_columns_tab_lists_cached_columns(repo) -> None:
+    ref = put_view(repo, "ORDERS_V")
+    put_columns(repo, "ORDERS_V", ("ID", "NUMBER"), ("TOTAL", "FLOAT"))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-columns", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((0, 0)).plain == "ID"
+        assert table.get_cell_at((1, 1)).plain == "FLOAT"
+
+
+async def test_the_view_definition_tab_shows_the_views_sql_text(repo) -> None:
+    ref = put_view(repo, "ORDERS_V", text="SELECT id, total FROM orders")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        text_area = pane.query_one("#view-definition", TextArea)
+        assert text_area.text == "SELECT id, total FROM orders"
+
+
+async def test_the_view_definition_tab_falls_back_when_nothing_is_cached(repo) -> None:
+    ref = ObjectRef(ObjectKind.VIEW, "MYDB", "PUBLIC", "ORDERS_V")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        text_area = pane.query_one("#view-definition", TextArea)
+        assert text_area.text == "-- not cached"
+
+
+async def test_the_view_tab_mnemonic_actions_switch_tabs(repo) -> None:
+    ref = put_view(repo, "ORDERS_V")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        view = pane.view
+        tabs = view.query_one(TabbedContent)
+        assert tabs.active == "tab-columns"
+        view.action_show_tab("definition")
+        assert tabs.active == "tab-definition"
+        view.action_show_tab("columns")
+        assert tabs.active == "tab-columns"
 
 
 # --------------------------------------------------------------- pipe view
@@ -1294,6 +1410,132 @@ async def test_moving_between_two_schemas_tables_reuses_the_list_view(repo) -> N
         assert pane.query_one("#detail-table-list", DataTable).row_count == 1
 
 
+# ----------------------------------------------------------------- view list
+
+
+async def test_selecting_a_views_category_mounts_the_view_list_view(repo) -> None:
+    put_view(repo, "ORDERS_V")
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        assert isinstance(pane.view, ViewListView)
+
+
+async def test_the_view_list_view_lists_every_cached_view(repo) -> None:
+    put_view(repo, "ORDERS_V", created_on="2026-01-01 00:00:00")
+    put_view(repo, "CUSTOMERS_V", created_on="2026-02-02 00:00:00")
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((0, 0)).plain == "CUSTOMERS_V"
+        assert table.get_cell_at((1, 0)).plain == "ORDERS_V"
+        assert table.get_cell_at((1, 3)).plain == "2026-01-01"
+
+
+async def test_view_stats_columns_render_when_the_scope_has_data(repo) -> None:
+    put_view(repo, "ORDERS_V")
+    put_view_stats(
+        repo,
+        "ORDERS_V",
+        LAST_DDL="2026-03-01 08:00:00",
+        LAST_ALTERED="2026-03-02 09:30:00",
+    )
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 4)).plain == "2026-03-01"
+        assert table.get_cell_at((0, 5)).plain == "2026-03-02 09:30"
+
+
+async def test_view_stats_columns_are_blank_without_a_successful_stats_pass(
+    repo,
+) -> None:
+    """A missing/failed stats scope must not block the SHOW-sourced columns:
+    the row still renders, just with the two SELECT-sourced cells blank."""
+    put_view(repo, "ORDERS_V")
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 4)).plain == ""
+        assert table.get_cell_at((0, 5)).plain == ""
+
+
+async def test_materialized_view_stats_render_rows_and_size(repo) -> None:
+    put_view(repo, "TOTALS_MV", is_materialized="true")
+    put_materialized_view_stats(repo, "TOTALS_MV", rows=42, bytes=8192)
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 1)).plain == "42"
+        assert table.get_cell_at((0, 2)).plain == "8.0K"
+        assert table.get_cell_at((0, 6)).plain == "Yes"
+
+
+async def test_a_regular_view_has_blank_rows_and_size(repo) -> None:
+    """Not a cache-miss gap: SHOW VIEWS never carries rows/bytes for a
+    regular view, so there is nothing to merge in, ever -- unlike Last
+    DDL/Last Altered, which are simply absent until a stats pass succeeds."""
+    put_view(repo, "ORDERS_V")
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        assert table.get_cell_at((0, 1)).plain == ""
+        assert table.get_cell_at((0, 2)).plain == ""
+        assert table.get_cell_at((0, 6)).plain == ""
+
+
+def test_view_list_view_scopes_includes_both_stats_scopes(repo) -> None:
+    """This is what wires the new scopes into the background staleness sweep
+    (MainScreen._sweep reads self.detail.scopes()) with no other plumbing."""
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    view = ViewListView(repo, scope)
+    assert view_stats_scope("MYDB", "PUBLIC") in view.scopes()
+    assert materialized_view_stats_scope("MYDB", "PUBLIC") in view.scopes()
+
+
+async def test_pressing_enter_on_a_view_row_selects_it(repo) -> None:
+    """Reuses the exact path a search hit takes -- see the identical table
+    test for the full reasoning."""
+    put_view(repo, "ORDERS_V")
+    scope = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-table-list", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.selected == [ObjectRef(ObjectKind.VIEW, "MYDB", "PUBLIC", "ORDERS_V")]
+
+
 # ---------------------------------------------------------------- pipe list
 
 
@@ -1589,13 +1831,13 @@ async def test_pressing_enter_on_a_task_row_selects_it(repo) -> None:
 
 
 async def test_an_unregistered_category_kind_shows_a_placeholder(repo) -> None:
-    """Only Tables, Pipes and Tasks have list views so far; the other
-    category kinds fall back to the same placeholder convention as an
-    unregistered object kind."""
+    """Only Tables, Views, Pipes and Tasks have list views so far; Stages,
+    the one category kind still unregistered, falls back to the same
+    placeholder convention as an unregistered object kind."""
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
-        result = pane.show_category(objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC"))
+        result = pane.show_category(objects_scope(ObjectKind.STAGE, "MYDB", "PUBLIC"))
         await pilot.pause()
         assert result is None
         assert pane.query_one("#detail-placeholder", Static)

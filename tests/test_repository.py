@@ -471,6 +471,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _COLUMNS,
         _DATABASES,
         _GRANTS,
+        _MATERIALIZED_VIEW_STATS,
         _OBJECT_TABLES,
         _PIPE_ACTIVITY,
         _PIPE_ACTIVITY_HISTORY,
@@ -481,6 +482,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _TASK_ACTIVITY,
         _TASK_ACTIVITY_HISTORY,
         _TASK_HISTORY,
+        _VIEW_STATS,
     )
 
     specs = [
@@ -488,6 +490,8 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _SCHEMAS,
         _COLUMNS,
         _TABLE_STATS,
+        _VIEW_STATS,
+        _MATERIALIZED_VIEW_STATS,
         _PIPE_ACTIVITY,
         _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
@@ -584,6 +588,56 @@ def test_table_stats_columns_round_trip_but_are_unverified(repo) -> None:
     stored = repo.raw_rows(scope)[0]
     assert stored["LAST_DDL"] == "2026-01-01 00:00:00"
     assert stored["LAST_ALTERED"] == "2026-01-02 00:00:00"
+
+
+def test_view_stats_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
+    the exact same INFORMATION_SCHEMA.TABLES statement, just filtered to
+    TABLE_TYPE = 'VIEW' instead of 'BASE TABLE'."""
+    from snowcone.models import view_stats_scope
+
+    scope = view_stats_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "TABLE_CATALOG": "MYDB",
+                "TABLE_SCHEMA": "PUBLIC",
+                "TABLE_NAME": "ORDERS_V",
+                "LAST_DDL": "2026-01-01 00:00:00",
+                "LAST_ALTERED": "2026-01-02 00:00:00",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["LAST_DDL"] == "2026-01-01 00:00:00"
+    assert stored["LAST_ALTERED"] == "2026-01-02 00:00:00"
+
+
+def test_materialized_view_stats_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
+    this shape comes from Snowflake's published SHOW MATERIALIZED VIEWS
+    documentation, not a probed live account."""
+    from snowcone.models import materialized_view_stats_scope
+
+    scope = materialized_view_stats_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "database_name": "MYDB",
+                "schema_name": "PUBLIC",
+                "name": "TOTALS_MV",
+                "rows": 42,
+                "bytes": 8192,
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["rows"] == 42
+    assert stored["bytes"] == 8192
 
 
 def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:

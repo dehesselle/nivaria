@@ -201,6 +201,37 @@ def test_table_stats_binds_schema_and_table_type_as_parameters() -> None:
     assert rows[0]["TABLE_NAME"] == "ORDERS"
 
 
+def test_view_stats_binds_schema_and_view_table_type_as_parameters() -> None:
+    """Same statement as table_stats, just bound to TABLE_TYPE = 'VIEW'."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "TABLE_CATALOG",
+        "TABLE_SCHEMA",
+        "TABLE_NAME",
+        "LAST_DDL",
+        "LAST_ALTERED",
+    ]
+    connection.rows = [("MYDB", "PUBLIC", "ORDERS_V", "2026-01-01", "2026-01-02")]
+    rows = gateway.view_stats("MYDB", "PUBLIC")
+    statement, params = connection.executed[-1]
+    assert 'FROM "MYDB".INFORMATION_SCHEMA.TABLES' in statement
+    assert params == ("PUBLIC", "VIEW")
+    assert rows[0]["TABLE_NAME"] == "ORDERS_V"
+
+
+def test_materialized_view_stats_sends_the_unpaged_show_statement() -> None:
+    """Metadata layer like every other SHOW builder -- no bound params, and
+    no LIMIT/FROM paging tail issued, same as table_stats being unpaged."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = ["database_name", "schema_name", "name", "rows", "bytes"]
+    connection.rows = [("MYDB", "PUBLIC", "TOTALS_MV", 42, 8192)]
+    rows = gateway.materialized_view_stats("MYDB", "PUBLIC")
+    statement, params = connection.executed[-1]
+    assert statement.startswith('SHOW MATERIALIZED VIEWS IN SCHEMA "MYDB"."PUBLIC"')
+    assert params is None
+    assert rows[0]["name"] == "TOTALS_MV"
+
+
 def test_pipe_activity_binds_database_and_schema_as_parameters() -> None:
     """Unlike table_stats, the database is not interpolated into the FROM
     target here -- ACCOUNT_USAGE.COPY_HISTORY is a fixed name -- so both

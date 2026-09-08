@@ -117,6 +117,55 @@ def test_table_stats_is_fetched_in_one_shot() -> None:
     assert cursor is None
 
 
+def test_view_stats_is_fetched_in_one_shot() -> None:
+    """A schema's view count is bounded, same reasoning as table_stats."""
+    from snowcone.models import view_stats_scope
+
+    gateway = FakeGateway(
+        view_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "TABLE_CATALOG": "MYDB",
+                    "TABLE_SCHEMA": "PUBLIC",
+                    "TABLE_NAME": "ORDERS_V",
+                    "LAST_DDL": "2026-01-01",
+                    "LAST_ALTERED": "2026-01-02",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway, view_stats_scope("MYDB", "PUBLIC"), None, limit=1
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
+def test_materialized_view_stats_is_fetched_in_one_shot() -> None:
+    """A schema's materialized-view count is bounded, same reasoning as
+    table_stats/view_stats."""
+    from snowcone.models import materialized_view_stats_scope
+
+    gateway = FakeGateway(
+        materialized_view_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "database_name": "MYDB",
+                    "schema_name": "PUBLIC",
+                    "name": "TOTALS_MV",
+                    "rows": 42,
+                    "bytes": 8192,
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway, materialized_view_stats_scope("MYDB", "PUBLIC"), None, limit=1
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
 def test_schema_level_grants_are_fetched_in_one_shot() -> None:
     """A schema's grant list is bounded, like table_stats -- no paging needed,
     and a schema scope dispatches to show_grants_on_schema, not the
@@ -937,6 +986,60 @@ def test_table_stats_scope_reaches_the_right_gateway_call(repo) -> None:
         service.stop()
     assert [row["TABLE_NAME"] for row in repo.raw_rows(scope)] == ["ORDERS"]
     assert [c[0] for c in gateway.calls] == ["table_stats"]
+
+
+def test_view_stats_scope_reaches_the_right_gateway_call(repo) -> None:
+    from snowcone.models import view_stats_scope
+
+    gateway = FakeGateway(
+        view_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "TABLE_CATALOG": "MYDB",
+                    "TABLE_SCHEMA": "PUBLIC",
+                    "TABLE_NAME": "ORDERS_V",
+                    "LAST_DDL": "2026-01-01",
+                    "LAST_ALTERED": "2026-01-02",
+                }
+            ]
+        }
+    )
+    scope = view_stats_scope("MYDB", "PUBLIC")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["TABLE_NAME"] for row in repo.raw_rows(scope)] == ["ORDERS_V"]
+    assert [c[0] for c in gateway.calls] == ["view_stats"]
+
+
+def test_materialized_view_stats_scope_reaches_the_right_gateway_call(repo) -> None:
+    from snowcone.models import materialized_view_stats_scope
+
+    gateway = FakeGateway(
+        materialized_view_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "database_name": "MYDB",
+                    "schema_name": "PUBLIC",
+                    "name": "TOTALS_MV",
+                    "rows": 42,
+                    "bytes": 8192,
+                }
+            ]
+        }
+    )
+    scope = materialized_view_stats_scope("MYDB", "PUBLIC")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["name"] for row in repo.raw_rows(scope)] == ["TOTALS_MV"]
+    assert [c[0] for c in gateway.calls] == ["materialized_view_stats"]
 
 
 def test_a_failing_table_stats_fetch_keeps_previously_cached_stats(repo) -> None:

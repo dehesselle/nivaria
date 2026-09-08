@@ -1,4 +1,8 @@
-"""Detail view for tables and views: their columns."""
+"""Detail view for tables: their columns.
+
+Also hosts `ColumnsView`, the shared column-list body -- `view_view.py`
+reuses it directly for its own Columns tab, rather than duplicating this
+DataTable/scope/update_content logic for a view's columns."""
 
 from __future__ import annotations
 
@@ -64,8 +68,3 @@ class ColumnsView(ObjectView):
 @register_view
 class TableView(ColumnsView):
     OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.TABLE
-
-
-@register_view
-class ViewView(ColumnsView):
-    OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.VIEW

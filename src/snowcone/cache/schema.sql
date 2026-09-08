@@ -219,6 +219,64 @@ CREATE TABLE IF NOT EXISTS information_schema_tables (
 CREATE INDEX IF NOT EXISTS information_schema_tables_scope
     ON information_schema_tables(_scope);
 
+-- LAST_DDL/LAST_ALTERED for the "Views (n)" list, the same
+-- INFORMATION_SCHEMA.TABLES statement information_schema_tables above uses,
+-- just filtered to TABLE_TYPE = 'VIEW' instead of 'BASE TABLE' -- see
+-- ScopeKind.VIEW_STATS. Kept as its own physical table rather than sharing
+-- information_schema_tables under a second _scope value: table and view
+-- names cannot collide within one schema, so it would technically be safe,
+-- but this repo already keeps near-identical shapes in separate physical
+-- tables (account_usage_copy_history vs account_usage_task_history) rather
+-- than lean on that, and it costs nothing here since neither table is large.
+-- Column names verified live on 2026-09-09 against RENETEST1-3 (Snowflake
+-- 10.32.102) with LAST_DDL/LAST_ALTERED present for TABLE_TYPE = 'VIEW' rows
+-- exactly as for 'BASE TABLE' -- but populated values are not: those three
+-- databases carry no user-created view, only Snowflake's own
+-- INFORMATION_SCHEMA system views, which read back LAST_DDL/LAST_ALTERED as
+-- NULL (system-managed, not user DDL). A real user view's actual values
+-- remain unconfirmed.
+CREATE TABLE IF NOT EXISTS information_schema_views (
+    TABLE_CATALOG TEXT NOT NULL,
+    TABLE_SCHEMA  TEXT NOT NULL,
+    TABLE_NAME    TEXT NOT NULL,
+    LAST_DDL      TEXT,
+    LAST_ALTERED  TEXT,
+    _scope        TEXT    NOT NULL,
+    _generation   INTEGER NOT NULL,
+    _fetched_at   REAL    NOT NULL,
+    PRIMARY KEY (TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME)
+);
+CREATE INDEX IF NOT EXISTS information_schema_views_scope
+    ON information_schema_views(_scope);
+
+-- Rows/bytes for materialized views in a schema -- SHOW VIEWS (show_views
+-- above) never carries these, even for materialized views; SHOW MATERIALIZED
+-- VIEWS is Snowflake's separate command that does, with its own column set
+-- (see ScopeKind.MATERIALIZED_VIEW_STATS). Metadata layer, needs no
+-- warehouse, unlike information_schema_views/information_schema_tables.
+-- Column names verified live on 2026-09-09 against RENETEST1-3 (Snowflake
+-- 10.32.102): the full column list is created_on, name, reserved,
+-- database_name, schema_name, cluster_by, rows, bytes, source_database_name,
+-- source_schema_name, source_table_name, refreshed_on, compacted_on, owner,
+-- invalid, invalid_reason, behind_by, comment, text, is_secure,
+-- automatic_clustering, owner_role_type -- rows/bytes are real columns here,
+-- confirming they exist where SHOW VIEWS never carries them. Populated
+-- values are unconfirmed: none of those three databases has an actual
+-- materialized view to read one back from.
+CREATE TABLE IF NOT EXISTS show_materialized_views (
+    database_name TEXT NOT NULL,
+    schema_name   TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    rows          INTEGER,
+    bytes         INTEGER,
+    _scope        TEXT    NOT NULL,
+    _generation   INTEGER NOT NULL,
+    _fetched_at   REAL    NOT NULL,
+    PRIMARY KEY (database_name, schema_name, name)
+);
+CREATE INDEX IF NOT EXISTS show_materialized_views_scope
+    ON show_materialized_views(_scope);
+
 -- Every pipe's load history in a schema (bounded by the "pipe history fetch
 -- window" setting), sourced via a real SELECT against
 -- SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY (needs a running warehouse) rather

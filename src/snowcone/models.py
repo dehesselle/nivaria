@@ -61,6 +61,20 @@ class ScopeKind(StrEnum):
     #: fetch SHOW TABLES, not this SELECT -- columns_scope avoids the same
     #: trap the same way, for a table's own single-object fetch.
     TABLE_STATS = "table_stats"
+    #: A schema's views' LAST_DDL/LAST_ALTERED, the same INFORMATION_SCHEMA.
+    #: TABLES statement TABLE_STATS uses, just bound to TABLE_TYPE = 'VIEW'
+    #: instead of 'BASE TABLE'. A separate ScopeKind rather than object_kind
+    #: on TABLE_STATS, for the same reason TABLE_STATS itself carries no
+    #: object_kind -- see that comment.
+    VIEW_STATS = "view_stats"
+    #: A schema's materialized views' Rows/Bytes, sourced by SHOW MATERIALIZED
+    #: VIEWS -- a distinct Snowflake command from SHOW VIEWS (see
+    #: show_materialized_views in schema.sql), with its own column set that
+    #: actually carries row/byte stats, which SHOW VIEWS never does even for
+    #: materialized views. Metadata layer like SHOW VIEWS, so -- unlike
+    #: TABLE_STATS/VIEW_STATS -- this needs no warehouse. Deliberately
+    #: carries no object_kind, for the same reason TABLE_STATS does not.
+    MATERIALIZED_VIEW_STATS = "materialized_view_stats"
     #: A schema's pipes' *latest* load each (bounded by the "pipe history
     #: fetch window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
@@ -185,6 +199,10 @@ class Scope:
                 return f"columns_prime:{self.database}.{self.schema}"
             case ScopeKind.TABLE_STATS:
                 return f"table_stats:{self.database}.{self.schema}"
+            case ScopeKind.VIEW_STATS:
+                return f"view_stats:{self.database}.{self.schema}"
+            case ScopeKind.MATERIALIZED_VIEW_STATS:
+                return f"materialized_view_stats:{self.database}.{self.schema}"
             case ScopeKind.PIPE_ACTIVITY:
                 return f"pipe_activity:{self.database}.{self.schema}"
             case ScopeKind.PIPE_ACTIVITY_HISTORY:
@@ -245,6 +263,16 @@ def columns_prime_scope(database: str, schema: str | None = None) -> Scope:
 def table_stats_scope(database: str, schema: str) -> Scope:
     # No object_kind -- see ScopeKind.TABLE_STATS's comment.
     return Scope(ScopeKind.TABLE_STATS, database=database, schema=schema)
+
+
+def view_stats_scope(database: str, schema: str) -> Scope:
+    # No object_kind -- see ScopeKind.VIEW_STATS's comment.
+    return Scope(ScopeKind.VIEW_STATS, database=database, schema=schema)
+
+
+def materialized_view_stats_scope(database: str, schema: str) -> Scope:
+    # No object_kind -- see ScopeKind.MATERIALIZED_VIEW_STATS's comment.
+    return Scope(ScopeKind.MATERIALIZED_VIEW_STATS, database=database, schema=schema)
 
 
 def pipe_activity_scope(database: str, schema: str) -> Scope:

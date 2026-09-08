@@ -149,6 +149,28 @@ def fetch_page(
                 ),
                 None,
             )
+        case ScopeKind.VIEW_STATS:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # A schema's view count is bounded, same reasoning as
+            # TABLE_STATS being deliberately unpaged.
+            return (
+                gateway.view_stats(
+                    scope.database, scope.schema, allow_reconnect=allow_reconnect
+                ),
+                None,
+            )
+        case ScopeKind.MATERIALIZED_VIEW_STATS:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # A schema's materialized-view count is bounded, same reasoning
+            # as TABLE_STATS/VIEW_STATS being deliberately unpaged.
+            return (
+                gateway.materialized_view_stats(
+                    scope.database, scope.schema, allow_reconnect=allow_reconnect
+                ),
+                None,
+            )
         case ScopeKind.PIPE_ACTIVITY:
             assert scope.database is not None
             assert scope.schema is not None

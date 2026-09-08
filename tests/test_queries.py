@@ -84,6 +84,25 @@ def test_table_stats_targets_information_schema_tables_with_bound_params() -> No
     )
 
 
+def test_view_stats_is_the_exact_same_statement_as_table_stats() -> None:
+    """TABLE_TYPE is a bound %s, not baked into the text -- the two builders
+    differ only in what the caller binds ("BASE TABLE" vs "VIEW")."""
+    assert queries.view_stats("MYDB") == queries.table_stats("MYDB")
+
+
+def test_show_materialized_views_scopes_to_a_quoted_schema() -> None:
+    assert queries.show_materialized_views("MYDB", "PUBLIC", limit=10) == (
+        'SHOW MATERIALIZED VIEWS IN SCHEMA "MYDB"."PUBLIC" LIMIT 10'
+    )
+
+
+def test_show_materialized_views_pages_with_a_keyset_cursor() -> None:
+    assert (
+        queries.show_materialized_views("MYDB", "PUBLIC", after="TOTALS_MV", limit=1000)
+        == 'SHOW MATERIALIZED VIEWS IN SCHEMA "MYDB"."PUBLIC" LIMIT 1000 FROM \'TOTALS_MV\''
+    )
+
+
 def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() -> None:
     """Unlike table_stats, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather
     than one built from the database, so both filter values bind as ordinary

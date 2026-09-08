@@ -8,6 +8,7 @@ from snowcone.models import (
     columns_scope,
     databases_scope,
     grants_scope,
+    materialized_view_stats_scope,
     objects_scope,
     pipe_activity_history_scope,
     pipe_activity_scope,
@@ -20,6 +21,7 @@ from snowcone.models import (
     task_activity_history_scope,
     task_activity_scope,
     task_history_scope,
+    view_stats_scope,
     warehouses_scope,
 )
 
@@ -95,6 +97,27 @@ def test_table_stats_scope_carries_no_object_kind() -> None:
     misroute every ensure()-triggered fetch of this scope into that prime
     instead of the INFORMATION_SCHEMA SELECT this scope actually needs."""
     assert table_stats_scope("MYDB", "PUBLIC").object_kind is None
+
+
+def test_view_stats_scope_key() -> None:
+    assert view_stats_scope("MYDB", "PUBLIC").key == "view_stats:MYDB.PUBLIC"
+
+
+def test_view_stats_scope_carries_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert view_stats_scope("MYDB", "PUBLIC").object_kind is None
+
+
+def test_materialized_view_stats_scope_key() -> None:
+    assert (
+        materialized_view_stats_scope("MYDB", "PUBLIC").key
+        == "materialized_view_stats:MYDB.PUBLIC"
+    )
+
+
+def test_materialized_view_stats_scope_carries_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert materialized_view_stats_scope("MYDB", "PUBLIC").object_kind is None
 
 
 def test_pipe_activity_scope_key() -> None:

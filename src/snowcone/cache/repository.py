@@ -248,6 +248,20 @@ _TABLE_STATS = TableSpec(
     order_by=("TABLE_NAME",),
 )
 
+_VIEW_STATS = TableSpec(
+    name="information_schema_views",
+    columns=("TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME", "LAST_DDL", "LAST_ALTERED"),
+    key=("TABLE_CATALOG", "TABLE_SCHEMA", "TABLE_NAME"),
+    order_by=("TABLE_NAME",),
+)
+
+_MATERIALIZED_VIEW_STATS = TableSpec(
+    name="show_materialized_views",
+    columns=("database_name", "schema_name", "name", "rows", "bytes"),
+    key=("database_name", "schema_name", "name"),
+    order_by=("name",),
+)
+
 _PIPE_ACTIVITY = TableSpec(
     name="account_usage_copy_history",
     columns=(
@@ -422,6 +436,10 @@ def spec_for(scope: Scope) -> TableSpec:
             return _COLUMNS
         case ScopeKind.TABLE_STATS:
             return _TABLE_STATS
+        case ScopeKind.VIEW_STATS:
+            return _VIEW_STATS
+        case ScopeKind.MATERIALIZED_VIEW_STATS:
+            return _MATERIALIZED_VIEW_STATS
         case ScopeKind.PIPE_ACTIVITY:
             return _PIPE_ACTIVITY
         case ScopeKind.PIPE_ACTIVITY_HISTORY:
