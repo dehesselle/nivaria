@@ -1,4 +1,10 @@
-"""Category view for the "Pipes (n)" node: last load activity per pipe.
+"""Category view for the "Pipes (n)" node: status and load activity.
+
+Tabbed -- Status (one row per pipe: name, running/stopped, and
+`invalid_reason` -- a stopped pipe is otherwise indistinguishable from a
+healthy one) opens by default, alongside Load history (last load activity
+per pipe). Status needs no new scope: `invalid_reason` is already mirrored
+onto the same `SHOW PIPES` rows this view already reads for the Name column.
 
 The base rows (every pipe that exists) come from `SHOW PIPES`, already
 mirrored for the tree's own category count -- no new fetch scope for those.
@@ -20,8 +26,9 @@ from typing import Any, ClassVar
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.coordinate import Coordinate
-from textual.widgets import DataTable
+from textual.widgets import DataTable, TabbedContent, TabPane
 from textual.widgets.data_table import CellDoesNotExist
 
 from snowcone.cache.repository import Repository
@@ -36,7 +43,16 @@ from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
 
-_COLUMNS = ("Name", "Rows", "Size", "Loaded", "Status", "Target Table", "Filename")
+_STATUS_COLUMNS = ("Name", "Status", "Invalid Reason")
+_HISTORY_COLUMNS = (
+    "Name",
+    "Rows",
+    "Size",
+    "Loaded",
+    "Status",
+    "Target Table",
+    "Filename",
+)
 
 
 def _is_more_recent(candidate: dict[str, Any], current: dict[str, Any]) -> bool:
@@ -94,6 +110,11 @@ class _PipeListDataTable(DataTable):
 class PipeListView(CategoryView):
     OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.PIPE
 
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("s", "show_tab('status')", "Status", show=False),
+        Binding("l", "show_tab('history')", "Load history", show=False),
+    ]
+
     def __init__(self, repo: Repository, scope: Scope) -> None:
         super().__init__(repo, scope)
         #: This paint's rows, keyed by pipe name -- the merged show_pipes +
@@ -101,11 +122,23 @@ class PipeListView(CategoryView):
         self._rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
-        table: DataTable[Text] = _PipeListDataTable(
-            self, id="detail-table-list", cursor_type="row"
-        )
-        table.zebra_stripes = True
-        yield table
+        with TabbedContent(initial="tab-status"):
+            with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
+                status: DataTable[Text] = DataTable(
+                    id="pipe-list-status", cursor_type="row"
+                )
+                status.zebra_stripes = True
+                status.add_columns(*_STATUS_COLUMNS)
+                yield status
+            with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
+                history: DataTable[Text] = _PipeListDataTable(
+                    self, id="detail-table-list", cursor_type="row"
+                )
+                history.zebra_stripes = True
+                yield history
+
+    def action_show_tab(self, tab: str) -> None:
+        self.query_one(TabbedContent).active = f"tab-{tab}"
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Enter on a row opens that pipe's detail view, revealed in the tree.
@@ -150,16 +183,18 @@ class PipeListView(CategoryView):
             if current is None or _is_more_recent(row, current):
                 activity_by_name[name] = row
 
-        table = self.query_one("#detail-table-list", DataTable)
-        table.clear(columns=True)
-        table.add_columns(*_COLUMNS)
+        status_table = self.query_one("#pipe-list-status", DataTable)
+        status_table.clear()
+        history_table = self.query_one("#detail-table-list", DataTable)
+        history_table.clear(columns=True)
+        history_table.add_columns(*_HISTORY_COLUMNS)
         self._rows = {}
         for row in self.repo.raw_rows(self.scope):
             name = row["name"]
             merged = {**row, **activity_by_name.get(name, {})}
             self._rows[name] = merged
             row_count = merged.get("ROW_COUNT")
-            table.add_row(
+            history_table.add_row(
                 Text(name),
                 Text(f"{row_count:,}" if row_count is not None else ""),
                 Text(format_bytes(merged.get("FILE_SIZE"))),
@@ -168,4 +203,9 @@ class PipeListView(CategoryView):
                 Text(merged.get("TABLE_NAME") or ""),
                 Text(merged.get("FILE_NAME") or ""),
                 key=name,
+            )
+            invalid_reason = row.get("invalid_reason") or ""
+            pipe_status = "stopped" if invalid_reason else "running"
+            status_table.add_row(
+                Text(name), Text(pipe_status), Text(invalid_reason), key=name
             )

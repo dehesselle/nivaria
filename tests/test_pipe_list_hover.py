@@ -28,7 +28,11 @@ def repo(tmp_path) -> Repository:
 
 async def _mounted_table(app: Harness, pilot) -> DataTable:
     pane = app.query_one(DetailPane)
-    pane.show_category(objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC"))
+    view = pane.show_category(objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC"))
+    await pilot.pause()
+    # The table lives on the "Load history" tab, not the default "Status"
+    # one -- switch there first, same as a user pressing "l".
+    view.action_show_tab("history")
     await pilot.pause()
     return pane.query_one("#detail-table-list", DataTable)
 

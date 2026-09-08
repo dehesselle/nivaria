@@ -401,49 +401,6 @@ async def test_a_pipe_shows_load_history_not_columns(repo) -> None:
         assert len(pane.query("#detail-columns")) == 0
 
 
-async def test_a_stopped_pipes_status_says_so(repo) -> None:
-    """A stopped pipe looks exactly like a healthy one until you read
-    invalid_reason -- shown in the Status tab as its own column, not buried
-    in a sentence."""
-    ref = put_pipe(repo, "LOAD_ORDERS", invalid_reason="stage dropped")
-    app = Harness(repo)
-    async with app.run_test(size=(100, 30)) as pilot:
-        pane = app.query_one(DetailPane)
-        pane.show(ref)
-        await pilot.pause()
-        table = pane.query_one("#pipe-status", DataTable)
-        assert table.get_cell_at((0, 0)).plain == "LOAD_ORDERS"
-        assert table.get_cell_at((0, 1)).plain == "stopped"
-        assert table.get_cell_at((0, 2)).plain == "stage dropped"
-
-
-async def test_a_running_pipes_status_says_so(repo) -> None:
-    ref = put_pipe(repo, "LOAD_ORDERS")
-    app = Harness(repo)
-    async with app.run_test(size=(100, 30)) as pilot:
-        pane = app.query_one(DetailPane)
-        pane.show(ref)
-        await pilot.pause()
-        table = pane.query_one("#pipe-status", DataTable)
-        assert table.get_cell_at((0, 0)).plain == "LOAD_ORDERS"
-        assert table.get_cell_at((0, 1)).plain == "running"
-        assert table.get_cell_at((0, 2)).plain == ""
-
-
-async def test_an_uncached_pipes_status_says_so(repo) -> None:
-    """A pipe that has never been fetched (only a scope reference exists)
-    shows "not cached" rather than a blank or crashing lookup."""
-    ref = ObjectRef(ObjectKind.PIPE, "MYDB", "PUBLIC", "GHOST")
-    app = Harness(repo)
-    async with app.run_test(size=(100, 30)) as pilot:
-        pane = app.query_one(DetailPane)
-        pane.show(ref)
-        await pilot.pause()
-        table = pane.query_one("#pipe-status", DataTable)
-        assert table.get_cell_at((0, 0)).plain == "GHOST"
-        assert table.get_cell_at((0, 1)).plain == "not cached"
-
-
 async def test_opening_a_pipe_requests_its_activity_scope(repo) -> None:
     """The base facts came with the SHOW PIPES row already cached, but load
     history is backed by its own SELECT scope -- see pipe_view.py -- and is
@@ -729,13 +686,11 @@ async def test_the_tab_mnemonic_actions_switch_tabs(repo) -> None:
         view = pane.show(ref)
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
-        assert tabs.active == "tab-status"
-        view.action_show_tab("history")
         assert tabs.active == "tab-history"
         view.action_show_tab("definition")
         assert tabs.active == "tab-definition"
-        view.action_show_tab("status")
-        assert tabs.active == "tab-status"
+        view.action_show_tab("history")
+        assert tabs.active == "tab-history"
 
 
 def test_pipe_view_scopes_always_includes_activity(repo) -> None:
@@ -896,6 +851,57 @@ async def test_selecting_a_pipes_category_mounts_the_pipe_list_view(repo) -> Non
         pane.show_category(scope)
         await pilot.pause()
         assert isinstance(pane.view, PipeListView)
+
+
+async def test_the_status_tab_shows_every_pipes_running_or_stopped_state(
+    repo,
+) -> None:
+    """The whole point of moving Status here from the single-pipe view: one
+    table answers "which of my pipes are broken?" for every pipe at once,
+    not just whichever one happens to be open."""
+    put_pipe(repo, "LOAD_ORDERS")
+    put_pipe(repo, "LOAD_CUSTOMERS", invalid_reason="stage dropped")
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#pipe-list-status", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((0, 0)).plain == "LOAD_CUSTOMERS"
+        assert table.get_cell_at((0, 1)).plain == "stopped"
+        assert table.get_cell_at((0, 2)).plain == "stage dropped"
+        assert table.get_cell_at((1, 0)).plain == "LOAD_ORDERS"
+        assert table.get_cell_at((1, 1)).plain == "running"
+        assert table.get_cell_at((1, 2)).plain == ""
+
+
+async def test_the_status_tab_is_active_by_default(repo) -> None:
+    put_pipe(repo, "LOAD_ORDERS")
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_category(scope)
+        await pilot.pause()
+        assert view.query_one(TabbedContent).active == "tab-status"
+
+
+async def test_the_pipe_list_tab_mnemonic_actions_switch_tabs(repo) -> None:
+    put_pipe(repo, "LOAD_ORDERS")
+    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_category(scope)
+        await pilot.pause()
+        tabs = view.query_one(TabbedContent)
+        assert tabs.active == "tab-status"
+        view.action_show_tab("history")
+        assert tabs.active == "tab-history"
+        view.action_show_tab("status")
+        assert tabs.active == "tab-status"
 
 
 async def test_the_pipe_list_view_lists_every_cached_pipe(repo) -> None:

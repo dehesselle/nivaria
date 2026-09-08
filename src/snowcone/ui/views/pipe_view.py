@@ -1,11 +1,17 @@
-"""Detail view for pipes: status, load history, and definition.
+"""Detail view for pipes: load history and definition.
 
 Deliberately a different shape from the column views: a pipe has no columns,
-so its body is tabbed instead -- Status (pipe/status/invalid_reason, one row),
-Load history (one row per file it has loaded, the same dual-source pattern
-`pipe_list_view.py` uses, plus a detail panel below for whatever the
-highlighted row wants to say about itself -- currently its error, if any),
-and Definition (the pipe's raw COPY INTO SQL, unformatted).
+so its body is tabbed instead -- Load history (one row per file it has
+loaded, the same dual-source pattern `pipe_list_view.py` uses, plus a detail
+panel below for whatever the highlighted row wants to say about itself --
+currently its error, if any) and Definition (the pipe's raw COPY INTO SQL,
+unformatted).
+
+Status (pipe/status/invalid_reason) lives in `pipe_list_view.py` instead of
+here -- a single pipe's view can only ever show one row of it, which can
+never answer the question a status tab is for ("which of my pipes are
+broken?"). The category view already lists every pipe in the schema, so it
+can show status for all of them at once.
 
 The history merges two sources: `pipe_activity_scope` (SNOWFLAKE.
 ACCOUNT_USAGE.COPY_HISTORY, the full backfill within the "pipe history fetch
@@ -61,7 +67,6 @@ class PipeView(ObjectView):
     OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.PIPE
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("s", "show_tab('status')", "Status", show=False),
         Binding("l", "show_tab('history')", "Load history", show=False),
         Binding("d", "show_tab('definition')", "Definition", show=False),
     ]
@@ -73,11 +78,7 @@ class PipeView(ObjectView):
         self._history_rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
-        with TabbedContent(initial="tab-status"):
-            with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
-                status: DataTable[Text] = DataTable(id="pipe-status", cursor_type="row")
-                status.add_columns("Pipe", "Status", "Invalid Reason")
-                yield status
+        with TabbedContent(initial="tab-history"):
             with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
                 history: DataTable[Text] = DataTable(
                     id="pipe-history", cursor_type="row"
@@ -120,20 +121,8 @@ class PipeView(ObjectView):
         return scopes
 
     def update_content(self) -> None:
-        self._update_status()
         self._update_history()
         self._update_definition()
-
-    def _update_status(self) -> None:
-        row = self.repo.object_detail(self.ref)
-        table = self.query_one("#pipe-status", DataTable)
-        table.clear()
-        if row is None:
-            table.add_row(Text(self.ref.name), Text("not cached"), Text(""))
-            return
-        invalid_reason = row.get("invalid_reason") or ""
-        status = "stopped" if invalid_reason else "running"
-        table.add_row(Text(self.ref.name), Text(status), Text(invalid_reason))
 
     def _update_history(self) -> None:
         ttl = config.get(CACHE_TTL)

@@ -706,16 +706,25 @@ crashing, so the tree can list kinds ahead of their views existing.
 
 The kinds are genuinely different shapes, which is the justification for the
 seam: a table shows columns; a pipe has no columns at all, so its body is a
-`TabbedContent` instead -- **Status** (pipe name, running/stopped, and
-`invalid_reason` as three columns of a one-row table -- a stopped pipe is
-otherwise indistinguishable from a healthy one), **Load history** (see "A
-second source" for where that comes from, plus a detail panel below the
-table for whatever the currently highlighted row wants to say about itself
--- today that's a load error's message and line number, if it has one), and
-**Definition** (the pipe's raw `COPY INTO` SQL, unformatted -- no syntax
-highlighting, a deliberate scope boundary for now). The three tabs are also
-keyboard-mnemonic switchable (`s`/`l`/`d`, hidden from the footer), the same
-pattern sibling project snakecam's `JobDetailsScreen` already established.
+`TabbedContent` instead -- **Load history** (see "A second source" for where
+that comes from, plus a detail panel below the table for whatever the
+currently highlighted row wants to say about itself -- today that's a load
+error's message and line number, if it has one) and **Definition** (the
+pipe's raw `COPY INTO` SQL, unformatted -- no syntax highlighting, a
+deliberate scope boundary for now). The two tabs are also keyboard-mnemonic
+switchable (`l`/`d`, hidden from the footer), the same pattern sibling
+project snakecam's `JobDetailsScreen` already established.
+
+The "Pipes (n)" category node (`PipeListView`) is tabbed the same way, for
+the same reason a single pipe's own view is not: **Status** (name,
+running/stopped, and `invalid_reason` as three columns, one row per pipe --
+a stopped pipe is otherwise indistinguishable from a healthy one) needs
+every pipe in the schema to be useful, not just whichever one happens to be
+open, so it lives on the list view instead. It opens by default (mnemonic
+`s`), alongside **Load history** (mnemonic `l`) -- last load activity per
+pipe, the same data this view already showed before it had tabs.
+`invalid_reason` costs no new scope here either: it is already mirrored onto
+the same `SHOW PIPES` rows this view reads for the Name column.
 
 ---
 
