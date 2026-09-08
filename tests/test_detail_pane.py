@@ -32,7 +32,7 @@ from snowcone.models import (
 )
 from snowcone.settings import PIPE_HISTORY_SHOW_DAYS, TASK_HISTORY_SHOW_DAYS, config
 from snowcone.ui.messages import ObjectSelected, ScopeNeeded
-from snowcone.ui.views.base import registered_kinds, view_for
+from snowcone.ui.views.base import registered_category_kinds, registered_kinds, view_for
 from snowcone.ui.views.pipe_list_view import PipeListView
 from snowcone.ui.views.pipe_view import PipeView
 from snowcone.ui.views.schema_view import DatabaseView, SchemaView
@@ -283,6 +283,31 @@ def put_pipe_history(repo: Repository, pipe: str, **extra) -> None:
             row,
         ],
     )
+
+
+def put_stage(repo: Repository, name: str, **extra) -> ObjectRef:
+    row = {
+        "database_name": "MYDB",
+        "schema_name": "PUBLIC",
+        "name": name,
+        "created_on": "2026-01-01 00:00:00",
+        "url": "s3://mybucket/path/",
+        "type": "External Named",
+        "owner": "LOADER",
+        "comment": "",
+        "storage_integration": "MY_INTEGRATION",
+    }
+    row.update(extra)
+    existing = repo.raw_rows(objects_scope(ObjectKind.STAGE, "MYDB", "PUBLIC"))
+    load(
+        repo,
+        objects_scope(ObjectKind.STAGE, "MYDB", "PUBLIC"),
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+    return ObjectRef(ObjectKind.STAGE, "MYDB", "PUBLIC", name)
 
 
 def put_task(repo: Repository, name: str, **extra) -> ObjectRef:
@@ -1830,17 +1855,18 @@ async def test_pressing_enter_on_a_task_row_selects_it(repo) -> None:
     ]
 
 
-async def test_an_unregistered_category_kind_shows_a_placeholder(repo) -> None:
-    """Only Tables, Views, Pipes and Tasks have list views so far; Stages,
-    the one category kind still unregistered, falls back to the same
-    placeholder convention as an unregistered object kind."""
-    app = Harness(repo)
-    async with app.run_test(size=(100, 30)) as pilot:
-        pane = app.query_one(DetailPane)
-        result = pane.show_category(objects_scope(ObjectKind.STAGE, "MYDB", "PUBLIC"))
-        await pilot.pause()
-        assert result is None
-        assert pane.query_one("#detail-placeholder", Static)
+async def test_every_category_kind_has_a_list_view() -> None:
+    """Tables, Views, Pipes, Stages and Tasks -- every ObjectKind the tree
+    produces a category node for -- must have a registered CategoryView, so
+    `show_category`'s placeholder fallback is only ever defensive, never hit
+    in practice for a real kind."""
+    assert {
+        ObjectKind.TABLE,
+        ObjectKind.VIEW,
+        ObjectKind.PIPE,
+        ObjectKind.STAGE,
+        ObjectKind.TASK,
+    } <= registered_category_kinds()
 
 
 async def test_a_category_cache_update_repaints_the_list(repo) -> None:

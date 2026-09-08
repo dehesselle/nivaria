@@ -839,6 +839,26 @@ rows, so a regular view simply has no match on merge; Materialized itself is
 shown because it is the only thing that explains why most rows' Rows/Size are
 blank -- by Snowflake design, not a cache miss.
 
+The "Stages (n)" category node (`StageListView`) is the same single-`DataTable`
+shape again, for a stronger reason than Views' own: a stage carries no
+per-row status or activity concept either, but unlike a table or a view it
+also has no natural per-object drill-down -- there are no columns, no defining
+SQL, nothing that does not fit in one `SHOW STAGES` row. So this list is the
+only place a stage is shown in any detail; opening one from here (or from
+search) still lands on the generic "no detail view yet" placeholder, same as
+today, and needs no new fetch scope -- `Type`, `Storage Integration`, `URL`
+and `Created` all come straight from `show_stages`, already mirrored for the
+tree's own count. `Type` earns a column not for its own sake but because
+`Storage Integration`/`URL` are blank for an internal stage -- the same role
+`Materialized` plays above for its own blank cells. The "Stages (n)" node
+stays expandable like every other category despite this, rather than becoming
+the first exception: nothing is saved by suppressing it (an unregistered kind
+already falls back to the same placeholder for free), and `ObjectTree.reveal`
+would have to special-case a stage hit to avoid force-expanding down to a leaf
+that is unreachable by ordinary browsing otherwise (Textual's
+`TreeNode.expand()` ignores `allow_expand` -- that flag only gates the
+user-facing arrow/click/keyboard toggle).
+
 A **schema** or **database** node is a further departure from the registry
 above: neither has an `ObjectKind`, so neither `ObjectView` nor `CategoryView`
 fits, and there is exactly one view per node kind rather than one of several
@@ -1229,8 +1249,11 @@ Three things about it are worth knowing from inside snowcone:
   sessions, and does not re-clamp an already-narrow pane if the terminal is
   then resized smaller -- both accepted, ported as-is from sibling project
   snakecam's identical mechanism, not engineered around.
-- Stages appear in the tree but have no Object view yet; they show a
-  placeholder.
+- A single stage's own leaf node still has no Object view -- it shows a
+  placeholder, same as any unregistered kind. This is not treated as an open
+  gap the way it is for other kinds without their own view yet: see the
+  "Stages (n)" category-node paragraph above for why a stage has nothing left
+  to show beyond its `StageListView` row.
 - **Multiple databases can now be browsed and searched at once** — this
   reverses what used to be a deliberate constraint here ("cross-database
   browsing is out of scope by design"). The database picker (`ctrl+d`) is a

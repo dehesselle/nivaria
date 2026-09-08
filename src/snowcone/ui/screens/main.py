@@ -50,6 +50,7 @@ from snowcone.ui.screens.search import SearchScreen
 from snowcone.ui.views import (  # noqa: F401 -- registers views
     pipe_list_view,
     pipe_view,
+    stage_list_view,
     table_list_view,
     table_view,
     task_list_view,
