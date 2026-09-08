@@ -20,7 +20,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from snowcone.errors import SnowconeError
-from snowcone.gateway import queries
+from snowcone.gateway import queries, sql_log
 
 EXTERNAL_BROWSER = "externalbrowser"
 USERNAME_PASSWORD_MFA = "username_password_mfa"
@@ -423,6 +423,7 @@ class ConnectionPool:
                 for connection in held:
                     cursor = connection.cursor()
                     try:
+                        sql_log.log_statement(cursor, statement)
                         cursor.execute(statement)
                     finally:
                         cursor.close()

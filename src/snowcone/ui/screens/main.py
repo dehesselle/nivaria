@@ -12,7 +12,14 @@ from collections.abc import Sequence
 from math import ceil
 from typing import ClassVar
 
-from tcw.widgets import Menu, MenuBar, MenuItem, MenuSeparator, SettingsMenuItem
+from tcw.widgets import (
+    LogViewer,
+    Menu,
+    MenuBar,
+    MenuItem,
+    MenuSeparator,
+    SettingsMenuItem,
+)
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -125,6 +132,7 @@ class MainScreen(Screen):
                 yield MenuItem(
                     "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
                 )
+        yield LogViewer()
         tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
         yield tree
         yield DetailPane(self.repo, id="detail")

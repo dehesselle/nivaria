@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -359,6 +360,18 @@ def test_set_warehouse_runs_use_warehouse_on_every_connection() -> None:
     pool.set_warehouse("COMPUTE_WH")
     assert all(c.executed == ['USE WAREHOUSE "COMPUTE_WH"'] for c in pool._all)
     assert pool.params.warehouse == "COMPUTE_WH"
+
+
+def test_run_on_all_logs_the_statement_at_debug_under_the_sql_source(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    with caplog.at_level(logging.DEBUG, logger="sql"):
+        pool.set_role("SYSADMIN")
+    records = [record for record in caplog.records if record.name == "sql"]
+    assert len(records) == 2  # one per pooled connection
+    assert all('USE ROLE "SYSADMIN"' in record.message for record in records)
 
 
 def test_a_dead_connection_is_replaced_during_a_session_change() -> None:

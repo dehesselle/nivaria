@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from snowcone.gateway import queries
+from snowcone.gateway import queries, sql_log
 from snowcone.gateway.pool import ConnectionPool
 from snowcone.models import ObjectKind
 
@@ -217,6 +217,7 @@ class PoolGateway:
         with self._pool.acquire(allow_reconnect=allow_reconnect) as connection:
             cursor = connection.cursor()
             try:
+                sql_log.log_statement(cursor, statement, params)
                 if params:
                     cursor.execute(statement, params)
                 else:

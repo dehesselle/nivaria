@@ -28,6 +28,14 @@ class FakeCursor:
     def close(self) -> None:
         pass
 
+    def _preprocess_pyformat_query(
+        self, statement: str, params: tuple[Any, ...] | None = None
+    ) -> str:
+        # Stands in for the real connector's bind resolution -- good enough
+        # fidelity for a test to assert on, not a claim this matches
+        # Snowflake's own pyformat handling exactly.
+        return statement % params if params else statement
+
 
 class FakeConnection:
     def __init__(
