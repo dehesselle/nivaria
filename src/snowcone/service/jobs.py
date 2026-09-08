@@ -152,13 +152,31 @@ def fetch_page(
         case ScopeKind.PIPE_ACTIVITY:
             assert scope.database is not None
             assert scope.schema is not None
-            # A schema's pipe-history row count is bounded (by the fetch
-            # window setting), same reasoning as TABLE_STATS.
+            # Bounded by pipe count, not by history depth -- see
+            # queries.pipe_activity's QUALIFY.
             fetch_days = config.get(PIPE_HISTORY_FETCH_DAYS)
             return (
                 gateway.pipe_activity(
                     scope.database,
                     scope.schema,
+                    fetch_days,
+                    allow_reconnect=allow_reconnect,
+                ),
+                None,
+            )
+        case ScopeKind.PIPE_ACTIVITY_HISTORY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            assert scope.table is not None  # the pipe's name
+            # Bounded to one pipe's history -- no target-table resolution
+            # needed, unlike PIPE_HISTORY, since ACCOUNT_USAGE.COPY_HISTORY
+            # has an ordinary PIPE_NAME column to filter on directly.
+            fetch_days = config.get(PIPE_HISTORY_FETCH_DAYS)
+            return (
+                gateway.pipe_activity_history(
+                    scope.database,
+                    scope.schema,
+                    scope.table,
                     fetch_days,
                     allow_reconnect=allow_reconnect,
                 ),

@@ -147,6 +147,38 @@ def test_pipe_activity_is_fetched_in_one_shot() -> None:
     assert cursor is None
 
 
+def test_pipe_activity_history_is_fetched_in_one_shot() -> None:
+    """One pipe's full backfill is likewise bounded and unpaged -- no
+    pipe_target needed, unlike pipe_history below: ACCOUNT_USAGE.COPY_HISTORY
+    filters by PIPE_NAME directly."""
+    from snowcone.models import pipe_activity_history_scope
+
+    gateway = FakeGateway(
+        pipe_activity_history={
+            ("MYDB", "PUBLIC", "MY_PIPE"): [
+                {
+                    "PIPE_CATALOG_NAME": "MYDB",
+                    "PIPE_SCHEMA_NAME": "PUBLIC",
+                    "PIPE_NAME": "MY_PIPE",
+                    "FILE_NAME": "orders_1.csv.gz",
+                    "FILE_SIZE": 1024,
+                    "ROW_COUNT": 42,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
+                    "TABLE_CATALOG_NAME": "MYDB",
+                    "TABLE_SCHEMA_NAME": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                }
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway, pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE"), None, limit=1
+    )
+    assert len(rows) == 1
+    assert cursor is None
+
+
 def test_pipe_history_is_fetched_in_one_shot_given_its_resolved_target() -> None:
     """One pipe's near-real-time history is likewise bounded and unpaged --
     same reasoning as pipe_activity above."""
@@ -865,6 +897,39 @@ def test_a_failing_pipe_activity_fetch_keeps_previously_cached_activity(repo) ->
         service.stop()
     assert repo.entry(scope).state is CacheState.ERROR
     assert [row["PIPE_NAME"] for row in repo.raw_rows(scope)] == ["MY_PIPE"]
+
+
+def test_pipe_activity_history_scope_reaches_the_right_gateway_call(repo) -> None:
+    from snowcone.models import pipe_activity_history_scope
+
+    gateway = FakeGateway(
+        pipe_activity_history={
+            ("MYDB", "PUBLIC", "MY_PIPE"): [
+                {
+                    "PIPE_CATALOG_NAME": "MYDB",
+                    "PIPE_SCHEMA_NAME": "PUBLIC",
+                    "PIPE_NAME": "MY_PIPE",
+                    "FILE_NAME": "orders_1.csv.gz",
+                    "FILE_SIZE": 1024,
+                    "ROW_COUNT": 42,
+                    "STATUS": "Loaded",
+                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
+                    "TABLE_CATALOG_NAME": "MYDB",
+                    "TABLE_SCHEMA_NAME": "PUBLIC",
+                    "TABLE_NAME": "ORDERS",
+                }
+            ]
+        }
+    )
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["FILE_NAME"] for row in repo.raw_rows(scope)] == ["orders_1.csv.gz"]
+    assert [c[0] for c in gateway.calls] == ["pipe_activity_history"]
 
 
 def test_pipe_history_resolves_its_target_from_cached_pipe_activity(repo) -> None:

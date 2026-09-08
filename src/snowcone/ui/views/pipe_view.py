@@ -13,16 +13,19 @@ never answer the question a status tab is for ("which of my pipes are
 broken?"). The category view already lists every pipe in the schema, so it
 can show status for all of them at once.
 
-The history merges two sources: `pipe_activity_scope` (SNOWFLAKE.
-ACCOUNT_USAGE.COPY_HISTORY, the full backfill within the "pipe history fetch
-window" setting) and `pipe_history_scope` (INFORMATION_SCHEMA.COPY_HISTORY,
-near-real-time but limited to Snowflake's own 14-day retention for that
-function). Rows are merged by (FILE_NAME, LAST_LOAD_TIME), with the
-near-real-time source inserted last so it wins on overlap -- robust to either
-source being empty or failed, since there is no need to reason about which
-scope succeeded. The result is filtered to the "pipe history display window"
-setting, which can be shorter than the fetch window: shrinking it later is
-a display-only change, since the wider range stays cached either way.
+The history merges two sources: `pipe_activity_history_scope` (SNOWFLAKE.
+ACCOUNT_USAGE.COPY_HISTORY, this one pipe's full backfill within the "pipe
+history fetch window" setting -- lazy, fetched only while this view is open,
+unlike the schema-wide `pipe_activity_scope` the "Pipes (n)" list uses, which
+is reduced to each pipe's latest row only) and `pipe_history_scope`
+(INFORMATION_SCHEMA.COPY_HISTORY, near-real-time but limited to Snowflake's
+own 14-day retention for that function). Rows are merged by (FILE_NAME,
+LAST_LOAD_TIME), with the near-real-time source inserted last so it wins on
+overlap -- robust to either source being empty or failed, since there is no
+need to reason about which scope succeeded. The result is filtered to the
+"pipe history display window" setting, which can be shorter than the fetch
+window: shrinking it later is a display-only change, since the wider range
+stays cached either way.
 
 `pipe_history_scope` needs the pipe's target table, which Snowflake exposes
 nowhere except by resolving it from whatever `pipe_activity_scope` already
@@ -32,7 +35,9 @@ not been fetched yet) has no target to give it. That is a normal, permanent
 state for plenty of pipes, not a transient failure: this view does not
 `ensure()` -- or even list in `scopes()` -- the history scope until a target
 is actually resolvable, so such a pipe just shows an empty table rather than
-repeatedly failing a fetch it can never succeed at.
+repeatedly failing a fetch it can never succeed at. `pipe_activity_history_scope`
+needs no such gating: ACCOUNT_USAGE.COPY_HISTORY filters directly by
+PIPE_NAME, with no target table to resolve first.
 """
 
 from __future__ import annotations
@@ -53,6 +58,7 @@ from snowcone.models import (
     ObjectKind,
     ObjectRef,
     Scope,
+    pipe_activity_history_scope,
     pipe_activity_scope,
     pipe_history_scope,
 )
@@ -101,6 +107,11 @@ class PipeView(ObjectView):
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.ref.database, self.ref.schema)
 
+    def activity_history_scope(self) -> Scope:
+        return pipe_activity_history_scope(
+            self.ref.database, self.ref.schema, self.ref.name
+        )
+
     def history_scope(self) -> Scope:
         return pipe_history_scope(self.ref.database, self.ref.schema, self.ref.name)
 
@@ -114,8 +125,10 @@ class PipeView(ObjectView):
         # is resolvable -- see the module docstring. Omitting it otherwise
         # keeps both the interactive ensure() below and the background sweep
         # (MainScreen._sweep, which watches self.detail.scopes()) from ever
-        # requesting a fetch that cannot succeed.
-        scopes = [self.activity_scope()]
+        # requesting a fetch that cannot succeed. activity_scope (schema-wide,
+        # for target resolution) and activity_history_scope (this pipe's own
+        # backfill) need no such gating -- neither depends on a target table.
+        scopes = [self.activity_scope(), self.activity_history_scope()]
         if self.target_table() is not None:
             scopes.append(self.history_scope())
         return scopes
@@ -126,8 +139,12 @@ class PipeView(ObjectView):
 
     def _update_history(self) -> None:
         ttl = config.get(CACHE_TTL)
-        activity_scope = self.activity_scope()
-        self.ensure(activity_scope, ttl)
+        # ensure()d for Repository.pipe_target_table's resolution below, but
+        # not read into the merge -- it only ever holds this pipe's latest
+        # row, which activity_history_scope's full backfill already covers.
+        self.ensure(self.activity_scope(), ttl)
+        activity_history_scope = self.activity_history_scope()
+        self.ensure(activity_history_scope, ttl)
 
         target = self.target_table()
         history_scope = self.history_scope() if target is not None else None
@@ -137,9 +154,7 @@ class PipeView(ObjectView):
         # Merged by (FILE_NAME, LAST_LOAD_TIME) -- see the module docstring
         # for why this needs no "which scope succeeded" branching.
         merged: dict[tuple[Any, Any], dict[str, Any]] = {}
-        for r in self.repo.raw_rows(activity_scope):
-            if r.get("PIPE_NAME") != self.ref.name:
-                continue
+        for r in self.repo.raw_rows(activity_history_scope):
             merged[(r.get("FILE_NAME"), r.get("LAST_LOAD_TIME"))] = r
         if history_scope is not None:
             for r in self.repo.raw_rows(history_scope):

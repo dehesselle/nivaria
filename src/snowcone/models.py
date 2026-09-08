@@ -61,16 +61,26 @@ class ScopeKind(StrEnum):
     #: fetch SHOW TABLES, not this SELECT -- columns_scope avoids the same
     #: trap the same way, for a table's own single-object fetch.
     TABLE_STATS = "table_stats"
-    #: A schema's pipes' load history (bounded by the "pipe history fetch
-    #: window" setting), sourced by a real SELECT against
+    #: A schema's pipes' *latest* load each (bounded by the "pipe history
+    #: fetch window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
     #: instance of the dual-source pattern TABLE_STATS established (see
     #: DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
     #: its own mirror table. Deliberately carries no object_kind, for exactly
     #: the same reason TABLE_STATS does not -- see that comment. Its own data
     #: barely changes on the ordinary CACHE_TTL cadence, so it carries a much
-    #: longer effective TTL -- see `scope_ttl` below.
+    #: longer effective TTL -- see `scope_ttl` below. Reduced to one row per
+    #: pipe in SQL (see queries.pipe_activity) -- a single pipe's own full
+    #: history is PIPE_ACTIVITY_HISTORY below, not this scope.
     PIPE_ACTIVITY = "pipe_activity"
+    #: One pipe's full ACCOUNT_USAGE.COPY_HISTORY backfill (bounded by the
+    #: "pipe history fetch window" setting, same as PIPE_ACTIVITY), scoped to
+    #: one pipe like PIPE_HISTORY below -- fetched lazily, only once that
+    #: pipe's detail view is open, so a schema full of pipes never pays for
+    #: more history than whichever pipes someone has actually looked at.
+    #: Unlike PIPE_HISTORY, no target-table resolution is needed to fetch
+    #: this: ACCOUNT_USAGE.COPY_HISTORY has an ordinary PIPE_NAME column.
+    PIPE_ACTIVITY_HISTORY = "pipe_activity_history"
     #: One pipe's near-real-time load history (the last 14 days -- Snowflake's
     #: own retention limit for the function backing it), sourced by a real
     #: SELECT against INFORMATION_SCHEMA.COPY_HISTORY. Scoped to one pipe like
@@ -132,6 +142,10 @@ class Scope:
                 return f"table_stats:{self.database}.{self.schema}"
             case ScopeKind.PIPE_ACTIVITY:
                 return f"pipe_activity:{self.database}.{self.schema}"
+            case ScopeKind.PIPE_ACTIVITY_HISTORY:
+                return (
+                    f"pipe_activity_history:{self.database}.{self.schema}.{self.table}"
+                )
             case ScopeKind.PIPE_HISTORY:
                 return f"pipe_history:{self.database}.{self.schema}.{self.table}"
             case ScopeKind.WAREHOUSES:
@@ -177,6 +191,13 @@ def pipe_activity_scope(database: str, schema: str) -> Scope:
     return Scope(ScopeKind.PIPE_ACTIVITY, database=database, schema=schema)
 
 
+def pipe_activity_history_scope(database: str, schema: str, pipe: str) -> Scope:
+    # `table` holds the pipe's name -- same reuse `pipe_history_scope` makes.
+    return Scope(
+        ScopeKind.PIPE_ACTIVITY_HISTORY, database=database, schema=schema, table=pipe
+    )
+
+
 def pipe_history_scope(database: str, schema: str, pipe: str) -> Scope:
     # `table` holds the pipe's name here -- the generic "one object this
     # scope narrows to" slot, the same reuse `columns_scope` makes for a
@@ -202,6 +223,7 @@ def roles_scope() -> Scope:
 #: cut exactly at 14, so this stays one day inside it.
 _TTL_OVERRIDES: dict[ScopeKind, float] = {
     ScopeKind.PIPE_ACTIVITY: 13 * 86400,
+    ScopeKind.PIPE_ACTIVITY_HISTORY: 13 * 86400,
 }
 
 

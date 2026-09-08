@@ -36,7 +36,6 @@ from snowcone.format import (
     format_bytes,
     format_timestamp_full,
     format_timestamp_minutes,
-    parse_timestamp,
 )
 from snowcone.models import ObjectKind, ObjectRef, Scope, pipe_activity_scope
 from snowcone.settings import CACHE_TTL, config
@@ -53,19 +52,6 @@ _HISTORY_COLUMNS = (
     "Target Table",
     "Filename",
 )
-
-
-def _is_more_recent(candidate: dict[str, Any], current: dict[str, Any]) -> bool:
-    """Whether `candidate`'s LAST_LOAD_TIME is later than `current`'s.
-
-    An unparseable/missing timestamp never displaces an existing pick, and
-    never blocks one either -- it just loses every comparison either way.
-    """
-    candidate_ts = parse_timestamp(candidate.get("LAST_LOAD_TIME"))
-    if candidate_ts is None:
-        return False
-    current_ts = parse_timestamp(current.get("LAST_LOAD_TIME"))
-    return current_ts is None or candidate_ts > current_ts
 
 
 #: Which merged-row field a tooltip-bearing column's full value comes from,
@@ -167,21 +153,15 @@ class PipeListView(CategoryView):
         self.ensure(self.scope, ttl)
         activity_scope = self.activity_scope()
         self.ensure(activity_scope, ttl)
-        # The cache holds one row per historical load (see
-        # queries.pipe_activity), not one per pipe -- reduced to each pipe's
-        # single most recent row here, in Python, rather than in SQL, since
-        # a single pipe's detail view needs the full history from the same
-        # scope. Keyed by PIPE_NAME so a missing/failed activity pass just
-        # means an empty dict here -- every row still renders from
-        # show_pipes alone.
-        activity_by_name: dict[str, dict[str, Any]] = {}
-        for row in self.repo.raw_rows(activity_scope):
-            name = row.get("PIPE_NAME")
-            if not name:
-                continue
-            current = activity_by_name.get(name)
-            if current is None or _is_more_recent(row, current):
-                activity_by_name[name] = row
+        # The cache already holds at most one row per pipe -- queries.
+        # pipe_activity's QUALIFY keeps only each pipe's latest load. Keyed
+        # by PIPE_NAME so a missing/failed activity pass just means an empty
+        # dict here -- every row still renders from show_pipes alone.
+        activity_by_name: dict[str, dict[str, Any]] = {
+            name: row
+            for row in self.repo.raw_rows(activity_scope)
+            if (name := row.get("PIPE_NAME"))
+        }
 
         status_table = self.query_one("#pipe-list-status", DataTable)
         status_table.clear()

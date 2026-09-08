@@ -112,6 +112,7 @@ class FakeGateway:
         roles: list[str] | None = None,
         table_stats: dict[tuple[str, str], list[Row]] | None = None,
         pipe_activity: dict[tuple[str, str], list[Row]] | None = None,
+        pipe_activity_history: dict[tuple[str, str, str], list[Row]] | None = None,
         pipe_history: dict[tuple[str, str, str, str], list[Row]] | None = None,
     ) -> None:
         self.databases = databases or []
@@ -125,6 +126,8 @@ class FakeGateway:
         # name would shadow them.
         self._table_stats = table_stats or {}
         self._pipe_activity = pipe_activity or {}
+        #: Keyed by (database, schema, pipe_name).
+        self._pipe_activity_history = pipe_activity_history or {}
         #: Keyed by (target_catalog, target_schema, target_table, pipe_name).
         self._pipe_history = pipe_history or {}
         #: Flip to simulate a warehouse-dependent query failing, e.g. "no
@@ -133,6 +136,9 @@ class FakeGateway:
         #: Flip to simulate the ACCOUNT_USAGE grant being missing, the other
         #: way pipe_activity's SELECT can fail beyond a missing warehouse.
         self.raise_on_pipe_activity = False
+        #: Flip to simulate pipe_activity_history's SELECT failing, same as
+        #: raise_on_pipe_activity above.
+        self.raise_on_pipe_activity_history = False
         #: Flip to simulate pipe_history's SELECT failing (e.g. no warehouse).
         self.raise_on_pipe_history = False
         #: Every call, so a test can assert *what was fetched*, not merely
@@ -343,6 +349,24 @@ class FakeGateway:
                 "operate on database 'SNOWFLAKE'"
             )
         return list(self._pipe_activity.get((database, schema), []))
+
+    def pipe_activity_history(
+        self,
+        database: str,
+        schema: str,
+        pipe: str,
+        fetch_days: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        key = (database, schema, pipe)
+        self.calls.append(("pipe_activity_history", (*key, fetch_days)))
+        if self.raise_on_pipe_activity_history:
+            raise RuntimeError(
+                "SQL access control error: Insufficient privileges to "
+                "operate on database 'SNOWFLAKE'"
+            )
+        return list(self._pipe_activity_history.get(key, []))
 
     def pipe_history(
         self,

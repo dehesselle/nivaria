@@ -265,7 +265,8 @@ _PIPE_ACTIVITY = TableSpec(
         "FIRST_ERROR_MESSAGE",
         "FIRST_ERROR_LINE_NUMBER",
     ),
-    # One row per historical load, not per pipe -- see queries.pipe_activity.
+    # One row per pipe (the QUALIFY in queries.pipe_activity keeps only the
+    # latest), not per historical load -- see ScopeKind.PIPE_ACTIVITY.
     key=(
         "PIPE_CATALOG_NAME",
         "PIPE_SCHEMA_NAME",
@@ -274,6 +275,28 @@ _PIPE_ACTIVITY = TableSpec(
         "LAST_LOAD_TIME",
     ),
     order_by=("PIPE_NAME", "LAST_LOAD_TIME"),
+)
+
+_PIPE_ACTIVITY_HISTORY = TableSpec(
+    name="account_usage_copy_history_detail",
+    columns=(
+        "PIPE_CATALOG_NAME",
+        "PIPE_SCHEMA_NAME",
+        "PIPE_NAME",
+        "FILE_NAME",
+        "FILE_SIZE",
+        "ROW_COUNT",
+        "STATUS",
+        "LAST_LOAD_TIME",
+        "TABLE_CATALOG_NAME",
+        "TABLE_SCHEMA_NAME",
+        "TABLE_NAME",
+        "FIRST_ERROR_MESSAGE",
+        "FIRST_ERROR_LINE_NUMBER",
+    ),
+    # _scope disambiguates by pipe -- same reasoning as _PIPE_HISTORY below.
+    key=("_scope", "FILE_NAME", "LAST_LOAD_TIME"),
+    order_by=("LAST_LOAD_TIME",),
 )
 
 _PIPE_HISTORY = TableSpec(
@@ -310,6 +333,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _TABLE_STATS
         case ScopeKind.PIPE_ACTIVITY:
             return _PIPE_ACTIVITY
+        case ScopeKind.PIPE_ACTIVITY_HISTORY:
+            return _PIPE_ACTIVITY_HISTORY
         case ScopeKind.PIPE_HISTORY:
             return _PIPE_HISTORY
         case ScopeKind.WAREHOUSES:

@@ -231,10 +231,11 @@ CREATE INDEX IF NOT EXISTS information_schema_tables_scope
 -- column set is NOT verified against a live account -- it is taken from
 -- Snowflake's published ACCOUNT_USAGE.COPY_HISTORY documentation only.
 --
--- One row per historical load, not per pipe: this backs both the "Pipes (n)"
--- list (which reduces it to the latest load per pipe in Python) and a single
--- pipe's detail view (which shows the whole history, merged with the
--- near-real-time information_schema_copy_history below).
+-- One row per pipe -- reduced from one row per historical load by a QUALIFY
+-- in queries.pipe_activity, keeping only each pipe's latest. This backs the
+-- "Pipes (n)" list and Repository.pipe_target_table's resolution, neither of
+-- which needs more than the newest row. A single pipe's own full history is
+-- account_usage_copy_history_detail below, fetched separately and lazily.
 CREATE TABLE IF NOT EXISTS account_usage_copy_history (
     PIPE_CATALOG_NAME       TEXT NOT NULL,
     PIPE_SCHEMA_NAME        TEXT NOT NULL,
@@ -256,6 +257,39 @@ CREATE TABLE IF NOT EXISTS account_usage_copy_history (
 );
 CREATE INDEX IF NOT EXISTS account_usage_copy_history_scope
     ON account_usage_copy_history(_scope);
+
+-- One pipe's full ACCOUNT_USAGE.COPY_HISTORY backfill (bounded by the "pipe
+-- history fetch window" setting, same source and window as
+-- account_usage_copy_history above, just not collapsed to the latest row).
+-- Scoped per pipe, like information_schema_copy_history below, and fetched
+-- just as lazily -- only once that pipe's detail view is open. This is a
+-- separate table rather than the same one under a different _scope value:
+-- account_usage_copy_history's primary key has no _scope column, since it
+-- never needed one before, so a row shared between that schema-wide scope
+-- and a per-pipe scope here would let whichever pass wrote it last steal its
+-- _scope tag out from under the other. This column set is likewise NOT
+-- verified against a live account.
+CREATE TABLE IF NOT EXISTS account_usage_copy_history_detail (
+    PIPE_CATALOG_NAME       TEXT,
+    PIPE_SCHEMA_NAME        TEXT,
+    PIPE_NAME               TEXT,
+    FILE_NAME               TEXT,
+    FILE_SIZE               INTEGER,
+    ROW_COUNT               INTEGER,
+    STATUS                  TEXT,
+    LAST_LOAD_TIME          TEXT,
+    TABLE_CATALOG_NAME      TEXT,
+    TABLE_SCHEMA_NAME       TEXT,
+    TABLE_NAME              TEXT,
+    FIRST_ERROR_MESSAGE     TEXT,
+    FIRST_ERROR_LINE_NUMBER INTEGER,
+    _scope                  TEXT    NOT NULL,
+    _generation             INTEGER NOT NULL,
+    _fetched_at             REAL    NOT NULL,
+    PRIMARY KEY (_scope, FILE_NAME, LAST_LOAD_TIME)
+);
+CREATE INDEX IF NOT EXISTS account_usage_copy_history_detail_scope
+    ON account_usage_copy_history_detail(_scope);
 
 -- One pipe's near-real-time load history (the last 14 days -- Snowflake's
 -- own retention limit for the function backing this), sourced via a real

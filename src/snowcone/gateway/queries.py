@@ -183,19 +183,29 @@ def table_stats(database: str) -> str:
 
 
 def pipe_activity(fetch_days: int) -> str:
-    """Every pipe's load history in a schema, back to `fetch_days` ago.
+    """Every pipe's *latest* load in a schema, back to `fetch_days` ago.
 
-    SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY, filtered to one schema's pipes --
-    one row per historical load, not collapsed to the latest: this is also
-    the backfill for a single pipe's detail view (`pipe_history_scope`),
-    which needs the full history, not just the newest row. `fetch_days`
-    comes from the "pipe history fetch window" setting, read fresh at fetch
-    time. Like `table_stats`, this needs a running warehouse; unlike it,
-    ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather than one built from the
-    database, so both filter values bind as ordinary `%s` parameters -- no
-    `quote_identifier` needed at all. It also needs IMPORTED PRIVILEGES on
-    the SNOWFLAKE database (or ACCOUNTADMIN); either gap just fails this one
-    scope, same as a missing warehouse does for `table_stats`.
+    SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY, filtered to one schema's pipes and
+    reduced to one row per pipe with QUALIFY -- this backs the "Pipes (n)"
+    list (which only ever wants each pipe's most recent load) and
+    `Repository.pipe_target_table`'s resolution, neither of which needs the
+    full history. Bounding this to one row per pipe, in SQL, is the whole
+    point: without it, a busy schema with hundreds of pipes and frequent
+    ingestion returns unboundedly many historical rows for a query that only
+    gets collapsed back down to one row per pipe in Python anyway (see
+    `pipe_list_view.py`) -- the first version of this query did exactly that,
+    and hung for minutes against a live account with ~400 pipes. A single
+    pipe's full history (for its own detail view) is `pipe_activity_history`
+    below instead -- lazy, per pipe, not part of this query.
+
+    `fetch_days` comes from the "pipe history fetch window" setting, read
+    fresh at fetch time. Like `table_stats`, this needs a running warehouse;
+    unlike it, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather than one
+    built from the database, so both filter values bind as ordinary `%s`
+    parameters -- no `quote_identifier` needed at all. It also needs
+    IMPORTED PRIVILEGES on the SNOWFLAKE database (or ACCOUNTADMIN); either
+    gap just fails this one scope, same as a missing warehouse does for
+    `table_stats`.
     """
     return (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
@@ -204,6 +214,32 @@ def pipe_activity(fetch_days: int) -> str:
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
+        f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        "QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1"
+    )
+
+
+def pipe_activity_history(fetch_days: int) -> str:
+    """One pipe's full ACCOUNT_USAGE load history, back to `fetch_days` ago.
+
+    The backfill half of a single pipe's detail view -- `pipe_activity`
+    above deliberately only keeps the latest row per pipe, so a pipe's own
+    "Load history" tab needs this instead, scoped to just that one pipe and
+    fetched lazily only once that pipe's view is opened (`PipeView`), never
+    eagerly for a whole schema. Unlike `pipe_history` (INFORMATION_SCHEMA's
+    table function, which has no PIPE_NAME argument and must resolve a
+    target table instead), ACCOUNT_USAGE.COPY_HISTORY already carries
+    PIPE_NAME as an ordinary column, so this needs no target-table
+    resolution at all -- just one more bound `%s` alongside `pipe_activity`'s
+    two.
+    """
+    return (
+        "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
+        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
+        "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
+        "FIRST_ERROR_LINE_NUMBER "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
+        "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
         f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP())"
     )
 

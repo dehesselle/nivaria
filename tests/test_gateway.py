@@ -242,6 +242,46 @@ def test_pipe_activity_binds_database_and_schema_as_parameters() -> None:
     assert rows[0]["PIPE_NAME"] == "MY_PIPE"
 
 
+def test_pipe_activity_history_binds_database_schema_and_pipe_as_parameters() -> None:
+    """The per-pipe backfill: same source as pipe_activity, plus a third
+    bound PIPE_NAME param instead of a QUALIFY reduction."""
+    gateway, connection, _ = make_gateway()
+    connection.columns = [
+        "PIPE_CATALOG_NAME",
+        "PIPE_SCHEMA_NAME",
+        "PIPE_NAME",
+        "FILE_NAME",
+        "FILE_SIZE",
+        "ROW_COUNT",
+        "STATUS",
+        "LAST_LOAD_TIME",
+        "TABLE_CATALOG_NAME",
+        "TABLE_SCHEMA_NAME",
+        "TABLE_NAME",
+    ]
+    connection.rows = [
+        (
+            "MYDB",
+            "PUBLIC",
+            "MY_PIPE",
+            "data/orders_1.csv.gz",
+            1024,
+            42,
+            "Loaded",
+            "2026-01-02T03:04:05+00:00",
+            "MYDB",
+            "PUBLIC",
+            "ORDERS",
+        )
+    ]
+    rows = gateway.pipe_activity_history("MYDB", "PUBLIC", "MY_PIPE", 90)
+    statement, params = connection.executed[-1]
+    assert "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY" in statement
+    assert "QUALIFY" not in statement
+    assert params == ("MYDB", "PUBLIC", "MY_PIPE")
+    assert rows[0]["PIPE_NAME"] == "MY_PIPE"
+
+
 def test_pipe_history_binds_pipe_name_and_qualifies_the_target_table() -> None:
     gateway, connection, _ = make_gateway()
     connection.columns = [

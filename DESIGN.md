@@ -263,24 +263,45 @@ instead of a SHOW result mapped onto that vocabulary.
 
 `information_schema_tables` (`LAST_DDL`, `LAST_ALTERED` on the "Tables (n)"
 list) is the first instance of this. `account_usage_copy_history` (Rows,
-Size, Loaded, Status, Target Table, Filename on the "Pipes (n)" list, and the
-backfill half of a single pipe's own "Load history") is the second: every
-pipe's load history in a schema, read from `SNOWFLAKE.ACCOUNT_USAGE.
-COPY_HISTORY` rather than `INFORMATION_SCHEMA` — the latter's `COPY_HISTORY`
-table function requires a `TABLE_NAME` argument with no schema-wide form,
-which would mean one round trip per distinct target table (worst case one
-per pipe) every time the list opens, against the round-trips-dominate
-principle below. `ACCOUNT_USAGE.COPY_HISTORY` is an ordinary view filterable
-by `PIPE_CATALOG_NAME`/`PIPE_SCHEMA_NAME`, so one query covers a whole
-schema's pipes at once, the same shape `table_stats` uses for tables — bound
-by the "pipe history fetch window" setting (default 90 days) rather than a
-fixed lookback, and *not* collapsed to one row per pipe: the same cached
-history backs both the list (which reduces it to each pipe's latest row, in
-Python) and a single pipe's detail view (which needs the full history). The
-trade-off: it needs `IMPORTED PRIVILEGES` on the `SNOWFLAKE` database (or
-`ACCOUNTADMIN`) and can lag real activity by up to ~2 hours — both are just
-another way this one scope degrades blank, the same as a missing warehouse
-does for `table_stats`, so nothing new had to be built to accommodate them.
+Size, Loaded, Status, Target Table, Filename on the "Pipes (n)" list) is the
+second: each pipe's *latest* load in a schema, read from `SNOWFLAKE.
+ACCOUNT_USAGE.COPY_HISTORY` rather than `INFORMATION_SCHEMA` — the latter's
+`COPY_HISTORY` table function requires a `TABLE_NAME` argument with no
+schema-wide form, which would mean one round trip per distinct target table
+(worst case one per pipe) every time the list opens, against the
+round-trips-dominate principle below. `ACCOUNT_USAGE.COPY_HISTORY` is an
+ordinary view filterable by `PIPE_CATALOG_NAME`/`PIPE_SCHEMA_NAME`, so one
+query covers a whole schema's pipes at once, the same shape `table_stats`
+uses for tables — bound by the "pipe history fetch window" setting (default
+90 days) rather than a fixed lookback, and reduced to one row per pipe with
+a `QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME
+DESC) = 1`, since the list only ever wants each pipe's most recent load and
+so does `Repository.pipe_target_table`'s resolution (below). Collapsing this
+in SQL, not just in Python the way the list already did, is the fix for a
+real incident: on an account with ~400 pipes and frequent ingestion, the
+unreduced query returned unboundedly many historical rows — one per load,
+over 90 days, across every pipe in the schema — and the app hung for
+minutes fetching and materializing all of them just to throw away everything
+but the newest per pipe a moment later. The trade-off that remains: it needs
+`IMPORTED PRIVILEGES` on the `SNOWFLAKE` database (or `ACCOUNTADMIN`) and can
+lag real activity by up to ~2 hours — both are just another way this one
+scope degrades blank, the same as a missing warehouse does for `table_stats`,
+so nothing new had to be built to accommodate them.
+
+A single pipe's own "Load history" needs more than the latest row, so it
+does *not* share this scope — it has its own, `pipe_activity_history`,
+querying the same view with the same fetch-window bound but filtered to one
+`PIPE_NAME` instead of `QUALIFY`-reduced, and — like `information_schema_
+copy_history` below — fetched lazily, only once that pipe's detail view is
+open, never eagerly for every pipe in the schema. Unlike that
+`INFORMATION_SCHEMA` sibling, this needs no target-table resolution first:
+`ACCOUNT_USAGE.COPY_HISTORY` already carries `PIPE_NAME` as an ordinary
+column. It also gets its own mirror table (`account_usage_copy_history_
+detail`) rather than reusing `account_usage_copy_history` under a different
+`_scope` value — that table's primary key predates having two different
+scopes write into it and does not include `_scope`, so a row visible to both
+the schema-wide latest-per-pipe scope and a per-pipe backfill scope would let
+whichever pass wrote it last silently steal its `_scope` tag from the other.
 
 `FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` were added later, directly
 onto both `account_usage_copy_history` and `information_schema_copy_history`
@@ -299,7 +320,9 @@ answer.
 
 `information_schema_copy_history` is the third instance, and the first to
 pair with another SELECT-backed scope rather than stand alone: a single
-pipe's "Load history" merges it with `account_usage_copy_history` above.
+pipe's "Load history" merges it with `account_usage_copy_history_detail`
+above (that pipe's own backfill, not the schema-wide `account_usage_copy_
+history` the list uses).
 `INFORMATION_SCHEMA.COPY_HISTORY` gives near-real-time data but only for the
 last 14 days (Snowflake's own retention limit for that function, not a
 setting), and awkwardly requires a `TABLE_NAME` argument rather than a
@@ -307,10 +330,10 @@ setting), and awkwardly requires a `TABLE_NAME` argument rather than a
 history directly. Rather than parse the pipe's target table out of its COPY
 INTO definition text, `Repository.pipe_target_table` reads it straight off
 whatever `account_usage_copy_history` already has cached for that pipe:
-Snowflake's own resolution, already being fetched for the backfill anyway,
-not a guess. That is an opportunistic read of a sibling scope's cache, the
-same pattern `_fan_out_columns_by_schema` already uses for `SCHEMAS` — not a
-hard dependency between scopes.
+Snowflake's own resolution, already being fetched for the "Pipes (n)" list
+anyway, not a guess. That is an opportunistic read of a sibling scope's
+cache, the same pattern `_fan_out_columns_by_schema` already uses for
+`SCHEMAS` — not a hard dependency between scopes.
 
 A pipe that has never loaded anything has no cached activity row to resolve
 a target from, and that is a normal, *permanent* state for plenty of real
@@ -340,13 +363,13 @@ regardless, so shrinking the display window later needs no refetch.
 
 #### A scope whose data does not age on the ordinary cadence
 
-`account_usage_copy_history`'s backfill barely needs re-fetching at all: once
-`INFORMATION_SCHEMA.COPY_HISTORY` covers the live last-14-days window, the
-only thing a re-fetch of the `ACCOUNT_USAGE` side can surface is data that has
-freshly aged *past* that 14-day window — which only moves once a day. Ordinary
-scopes just use whatever `CACHE_TTL` the sweep passes in, but forcing this one
-onto the same cadence would repeat the same round trip every sweep tick for no
-new data.
+`account_usage_copy_history_detail`'s backfill barely needs re-fetching at
+all: once `INFORMATION_SCHEMA.COPY_HISTORY` covers the live last-14-days
+window, the only thing a re-fetch of the `ACCOUNT_USAGE` side can surface is
+data that has freshly aged *past* that 14-day window — which only moves once
+a day. Ordinary scopes just use whatever `CACHE_TTL` the sweep passes in, but
+forcing this one onto the same cadence would repeat the same round trip every
+sweep tick for no new data.
 
 Rather than build a new "background job that knows to skip itself" concept,
 `models.scope_ttl(scope, default)` generalizes the existing TTL check itself:
@@ -359,11 +382,22 @@ It only ever *lengthens* the caller's TTL, never shortens it, so an
 aggressively short `CACHE_TTL` setting is still honoured for every scope with
 no override.
 
-`PIPE_ACTIVITY`'s own override is 13 days, one short of
+`PIPE_ACTIVITY_HISTORY`'s own override is 13 days, one short of
 `INFORMATION_SCHEMA.COPY_HISTORY`'s 14-day retention rather than the full 14:
 the two sources must jointly cover every day with no gap between them, and
 `ACCOUNT_USAGE`'s own ingestion lag (up to a few hours) eats into a boundary
 cut exactly at 14, so the override stays one day inside it for margin.
+`PIPE_ACTIVITY` (the schema-wide latest-per-pipe snapshot the "Pipes (n)"
+list reads) carries the same 13-day override, inherited from before this
+scope was split in two rather than freshly justified by the argument above:
+its own data changes every time any pipe in the schema loads something new,
+which on a busy account is not rare, so the list's own Loaded/Status columns
+can now go up to 13 days without a refetch even though nothing about the
+`INFORMATION_SCHEMA` coverage argument requires that for *this* scope. That
+was already true before the split -- `PipeListView` never merged in the
+near-real-time source the way `PipeView` does -- so this isn't a regression,
+but it's worth revisiting on its own if the list turns out to need fresher
+data than that.
 
 One landmine worth naming for whoever builds the next one: `object_kind` on
 a `Scope` is not a general "this is about tables" marker — it specifically
@@ -1042,13 +1076,18 @@ Three things about it are worth knowing from inside snowcone:
 - `information_schema_tables`'s `LAST_DDL`/`LAST_ALTERED` columns are
   documentation-only, unverified against a live account, same caveat as the
   two gaps above.
-- `account_usage_copy_history`'s columns are likewise documentation-only,
-  unverified against a live account. It additionally needs `IMPORTED
-  PRIVILEGES` on the `SNOWFLAKE` database (or `ACCOUNTADMIN`) and can lag
-  real pipe activity by up to ~2 hours — neither has been confirmed against a
-  live account either, so the "Pipes (n)" list's activity columns, and a
-  single pipe's older load history, may render blank on an account without
-  that grant even though everything else here works.
+- `account_usage_copy_history`'s and `account_usage_copy_history_detail`'s
+  columns are likewise documentation-only, unverified against a live
+  account. They additionally need `IMPORTED PRIVILEGES` on the `SNOWFLAKE`
+  database (or `ACCOUNTADMIN`) and can lag real pipe activity by up to ~2
+  hours — neither has been confirmed against a live account either, so the
+  "Pipes (n)" list's activity columns, and a single pipe's older load
+  history, may render blank on an account without that grant even though
+  everything else here works. The `QUALIFY ROW_NUMBER() OVER (PARTITION BY
+  PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1` that reduces
+  `account_usage_copy_history` to one row per pipe is likewise unverified
+  against a live account -- confirmed only by a hung, hand-tested account
+  with the *unreduced* query, not by re-running the reduced one against it.
 - `information_schema_copy_history`'s columns are likewise documentation-only
   and unverified, including the shape of its `PIPE_NAME` output column
   (assumed bare/unqualified for the `WHERE PIPE_NAME = %s` filter in

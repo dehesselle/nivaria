@@ -87,9 +87,10 @@ def test_table_stats_targets_information_schema_tables_with_bound_params() -> No
 def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() -> None:
     """Unlike table_stats, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather
     than one built from the database, so both filter values bind as ordinary
-    params -- no quote_identifier involved at all. No QUALIFY here any more:
-    the full history is fetched, not collapsed to the latest row, since a
-    single pipe's detail view needs it (see repository._PIPE_ACTIVITY)."""
+    params -- no quote_identifier involved at all. QUALIFY collapses the
+    result to one row per pipe: the list only ever wants each pipe's latest
+    load, and a single pipe's full history is pipe_activity_history instead
+    (see repository._PIPE_ACTIVITY / _PIPE_ACTIVITY_HISTORY)."""
     assert queries.pipe_activity(90) == (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
         "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
@@ -97,6 +98,22 @@ def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() ->
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
+        "AND LAST_LOAD_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1"
+    )
+
+
+def test_pipe_activity_history_targets_one_pipe_with_bound_params() -> None:
+    """The per-pipe backfill for a single pipe's detail view: same source and
+    window as pipe_activity, but filtered to one PIPE_NAME instead of
+    QUALIFY-reduced, since it needs the full history, not just the latest."""
+    assert queries.pipe_activity_history(90) == (
+        "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
+        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
+        "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
+        "FIRST_ERROR_LINE_NUMBER "
+        "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
+        "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
         "AND LAST_LOAD_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP())"
     )
 

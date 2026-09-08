@@ -12,6 +12,7 @@ from snowcone.models import (
     columns_scope,
     databases_scope,
     objects_scope,
+    pipe_activity_history_scope,
     pipe_activity_scope,
     roles_scope,
     schemas_scope,
@@ -443,6 +444,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _DATABASES,
         _OBJECT_TABLES,
         _PIPE_ACTIVITY,
+        _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
         _SCHEMAS,
         _TABLE_STATS,
@@ -454,6 +456,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _COLUMNS,
         _TABLE_STATS,
         _PIPE_ACTIVITY,
+        _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
         *_OBJECT_TABLES.values(),
     ]
@@ -577,10 +580,15 @@ def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["TABLE_NAME"] == "ORDERS"
 
 
-def test_pipe_activity_keeps_every_historical_load_not_just_the_latest(repo) -> None:
-    """The PK widened from (pipe) to (pipe, FILE_NAME, LAST_LOAD_TIME) so a
-    single pipe's detail view can show its full history, not just the most
-    recent row the "Pipes (n)" list needs -- see queries.pipe_activity."""
+def test_pipe_activity_table_can_hold_more_than_one_row_per_pipe(repo) -> None:
+    """The mirror table's PK is (pipe, FILE_NAME, LAST_LOAD_TIME), not just
+    (pipe) -- queries.pipe_activity's QUALIFY means only one row per pipe is
+    ever fetched in practice now, but the wider key is still what lets a pass
+    that advances a pipe's latest load insert the new row under its own key
+    rather than collide with the previous one, which finish_pass then sweeps
+    away as stale. (A single pipe's full history lives in
+    account_usage_copy_history_detail instead -- see _PIPE_ACTIVITY_HISTORY.)
+    """
     scope = pipe_activity_scope("MYDB", "PUBLIC")
     load(
         repo,
@@ -619,6 +627,69 @@ def test_pipe_activity_keeps_every_historical_load_not_just_the_latest(repo) -> 
         "orders_1.csv.gz",
         "orders_2.csv.gz",
     }
+
+
+def test_pipe_activity_history_columns_round_trip(repo) -> None:
+    """The per-pipe backfill mirror -- same column shape as account_usage_
+    copy_history, same unverified-against-a-live-account caveat."""
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "MY_PIPE",
+                "FILE_NAME": "orders_1.csv.gz",
+                "FILE_SIZE": 1024,
+                "ROW_COUNT": 42,
+                "STATUS": "Loaded",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+                "TABLE_CATALOG_NAME": "MYDB",
+                "TABLE_SCHEMA_NAME": "PUBLIC",
+                "TABLE_NAME": "ORDERS",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["FILE_NAME"] == "orders_1.csv.gz"
+    assert stored["STATUS"] == "Loaded"
+
+
+def test_pipe_activity_history_is_scoped_per_pipe_not_per_schema(repo) -> None:
+    """Unlike account_usage_copy_history (one _scope per schema),
+    account_usage_copy_history_detail is one _scope per pipe -- a row cached
+    for one pipe must not be visible from another pipe's scope."""
+    load(
+        repo,
+        pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_OTHER"),
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "LOAD_OTHER",
+                "FILE_NAME": "other.csv.gz",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+            }
+        ],
+    )
+    assert (
+        repo.raw_rows(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
+        == []
+    )
+
+
+def test_pipe_activity_historys_ttl_override_outlasts_the_ordinary_sweep_interval(
+    repo,
+) -> None:
+    """Same override, same reasoning, as PIPE_ACTIVITY's own test above."""
+    ordinary = databases_scope()
+    history = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    load(repo, ordinary, db_rows("ACME"))
+    load(repo, history, [])
+    time.sleep(0.02)
+    assert repo.stale_scopes(0.01, [ordinary, history]) == [ordinary]
 
 
 def test_pipe_target_table_is_none_with_no_activity_cached(repo) -> None:

@@ -17,6 +17,7 @@ from snowcone.models import (
     ObjectRef,
     columns_scope,
     objects_scope,
+    pipe_activity_history_scope,
     pipe_activity_scope,
     pipe_history_scope,
     table_stats_scope,
@@ -160,6 +161,37 @@ def put_pipe_activity(repo: Repository, pipe: str, **extra) -> None:
     }
     row.update(extra)
     scope = pipe_activity_scope("MYDB", "PUBLIC")
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+
+
+def put_pipe_activity_history(repo: Repository, pipe: str, **extra) -> None:
+    """Seeds a single pipe's ACCOUNT_USAGE backfill scope -- what PipeView's
+    Load History tab actually merges, unlike the schema-wide put_pipe_activity
+    above (which PipeListView reads, and which PipeView only reads for target
+    resolution now)."""
+    row = {
+        "PIPE_CATALOG_NAME": "MYDB",
+        "PIPE_SCHEMA_NAME": "PUBLIC",
+        "PIPE_NAME": pipe,
+        "FILE_NAME": "orders_1.csv.gz",
+        "FILE_SIZE": 1024,
+        "ROW_COUNT": 42,
+        "STATUS": "Loaded",
+        "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+        "TABLE_CATALOG_NAME": "MYDB",
+        "TABLE_SCHEMA_NAME": "PUBLIC",
+        "TABLE_NAME": "ORDERS",
+    }
+    row.update(extra)
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", pipe)
     existing = repo.raw_rows(scope)
     load(
         repo,
@@ -465,7 +497,8 @@ def _days_ago(days: float) -> str:
 
 async def test_a_pipes_history_table_lists_rows_from_both_sources(repo) -> None:
     ref = put_pipe(repo, "LOAD_ORDERS")
-    put_pipe_activity(
+    put_pipe_activity(repo, "LOAD_ORDERS")  # resolves the target table
+    put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         FILE_NAME="orders_1.csv.gz",
@@ -492,10 +525,10 @@ async def test_a_pipes_history_table_lists_rows_from_both_sources(repo) -> None:
 
 
 async def test_a_pipes_history_ignores_another_pipes_activity_rows(repo) -> None:
-    """account_usage_copy_history holds every pipe's rows for the schema
-    together -- a single pipe's view must filter to its own name."""
+    """account_usage_copy_history_detail is scoped per pipe -- a row cached
+    for another pipe must never leak into this one's history table."""
     ref = put_pipe(repo, "LOAD_ORDERS")
-    put_pipe_activity(repo, "LOAD_OTHER", FILE_NAME="other.csv.gz")
+    put_pipe_activity_history(repo, "LOAD_OTHER", FILE_NAME="other.csv.gz")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
@@ -510,7 +543,8 @@ async def test_the_near_real_time_source_wins_on_an_overlapping_row(repo) -> Non
     than duplicated."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     when = _days_ago(10)
-    put_pipe_activity(
+    put_pipe_activity(repo, "LOAD_ORDERS")  # resolves the target table
+    put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         FILE_NAME="orders_1.csv.gz",
@@ -541,7 +575,7 @@ async def test_rows_older_than_the_show_window_are_hidden_but_stay_cached(repo) 
     config.set(PIPE_HISTORY_SHOW_DAYS, 30)
     ref = put_pipe(repo, "LOAD_ORDERS")
     old = datetime.now().astimezone() - timedelta(days=31)
-    put_pipe_activity(
+    put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         FILE_NAME="ancient.csv.gz",
@@ -554,7 +588,7 @@ async def test_rows_older_than_the_show_window_are_hidden_but_stay_cached(repo) 
         await pilot.pause()
         assert pane.query_one("#pipe-history", DataTable).row_count == 0
     # Still in the cache -- only hidden from this paint.
-    assert repo.raw_rows(pipe_activity_scope("MYDB", "PUBLIC"))
+    assert repo.raw_rows(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
 
 
 async def test_the_highlighted_rows_error_shows_in_the_history_detail_panel(
@@ -563,7 +597,7 @@ async def test_the_highlighted_rows_error_shows_in_the_history_detail_panel(
     """Too long for a table column -- shown below the table instead, for
     whichever row the cursor is currently on."""
     ref = put_pipe(repo, "LOAD_ORDERS")
-    put_pipe_activity(
+    put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         LAST_LOAD_TIME=_days_ago(1),
@@ -585,7 +619,7 @@ async def test_a_row_with_no_error_leaves_the_history_detail_panel_hidden(
     repo,
 ) -> None:
     ref = put_pipe(repo, "LOAD_ORDERS")
-    put_pipe_activity(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
+    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
@@ -599,7 +633,7 @@ async def test_highlighting_a_different_history_row_updates_the_detail_panel(
     repo,
 ) -> None:
     ref = put_pipe(repo, "LOAD_ORDERS")
-    put_pipe_activity(
+    put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         FILE_NAME="bad.csv.gz",
@@ -607,7 +641,7 @@ async def test_highlighting_a_different_history_row_updates_the_detail_panel(
         FIRST_ERROR_MESSAGE="boom",
         FIRST_ERROR_LINE_NUMBER=1,
     )
-    put_pipe_activity(
+    put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         FILE_NAME="good.csv.gz",
@@ -635,7 +669,7 @@ async def test_a_repaint_does_not_leave_a_stale_error_showing(repo) -> None:
     whatever is actually on that row now, not trust the last message."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     when = _days_ago(1)
-    put_pipe_activity(
+    put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         LAST_LOAD_TIME=when,
@@ -650,8 +684,8 @@ async def test_a_repaint_does_not_leave_a_stale_error_showing(repo) -> None:
         assert pane.query_one("#pipe-history-detail", Static).display
 
         # Same file/time key, now with no error -- overwrites the row.
-        put_pipe_activity(repo, "LOAD_ORDERS", LAST_LOAD_TIME=when)
-        pane.cache_updated(pipe_activity_scope("MYDB", "PUBLIC"))
+        put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=when)
+        pane.cache_updated(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
         await pilot.pause()
         assert not pane.query_one("#pipe-history-detail", Static).display
 
