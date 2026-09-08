@@ -315,6 +315,63 @@ CREATE TABLE IF NOT EXISTS information_schema_copy_history (
 CREATE INDEX IF NOT EXISTS information_schema_copy_history_scope
     ON information_schema_copy_history(_scope);
 
+-- Every grant on one schema or one database (schema-level and database-level
+-- rows share this one physical table, disambiguated by _scope, same shape
+-- either way -- SHOW GRANTS ON SCHEMA/DATABASE both return this exact column
+-- set). Metadata layer, needs no warehouse. There is no natural single-
+-- column key (a grantee can hold several distinct privileges on the same
+-- object, and the same privilege/grantee pair can recur across separate
+-- grant statements), so the composite key below is a best-effort choice,
+-- same as account_usage_copy_history_detail's -- unverified against a live
+-- account for uniqueness at scale.
+--
+-- granted_by_role_type is a speculative companion to granted_by, mirroring
+-- the owner_role_type column every other SHOW table already carries --
+-- unconfirmed against a live account; if SHOW GRANTS does not return it,
+-- ingest just leaves it NULL, same as any other unreturned column.
+CREATE TABLE IF NOT EXISTS show_grants (
+    created_on           TEXT,
+    privilege             TEXT,
+    granted_on            TEXT,
+    name                  TEXT,
+    granted_to            TEXT,
+    grantee_name          TEXT,
+    grant_option          TEXT,
+    granted_by            TEXT,
+    granted_by_role_type  TEXT,
+    _scope                TEXT    NOT NULL,
+    _generation           INTEGER NOT NULL,
+    _fetched_at           REAL    NOT NULL,
+    PRIMARY KEY (_scope, granted_to, grantee_name, privilege, granted_on, name, granted_by, created_on)
+);
+CREATE INDEX IF NOT EXISTS show_grants_scope ON show_grants(_scope);
+
+-- Tags applied to one schema or one database (schema-level and database-
+-- level rows share this table, disambiguated by _scope). Sourced via a real
+-- SELECT against INFORMATION_SCHEMA.TAG_REFERENCES -- needs a running
+-- warehouse, degrades blank without one, same as every SELECT-backed table
+-- above. Deliberately not SHOW TAGS IN SCHEMA/DATABASE, which lists tag
+-- *objects defined inside* that container rather than tags *applied to* it
+-- -- the wrong semantics for this feature. Also deliberately not
+-- ACCOUNT_USAGE.TAG_REFERENCES: that needs IMPORTED PRIVILEGES on SNOWFLAKE
+-- (or ACCOUNTADMIN) and can lag ~2 hours, both unnecessary here since
+-- INFORMATION_SCHEMA.TAG_REFERENCES already covers a single object with no
+-- extra privilege and near-real-time data. Column set is documentation-only,
+-- unverified against a live account.
+CREATE TABLE IF NOT EXISTS information_schema_tag_references (
+    TAG_DATABASE TEXT,
+    TAG_SCHEMA   TEXT,
+    TAG_NAME     TEXT,
+    TAG_VALUE    TEXT,
+    DOMAIN       TEXT,
+    _scope       TEXT    NOT NULL,
+    _generation  INTEGER NOT NULL,
+    _fetched_at  REAL    NOT NULL,
+    PRIMARY KEY (_scope, TAG_DATABASE, TAG_SCHEMA, TAG_NAME)
+);
+CREATE INDEX IF NOT EXISTS information_schema_tag_references_scope
+    ON information_schema_tag_references(_scope);
+
 -- The freshness ledger: one row per separately-refreshable scope. This is
 -- what makes a refresh surgical rather than "fetch everything again".
 CREATE TABLE IF NOT EXISTS cache_entry (

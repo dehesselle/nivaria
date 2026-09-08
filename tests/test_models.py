@@ -7,6 +7,7 @@ from snowcone.models import (
     ScopeKind,
     columns_scope,
     databases_scope,
+    grants_scope,
     objects_scope,
     pipe_activity_history_scope,
     pipe_activity_scope,
@@ -15,6 +16,7 @@ from snowcone.models import (
     schemas_scope,
     scope_ttl,
     table_stats_scope,
+    tag_references_scope,
     warehouses_scope,
 )
 
@@ -125,6 +127,34 @@ def test_pipe_history_scope_key() -> None:
 def test_pipe_history_scope_carries_no_object_kind() -> None:
     """Same regression as table_stats -- see that test's comment."""
     assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").object_kind is None
+
+
+def test_a_schema_level_grants_scope_and_a_database_level_grants_scope_have_different_keys() -> (
+    None
+):
+    schema_level = grants_scope("MYDB", "PUBLIC")
+    database_level = grants_scope("MYDB")
+    assert schema_level.key == "grants:MYDB.PUBLIC"
+    assert database_level.key == "grants:MYDB"
+    assert schema_level != database_level
+
+
+def test_a_schema_level_tag_references_scope_and_a_database_level_one_have_different_keys() -> (
+    None
+):
+    schema_level = tag_references_scope("MYDB", "PUBLIC")
+    database_level = tag_references_scope("MYDB")
+    assert schema_level.key == "tag_references:MYDB.PUBLIC"
+    assert database_level.key == "tag_references:MYDB"
+    assert schema_level != database_level
+
+
+def test_grants_and_tag_references_scopes_carry_no_object_kind() -> None:
+    """Same regression as table_stats -- see that test's comment."""
+    assert grants_scope("MYDB", "PUBLIC").object_kind is None
+    assert grants_scope("MYDB").object_kind is None
+    assert tag_references_scope("MYDB", "PUBLIC").object_kind is None
+    assert tag_references_scope("MYDB").object_kind is None
 
 
 def test_scope_ttl_leaves_an_ordinary_scope_untouched() -> None:

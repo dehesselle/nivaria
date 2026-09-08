@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from textual.message import Message
 
-from snowcone.models import ObjectRef, Scope
+from snowcone.models import ObjectRef, SchemaRef, Scope
 
 
 class CacheUpdated(Message):
@@ -48,4 +48,20 @@ class CategorySelected(Message):
 
     def __init__(self, scope: Scope) -> None:
         self.scope = scope
+        super().__init__()
+
+
+class SchemaSelected(Message):
+    """A schema node is under the cursor."""
+
+    def __init__(self, ref: SchemaRef) -> None:
+        self.ref = ref
+        super().__init__()
+
+
+class DatabaseSelected(Message):
+    """A database node is under the cursor."""
+
+    def __init__(self, database: str) -> None:
+        self.database = database
         super().__init__()

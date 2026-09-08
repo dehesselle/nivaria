@@ -96,6 +96,22 @@ class SnowflakeGateway(Protocol):
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
 
+    def show_grants_on_schema(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
+    def show_grants_on_database(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
+    def tag_references_schema(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
+    def tag_references_database(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
     def pipe_activity(
         self,
         database: str,
@@ -287,6 +303,40 @@ class PoolGateway:
         return self._fetch(
             queries.table_stats(database),
             (schema, "BASE TABLE"),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def show_grants_on_schema(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.show_grants_on_schema(database, schema),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def show_grants_on_database(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.show_grants_on_database(database),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def tag_references_schema(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.tag_references(database),
+            (f"{database}.{schema}", "SCHEMA"),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def tag_references_database(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.tag_references(database),
+            (database, "DATABASE"),
             allow_reconnect=allow_reconnect,
         )
 

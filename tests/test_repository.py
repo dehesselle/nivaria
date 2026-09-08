@@ -442,12 +442,14 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
     from snowcone.cache.repository import (
         _COLUMNS,
         _DATABASES,
+        _GRANTS,
         _OBJECT_TABLES,
         _PIPE_ACTIVITY,
         _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
         _SCHEMAS,
         _TABLE_STATS,
+        _TAG_REFERENCES,
     )
 
     specs = [
@@ -458,6 +460,8 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _PIPE_ACTIVITY,
         _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
+        _GRANTS,
+        _TAG_REFERENCES,
         *_OBJECT_TABLES.values(),
     ]
     with repo._db.connect() as connection:
@@ -578,6 +582,100 @@ def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["FILE_NAME"] == "orders_1.csv.gz"
     assert stored["STATUS"] == "Loaded"
     assert stored["TABLE_NAME"] == "ORDERS"
+
+
+def test_grants_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
+    this shape comes from Snowflake's published SHOW GRANTS documentation,
+    not a probed live account -- see DESIGN.md "Known gaps"."""
+    from snowcone.models import grants_scope
+
+    scope = grants_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "created_on": "2026-01-01 00:00:00",
+                "privilege": "USAGE",
+                "granted_on": "SCHEMA",
+                "name": "MYDB.PUBLIC",
+                "granted_to": "DATABASE ROLE",
+                "grantee_name": "APP_ROLE",
+                "grant_option": "false",
+                "granted_by": "SYSADMIN",
+                "granted_by_role_type": "ROLE",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["granted_to"] == "DATABASE ROLE"
+    assert stored["privilege"] == "USAGE"
+
+
+def test_a_schema_level_and_a_database_level_grants_scope_do_not_collide(repo) -> None:
+    """The same physical table holds both -- _scope in the key must actually
+    keep them apart."""
+    from snowcone.models import grants_scope
+
+    schema_level = grants_scope("MYDB", "PUBLIC")
+    database_level = grants_scope("MYDB")
+    load(
+        repo,
+        schema_level,
+        [
+            {
+                "privilege": "USAGE",
+                "granted_on": "SCHEMA",
+                "name": "MYDB.PUBLIC",
+                "granted_to": "ROLE",
+                "grantee_name": "SCHEMA_ROLE",
+            }
+        ],
+    )
+    load(
+        repo,
+        database_level,
+        [
+            {
+                "privilege": "USAGE",
+                "granted_on": "DATABASE",
+                "name": "MYDB",
+                "granted_to": "ROLE",
+                "grantee_name": "DATABASE_ROLE",
+            }
+        ],
+    )
+    assert [r["grantee_name"] for r in repo.raw_rows(schema_level)] == ["SCHEMA_ROLE"]
+    assert [r["grantee_name"] for r in repo.raw_rows(database_level)] == [
+        "DATABASE_ROLE"
+    ]
+
+
+def test_tag_references_columns_round_trip_but_are_unverified(repo) -> None:
+    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
+    this shape comes from Snowflake's published INFORMATION_SCHEMA.
+    TAG_REFERENCES documentation, not a probed live account -- see DESIGN.md
+    "Known gaps"."""
+    from snowcone.models import tag_references_scope
+
+    scope = tag_references_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "TAG_DATABASE": "MYDB",
+                "TAG_SCHEMA": "TAGS",
+                "TAG_NAME": "COST_CENTER",
+                "TAG_VALUE": "ENG",
+                "DOMAIN": "SCHEMA",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["TAG_NAME"] == "COST_CENTER"
+    assert stored["TAG_VALUE"] == "ENG"
 
 
 def test_pipe_activity_table_can_hold_more_than_one_row_per_pipe(repo) -> None:

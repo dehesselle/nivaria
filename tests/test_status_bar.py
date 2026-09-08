@@ -197,6 +197,7 @@ async def test_key_bindings_are_still_shown(repo) -> None:
         keys = {key.key for key in app.screen.query(FooterKey)}
     assert "f9" in keys
     assert "slash" in keys
+    assert "f5" in keys
 
 
 async def test_the_picker_and_quit_shortcuts_are_hidden_from_the_footer(

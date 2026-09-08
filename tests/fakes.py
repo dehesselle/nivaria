@@ -114,6 +114,10 @@ class FakeGateway:
         pipe_activity: dict[tuple[str, str], list[Row]] | None = None,
         pipe_activity_history: dict[tuple[str, str, str], list[Row]] | None = None,
         pipe_history: dict[tuple[str, str, str, str], list[Row]] | None = None,
+        grants_schema: dict[tuple[str, str], list[Row]] | None = None,
+        grants_database: dict[str, list[Row]] | None = None,
+        tag_references_schema: dict[tuple[str, str], list[Row]] | None = None,
+        tag_references_database: dict[str, list[Row]] | None = None,
     ) -> None:
         self.databases = databases or []
         self.schemas = schemas or {}
@@ -130,6 +134,10 @@ class FakeGateway:
         self._pipe_activity_history = pipe_activity_history or {}
         #: Keyed by (target_catalog, target_schema, target_table, pipe_name).
         self._pipe_history = pipe_history or {}
+        self._grants_schema = grants_schema or {}
+        self._grants_database = grants_database or {}
+        self._tag_references_schema = tag_references_schema or {}
+        self._tag_references_database = tag_references_database or {}
         #: Flip to simulate a warehouse-dependent query failing, e.g. "no
         #: active warehouse" -- table_stats is the first fetch that needs one.
         self.raise_on_table_stats = False
@@ -141,6 +149,11 @@ class FakeGateway:
         self.raise_on_pipe_activity_history = False
         #: Flip to simulate pipe_history's SELECT failing (e.g. no warehouse).
         self.raise_on_pipe_history = False
+        #: Flip to simulate tag_references' SELECT failing for lack of an
+        #: active warehouse -- show_grants_on_schema/_database need no such
+        #: flag, since SHOW GRANTS is metadata-layer like show_warehouses/
+        #: show_roles above.
+        self.raise_on_tag_references = False
         #: Every call, so a test can assert *what was fetched*, not merely
         #: what ended up rendered.
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -382,3 +395,31 @@ class FakeGateway:
         if self.raise_on_pipe_history:
             raise RuntimeError("No active warehouse selected in the current session")
         return list(self._pipe_history.get(key, []))
+
+    def show_grants_on_schema(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("show_grants_on_schema", (database, schema)))
+        return list(self._grants_schema.get((database, schema), []))
+
+    def show_grants_on_database(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("show_grants_on_database", (database,)))
+        return list(self._grants_database.get(database, []))
+
+    def tag_references_schema(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("tag_references_schema", (database, schema)))
+        if self.raise_on_tag_references:
+            raise RuntimeError("No active warehouse selected in the current session")
+        return list(self._tag_references_schema.get((database, schema), []))
+
+    def tag_references_database(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("tag_references_database", (database,)))
+        if self.raise_on_tag_references:
+            raise RuntimeError("No active warehouse selected in the current session")
+        return list(self._tag_references_database.get(database, []))

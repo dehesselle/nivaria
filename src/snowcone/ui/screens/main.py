@@ -39,7 +39,9 @@ from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import (
     CacheUpdated,
     CategorySelected,
+    DatabaseSelected,
     ObjectSelected,
+    SchemaSelected,
     ScopeNeeded,
 )
 from snowcone.ui.screens.multipicker import MultiPickerScreen
@@ -75,7 +77,7 @@ class MainScreen(Screen):
         Binding("ctrl+r", "pick_role", "Role", show=False),
         Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
         Binding("slash", "search", "Search"),
-        Binding("r", "refresh", "Refresh"),
+        Binding("f5", "refresh", "Refresh"),
         Binding("f10", "app.quit", "Quit", show=False),
     ]
 
@@ -260,6 +262,15 @@ class MainScreen(Screen):
 
     def on_category_selected(self, event: CategorySelected) -> None:
         self._select_category(event.scope)
+
+    def on_schema_selected(self, event: SchemaSelected) -> None:
+        # No tree.reveal(...) needed here either, same reasoning as
+        # _select_category: the cursor is already on the schema node that
+        # was just highlighted.
+        self.detail.show_schema(event.ref)
+
+    def on_database_selected(self, event: DatabaseSelected) -> None:
+        self.detail.show_database(event.database)
 
     def _select_category(self, scope: Scope) -> None:
         # No tree.reveal(...) needed here, unlike _select: the cursor is

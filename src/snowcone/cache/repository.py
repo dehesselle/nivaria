@@ -317,6 +317,40 @@ _PIPE_HISTORY = TableSpec(
     order_by=("LAST_LOAD_TIME",),
 )
 
+_GRANTS = TableSpec(
+    name="show_grants",
+    columns=(
+        "created_on",
+        "privilege",
+        "granted_on",
+        "name",
+        "granted_to",
+        "grantee_name",
+        "grant_option",
+        "granted_by",
+        "granted_by_role_type",
+    ),
+    # No natural single-column key -- see schema.sql's own comment.
+    key=(
+        "_scope",
+        "granted_to",
+        "grantee_name",
+        "privilege",
+        "granted_on",
+        "name",
+        "granted_by",
+        "created_on",
+    ),
+    order_by=("granted_to", "grantee_name", "privilege"),
+)
+
+_TAG_REFERENCES = TableSpec(
+    name="information_schema_tag_references",
+    columns=("TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME", "TAG_VALUE", "DOMAIN"),
+    key=("_scope", "TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME"),
+    order_by=("TAG_NAME",),
+)
+
 
 def spec_for(scope: Scope) -> TableSpec:
     match scope.kind:
@@ -337,6 +371,10 @@ def spec_for(scope: Scope) -> TableSpec:
             return _PIPE_ACTIVITY_HISTORY
         case ScopeKind.PIPE_HISTORY:
             return _PIPE_HISTORY
+        case ScopeKind.GRANTS:
+            return _GRANTS
+        case ScopeKind.TAG_REFERENCES:
+            return _TAG_REFERENCES
         case ScopeKind.WAREHOUSES:
             return _WAREHOUSES
         case ScopeKind.ROLES:

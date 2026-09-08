@@ -44,7 +44,7 @@ Use these names when discussing changes.
 │ │                 ││                                                     │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ ^d Databases  / Search  r Refresh  F10 Quit  Role  Warehouse  Countdown  (2/5)│
+│ ^d Databases  / Search  F5 Refresh  F10 Quit  Role  Warehouse  Countdown  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
@@ -458,7 +458,7 @@ automatic trigger, since there was no good signal found for "the user wants
 this now" short of asking. Selecting it fires three background requests at
 once for whatever database the cursor is currently under (multiple databases
 can be selected, so this acts on the focused one, the same convention
-`action_refresh`/`r` uses): the table and view object lists (via the
+`action_refresh`/F5 uses): the table and view object lists (via the
 existing `DATABASE_PRIME` mechanism above) and a `COLUMNS_PRIME` scope. The
 first two exist so the third has schema and table names to fall back to, not
 as an afterthought — see below.
@@ -760,6 +760,25 @@ pipe, the same data this view already showed before it had tabs.
 `invalid_reason` costs no new scope here either: it is already mirrored onto
 the same `SHOW PIPES` rows this view reads for the Name column.
 
+A **schema** or **database** node is a further departure from the registry
+above: neither has an `ObjectKind`, so neither `ObjectView` nor `CategoryView`
+fits, and there is exactly one view per node kind rather than one of several
+kinds needing a lookup -- so `DetailPane.show_schema`/`show_database`
+construct `SchemaView`/`DatabaseView` (`ui/views/schema_view.py`) directly,
+with no registry entry at all. Both are tabbed the same way pipes are --
+**Grants** (`SHOW GRANTS ON SCHEMA`/`ON DATABASE`, metadata layer, needs no
+warehouse; `granted_to` can be `ROLE`, `DATABASE ROLE`, `USER`, `SHARE` or
+`APPLICATION ROLE`, deliberately not filtered down to roles only) and
+**Tags** (`INFORMATION_SCHEMA.TAG_REFERENCES`, an ordinary SELECT that needs
+a running warehouse and so degrades blank without one -- the fourth instance
+of the dual-source pattern `TABLE_STATS` established, see "A second source"
+above; deliberately not `SHOW TAGS IN SCHEMA`/`IN DATABASE`, which lists tag
+*objects defined inside* that container, not tags *applied to* it). Both
+scopes are fetched lazily, only once the schema or database's own view is
+open, the same convention every other detail-view scope in this app follows.
+Mnemonic-switchable (`g`/`t`, hidden from the footer), same pattern as
+`PipeView`/`PipeListView`.
+
 ---
 
 ## Search
@@ -866,11 +885,14 @@ already a plain function precisely so this stayed an easy change.
 
 Choosing an object or column hit **reveals it in the tree** (`ObjectTree.
 reveal`) as well as opening it in the detail pane, so search leaves you
-somewhere you can keep browsing from. A **schema** hit has no detail view to
-open — `SchemaRef` carries only `database`/`name`, deliberately not an
-`ObjectRef` with some placeholder kind, since a schema has no `ObjectKind`
-and no mirror row of its own to show. Choosing one instead **reveals and
-expands it** in the tree (`ObjectTree.reveal_schema`) and stops there.
+somewhere you can keep browsing from. A **schema** hit is different —
+`SchemaRef` carries only `database`/`name`, deliberately not an `ObjectRef`
+with some placeholder kind, since a schema has no `ObjectKind` and no mirror
+row of its own to show. Choosing one instead **reveals and expands it** in
+the tree (`ObjectTree.reveal_schema`), which moves the cursor onto the
+schema node itself — and since a schema node now announces itself on
+highlight (`SchemaSelected`, see "Detail views: the registry" below), that
+also opens its Grants/Tags view, not just the tree navigation alone.
 
 ---
 
@@ -1103,6 +1125,16 @@ Three things about it are worth knowing from inside snowcone:
   history`/`information_schema_copy_history` are likewise documentation-only,
   unverified against a live account -- same caveat as the two gaps above,
   now covering two more columns on both sources.
+- `show_grants`'s and `information_schema_tag_references`'s column sets are
+  likewise documentation-only and unverified against a live account, same
+  caveat as the sources above. `granted_by_role_type` in particular is a
+  speculative companion to the `owner_role_type` column every SHOW-sourced
+  mirror already carries, not confirmed to exist on `SHOW GRANTS` output.
+  Separately, `SHOW GRANTS ON <object>` only ever shows grants the active
+  role owns, has been granted `MANAGE GRANTS` on, or reaches via
+  `ACCOUNTADMIN`/`SECURITYADMIN` — a role without one of those sees a
+  shorter (or empty) Grants tab, which is Snowflake's own visibility rule,
+  not a bug or an incomplete fetch.
 - The tree/Detail drag-resize (see "Screen anatomy") does not persist across
   sessions, and does not re-clamp an already-narrow pane if the terminal is
   then resized smaller -- both accepted, ported as-is from sibling project

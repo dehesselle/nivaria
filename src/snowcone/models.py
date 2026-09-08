@@ -86,6 +86,22 @@ class ScopeKind(StrEnum):
     #: SELECT against INFORMATION_SCHEMA.COPY_HISTORY. Scoped to one pipe like
     #: COLUMNS is scoped to one table -- see `pipe_history_scope`.
     PIPE_HISTORY = "pipe_history"
+    #: Every grant on one schema or one database (schema is None), sourced by
+    #: SHOW GRANTS ON SCHEMA/DATABASE -- metadata layer, needs no warehouse,
+    #: same as every plain SHOW scope. Deliberately carries no object_kind:
+    #: a scope with both object_kind and database set gets silently upgraded
+    #: to a whole-database SHOW-prime by MainScreen.on_scope_needed, which
+    #: would be wrong here -- same trap TABLE_STATS/PIPE_ACTIVITY avoid.
+    #: granted_to can be ROLE, DATABASE ROLE, USER, SHARE or APPLICATION
+    #: ROLE -- deliberately not filtered down to roles only.
+    GRANTS = "grants"
+    #: Tags applied to one schema or one database (schema is None), sourced
+    #: by a real SELECT against INFORMATION_SCHEMA.TAG_REFERENCES rather than
+    #: SHOW -- the fourth instance of the dual-source pattern TABLE_STATS
+    #: established (see DESIGN.md). Needs a running warehouse; degrades
+    #: blank without one, same as every SELECT-backed scope. Deliberately
+    #: carries no object_kind, for exactly the same reason GRANTS does not.
+    TAG_REFERENCES = "tag_references"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
 
@@ -148,6 +164,14 @@ class Scope:
                 )
             case ScopeKind.PIPE_HISTORY:
                 return f"pipe_history:{self.database}.{self.schema}.{self.table}"
+            case ScopeKind.GRANTS:
+                if self.schema is None:
+                    return f"grants:{self.database}"
+                return f"grants:{self.database}.{self.schema}"
+            case ScopeKind.TAG_REFERENCES:
+                if self.schema is None:
+                    return f"tag_references:{self.database}"
+                return f"tag_references:{self.database}.{self.schema}"
             case ScopeKind.WAREHOUSES:
                 return "warehouses"
             case ScopeKind.ROLES:
@@ -203,6 +227,18 @@ def pipe_history_scope(database: str, schema: str, pipe: str) -> Scope:
     # scope narrows to" slot, the same reuse `columns_scope` makes for a
     # table's name.
     return Scope(ScopeKind.PIPE_HISTORY, database=database, schema=schema, table=pipe)
+
+
+def grants_scope(database: str, schema: str | None = None) -> Scope:
+    # No object_kind -- see ScopeKind.GRANTS's comment. schema=None means a
+    # database-level grants scope, schema set means schema-level -- same
+    # optional-schema convention COLUMNS_PRIME already uses.
+    return Scope(ScopeKind.GRANTS, database=database, schema=schema)
+
+
+def tag_references_scope(database: str, schema: str | None = None) -> Scope:
+    # No object_kind -- see ScopeKind.TAG_REFERENCES's comment.
+    return Scope(ScopeKind.TAG_REFERENCES, database=database, schema=schema)
 
 
 def warehouses_scope() -> Scope:
@@ -323,9 +359,12 @@ class SchemaRef:
     """What the search modal hands back for a schema hit.
 
     Deliberately not an ObjectRef with some placeholder kind: a schema has no
-    ObjectKind, no mirror row of its own to show, and no detail view -- the
-    tree can only reveal and expand it (see `ObjectTree.reveal_schema`),
-    never open it the way an object hit is opened.
+    ObjectKind and no mirror row of its own to show, unlike a real object. It
+    does have its own detail view (Grants/Tags, see SchemaSelected) -- but
+    the tree gets there by revealing and expanding the node (see
+    `ObjectTree.reveal_schema`) and letting the resulting highlight announce
+    it, not by this ref carrying enough to open one directly the way an
+    ObjectRef does.
     """
 
     database: str

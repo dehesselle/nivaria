@@ -13,13 +13,14 @@ from textual.containers import Vertical
 from textual.widgets import Static
 
 from snowcone.cache.repository import Repository
-from snowcone.models import ObjectRef, Scope
+from snowcone.models import ObjectRef, SchemaRef, Scope
 from snowcone.ui.views.base import (
     CategoryView,
     ObjectView,
     category_view_for,
     view_for,
 )
+from snowcone.ui.views.schema_view import DatabaseView, SchemaView
 
 
 class DetailPane(Vertical):
@@ -28,12 +29,14 @@ class DetailPane(Vertical):
     def __init__(self, repo: Repository, **kwargs) -> None:
         super().__init__(**kwargs)
         self.repo = repo
-        self._view: ObjectView | CategoryView | None = None
+        self._view: ObjectView | CategoryView | SchemaView | DatabaseView | None = None
         self._ref: ObjectRef | None = None
         self._scope: Scope | None = None
+        self._schema: SchemaRef | None = None
+        self._database: str | None = None
 
     @property
-    def view(self) -> ObjectView | CategoryView | None:
+    def view(self) -> ObjectView | CategoryView | SchemaView | DatabaseView | None:
         return self._view
 
     @property
@@ -48,6 +51,8 @@ class DetailPane(Vertical):
         """Point the pane at an object. Returns the view now showing it."""
         self._ref = ref
         self._scope = None
+        self._schema = None
+        self._database = None
         view_class = view_for(ref.kind)
         if view_class is None:
             self._show_placeholder(f"No detail view for {ref.kind.value} yet.")
@@ -72,6 +77,8 @@ class DetailPane(Vertical):
         """
         self._ref = None
         self._scope = scope
+        self._schema = None
+        self._database = None
         kind = scope.object_kind
         view_class = category_view_for(kind) if kind is not None else None
         if view_class is None:
@@ -90,10 +97,53 @@ class DetailPane(Vertical):
         self.mount(view)
         return view
 
+    def show_schema(self, ref: SchemaRef) -> SchemaView:
+        """Point the pane at a schema's Grants/Tags view.
+
+        No registry lookup, unlike `show`/`show_category`: there is exactly
+        one view for a schema node, not one of several kinds sharing a
+        lookup, so this constructs SchemaView directly.
+        """
+        self._ref = None
+        self._scope = None
+        self._database = None
+        self._schema = ref
+
+        current = self._view
+        if type(current) is SchemaView:
+            current.show(ref)
+            return current
+
+        self.remove_children()
+        view = SchemaView(self.repo, ref)
+        self._view = view
+        self.mount(view)
+        return view
+
+    def show_database(self, database: str) -> DatabaseView:
+        """Point the pane at a database's Grants/Tags view. See `show_schema`."""
+        self._ref = None
+        self._scope = None
+        self._schema = None
+        self._database = database
+
+        current = self._view
+        if type(current) is DatabaseView:
+            current.show(database)
+            return current
+
+        self.remove_children()
+        view = DatabaseView(self.repo, database)
+        self._view = view
+        self.mount(view)
+        return view
+
     def clear(self) -> None:
         self._view = None
         self._ref = None
         self._scope = None
+        self._schema = None
+        self._database = None
         self.remove_children()
 
     def set_repo(self, repo: Repository) -> None:

@@ -23,6 +23,7 @@ from snowcone.profiles import ProfileStore
 from snowcone.ui.screens.main import CacheUpdated, MainScreen
 from snowcone.ui.screens.multipicker import MultiPickerScreen
 from snowcone.ui.screens.picker import PickerScreen
+from snowcone.ui.views.schema_view import DatabaseView, SchemaView
 from snowcone.ui.widgets.object_tree import ObjectTree
 from tests.fakes import make_pool
 
@@ -375,7 +376,12 @@ async def test_refresh_targets_the_scope_under_the_cursor(repo) -> None:
         await pilot.pause()
         tree.focus()
         tree.move_cursor(tree.root.children[0])
-        await pilot.pause()
+        # Highlighting the database node now also mounts its Grants/Tags
+        # view (DatabaseSelected -> show_database), which requests its own
+        # scopes asynchronously -- settle() lets that finish before the
+        # requests list is cleared, so only action_refresh's own request
+        # below is captured.
+        await settle(pilot)
         fetch.requests.clear()
         screen.action_refresh()
         await pilot.pause()
@@ -572,7 +578,14 @@ async def test_selecting_a_table_fills_the_detail_pane(repo) -> None:
 
 
 async def test_switching_database_clears_the_detail_pane(repo) -> None:
-    """What was on screen belongs to a database nobody is looking at now."""
+    """What was on screen belongs to a database nobody is looking at now.
+
+    The pane does not stay empty, though: the rebuilt tree's cursor lands on
+    the newly selected database's own top-level node, which -- now that a
+    database node announces itself on highlight (DatabaseSelected) -- opens
+    that database's own Grants/Tags view. That is fresh content belonging to
+    "OTHER", not the stale ORDERS table view left over from "MYDB", which is
+    what this test actually protects."""
     put_databases(repo, "MYDB", "OTHER")
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")
@@ -585,11 +598,13 @@ async def test_switching_database_clears_the_detail_pane(repo) -> None:
         tree, tables = await drill_to_tables(app, pilot, screen)
         tree.move_cursor(tables.children[0])
         await settle(pilot)
-        assert screen.detail.view is not None
+        assert screen.detail.ref is not None
+        assert screen.detail.ref.fqn == "MYDB.AAA.ORDERS"
 
         screen.set_databases(["OTHER"])
         await settle(pilot)
-        assert screen.detail.view is None
+        assert screen.detail.ref is None
+        assert isinstance(screen.detail.view, DatabaseView)
 
 
 async def test_the_sweep_covers_the_detail_pane_too(repo) -> None:
@@ -710,9 +725,12 @@ async def test_search_is_scoped_to_every_selected_database(repo) -> None:
     assert any("OTHERDB.BBB.STG_OTHERDB_ORDERS" in text for text in shown)
 
 
-async def test_a_schema_search_hit_reveals_and_expands_it_in_the_tree(repo) -> None:
-    """A schema has no detail view (see SchemaRef) -- selecting one reveals
-    and expands it in the tree instead of touching the detail pane."""
+async def test_a_schema_search_hit_reveals_expands_and_opens_its_view(repo) -> None:
+    """A schema hit reveals and expands its node in the tree, same as
+    always -- but since that moves the cursor onto the schema node, and a
+    schema node now posts SchemaSelected on highlight, choosing a schema hit
+    also opens its Grants/Tags view, not just navigating the tree the way it
+    used to (see SchemaRef and DESIGN.md's "Choosing a hit")."""
     put_schemas(repo, "MYDB", "AAA", "STAGING")
     put_tables(repo, "MYDB", "STAGING", "STG_CUSTOMER_ORDERS")
     app = Harness(repo, RecordingFetch())
@@ -734,6 +752,7 @@ async def test_a_schema_search_hit_reveals_and_expands_it_in_the_tree(repo) -> N
         assert tree.cursor_node.data.key == "STAGING"
         assert tree.cursor_node.is_expanded
         assert screen.detail.ref is None
+        assert isinstance(screen.detail.view, SchemaView)
 
 
 async def test_escape_closes_the_search_modal_without_choosing(repo) -> None:

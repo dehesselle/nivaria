@@ -182,6 +182,44 @@ def table_stats(database: str) -> str:
     )
 
 
+def show_grants_on_schema(database: str, schema: str) -> str:
+    """Every grant on one schema -- metadata layer, needs no warehouse.
+
+    Unpaged, like `show_warehouses`/`show_roles`: one schema's grant list is
+    a small, bounded result, not the kind of thing that needs `LIMIT`/`FROM`
+    keyset paging the object lists do.
+    """
+    target = f"{quote_identifier(database)}.{quote_identifier(schema)}"
+    return f"SHOW GRANTS ON SCHEMA {target}"
+
+
+def show_grants_on_database(database: str) -> str:
+    """Every grant on one database. See `show_grants_on_schema`."""
+    return f"SHOW GRANTS ON DATABASE {quote_identifier(database)}"
+
+
+def tag_references(database: str) -> str:
+    """Tags applied to one schema or one database.
+
+    An ordinary SELECT against INFORMATION_SCHEMA.TAG_REFERENCES -- unlike
+    `show_grants_on_schema`/`show_grants_on_database` above, this needs a
+    running warehouse (see DESIGN.md's dual-source note). The object name
+    and domain ('SCHEMA'/'DATABASE') bind as ordinary `%s` parameters, same
+    as `table_stats`'s WHERE clause -- only the containing database (needed
+    to address `db.INFORMATION_SCHEMA.TAG_REFERENCES` itself) is an
+    identifier and needs `quote_identifier`.
+
+    Deliberately not `SHOW TAGS IN SCHEMA`/`IN DATABASE`, which lists tag
+    *objects defined inside* that container, not tags *applied to* it -- the
+    wrong semantics for "what does this schema/database carry."
+    """
+    target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.TAG_REFERENCES"
+    return (
+        "SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE, DOMAIN "
+        f"FROM TABLE({target}(%s, %s))"
+    )
+
+
 def pipe_activity(fetch_days: int) -> str:
     """Every pipe's *latest* load in a schema, back to `fetch_days` ago.
 

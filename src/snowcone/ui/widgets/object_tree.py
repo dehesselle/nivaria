@@ -44,7 +44,13 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.ui.messages import CategorySelected, ObjectSelected, ScopeNeeded
+from snowcone.ui.messages import (
+    CategorySelected,
+    DatabaseSelected,
+    ObjectSelected,
+    SchemaSelected,
+    ScopeNeeded,
+)
 from snowcone.ui.widgets.plan import Child, plan_children
 
 #: Which object kinds get a category node under each schema, in display order.
@@ -286,6 +292,12 @@ class ObjectTree(Tree[NodeData]):
             self.post_message(ObjectSelected(data.ref))
         elif data.kind is NodeKind.CATEGORY and data.scope is not None:
             self.post_message(CategorySelected(data.scope))
+        elif data.kind is NodeKind.SCHEMA and data.database is not None:
+            self.post_message(
+                SchemaSelected(SchemaRef(database=data.database, name=data.key))
+            )
+        elif data.kind is NodeKind.DATABASE and data.database is not None:
+            self.post_message(DatabaseSelected(data.database))
 
     # ------------------------------------------------------------ freshness
 

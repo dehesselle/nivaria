@@ -117,6 +117,77 @@ def test_table_stats_is_fetched_in_one_shot() -> None:
     assert cursor is None
 
 
+def test_schema_level_grants_are_fetched_in_one_shot() -> None:
+    """A schema's grant list is bounded, like table_stats -- no paging needed,
+    and a schema scope dispatches to show_grants_on_schema, not the
+    database-level call."""
+    from snowcone.models import grants_scope
+
+    gateway = FakeGateway(
+        grants_schema={
+            ("MYDB", "PUBLIC"): [
+                {"privilege": "USAGE", "granted_to": "ROLE", "grantee_name": "ANALYST"}
+            ]
+        }
+    )
+    rows, cursor = fetch_page(gateway, grants_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(rows) == 1
+    assert cursor is None
+    assert [c[0] for c in gateway.calls] == ["show_grants_on_schema"]
+
+
+def test_database_level_grants_are_fetched_in_one_shot() -> None:
+    """schema=None on the scope means database-level -- dispatches to
+    show_grants_on_database instead."""
+    from snowcone.models import grants_scope
+
+    gateway = FakeGateway(
+        grants_database={
+            "MYDB": [
+                {"privilege": "USAGE", "granted_to": "ROLE", "grantee_name": "ANALYST"}
+            ]
+        }
+    )
+    rows, cursor = fetch_page(gateway, grants_scope("MYDB"), None, limit=1)
+    assert len(rows) == 1
+    assert cursor is None
+    assert [c[0] for c in gateway.calls] == ["show_grants_on_database"]
+
+
+def test_schema_level_tag_references_are_fetched_in_one_shot() -> None:
+    from snowcone.models import tag_references_scope
+
+    gateway = FakeGateway(
+        tag_references_schema={
+            ("MYDB", "PUBLIC"): [
+                {"TAG_NAME": "COST_CENTER", "TAG_VALUE": "ENG", "DOMAIN": "SCHEMA"}
+            ]
+        }
+    )
+    rows, cursor = fetch_page(
+        gateway, tag_references_scope("MYDB", "PUBLIC"), None, limit=1
+    )
+    assert len(rows) == 1
+    assert cursor is None
+    assert [c[0] for c in gateway.calls] == ["tag_references_schema"]
+
+
+def test_database_level_tag_references_are_fetched_in_one_shot() -> None:
+    from snowcone.models import tag_references_scope
+
+    gateway = FakeGateway(
+        tag_references_database={
+            "MYDB": [
+                {"TAG_NAME": "COST_CENTER", "TAG_VALUE": "ENG", "DOMAIN": "DATABASE"}
+            ]
+        }
+    )
+    rows, cursor = fetch_page(gateway, tag_references_scope("MYDB"), None, limit=1)
+    assert len(rows) == 1
+    assert cursor is None
+    assert [c[0] for c in gateway.calls] == ["tag_references_database"]
+
+
 def test_pipe_activity_is_fetched_in_one_shot() -> None:
     """A schema's pipe count is bounded, same reasoning as table_stats."""
     from snowcone.models import pipe_activity_scope

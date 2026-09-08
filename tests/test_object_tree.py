@@ -13,7 +13,13 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.ui.messages import CategorySelected, ObjectSelected, ScopeNeeded
+from snowcone.ui.messages import (
+    CategorySelected,
+    DatabaseSelected,
+    ObjectSelected,
+    SchemaSelected,
+    ScopeNeeded,
+)
 from snowcone.ui.widgets.object_tree import ObjectTree
 
 
@@ -496,18 +502,22 @@ async def test_highlighting_an_object_announces_it(repo) -> None:
     assert "MYDB.AAA.ORDERS" in seen
 
 
-async def test_a_schema_node_announces_nothing(repo) -> None:
-    """A schema has no detail view of its own -- see SchemaRef -- so
-    highlighting one is pure navigation."""
+async def test_highlighting_a_schema_node_announces_it(repo) -> None:
+    """A schema now has its own Grants/Tags detail view -- see SchemaSelected
+    -- so highlighting one announces it, not just the tree that got us there."""
     put_schemas(repo, "MYDB", "AAA")
-    seen: list[str] = []
+    seen: list[SchemaRef] = []
+    other: list[str] = []
 
     class Listening(Harness):
+        def on_schema_selected(self, event: SchemaSelected) -> None:
+            seen.append(event.ref)
+
         def on_object_selected(self, event: ObjectSelected) -> None:
-            seen.append(event.ref.fqn)
+            other.append(event.ref.fqn)
 
         def on_category_selected(self, event: CategorySelected) -> None:
-            seen.append(event.scope.key)
+            other.append(event.scope.key)
 
     app = Listening(repo)
     async with app.run_test(size=(80, 30)) as pilot:
@@ -516,7 +526,32 @@ async def test_a_schema_node_announces_nothing(repo) -> None:
         await pilot.pause()
         tree.move_cursor(database_node(tree).children[0])
         await pilot.pause()
-    assert seen == []
+    assert seen == [SchemaRef(database="MYDB", name="AAA")]
+    assert other == []
+
+
+async def test_highlighting_a_database_node_announces_it(repo) -> None:
+    """A database now has its own Grants/Tags detail view -- see
+    DatabaseSelected -- so highlighting its top-level node announces it."""
+    put_schemas(repo, "MYDB", "AAA")
+    seen: list[str] = []
+
+    class Listening(Harness):
+        def on_database_selected(self, event: DatabaseSelected) -> None:
+            seen.append(event.database)
+
+    app = Listening(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        database_node(tree).expand()
+        await pilot.pause()
+        # Move off the database node first, so moving back onto it is a real
+        # cursor_line transition -- Tree only fires NodeHighlighted on change.
+        tree.move_cursor(database_node(tree).children[0])
+        await pilot.pause()
+        tree.move_cursor(database_node(tree))
+        await pilot.pause()
+    assert seen == ["MYDB"]
 
 
 async def test_highlighting_a_category_node_announces_its_scope(repo) -> None:

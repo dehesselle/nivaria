@@ -202,6 +202,38 @@ def fetch_page(
                 ),
                 None,
             )
+        case ScopeKind.GRANTS:
+            assert scope.database is not None
+            # A schema or database's grant list is bounded, same reasoning
+            # as show_columns/table_stats being deliberately unpaged.
+            if scope.schema is not None:
+                return (
+                    gateway.show_grants_on_schema(
+                        scope.database, scope.schema, allow_reconnect=allow_reconnect
+                    ),
+                    None,
+                )
+            return (
+                gateway.show_grants_on_database(
+                    scope.database, allow_reconnect=allow_reconnect
+                ),
+                None,
+            )
+        case ScopeKind.TAG_REFERENCES:
+            assert scope.database is not None
+            if scope.schema is not None:
+                return (
+                    gateway.tag_references_schema(
+                        scope.database, scope.schema, allow_reconnect=allow_reconnect
+                    ),
+                    None,
+                )
+            return (
+                gateway.tag_references_database(
+                    scope.database, allow_reconnect=allow_reconnect
+                ),
+                None,
+            )
         case ScopeKind.WAREHOUSES:
             # Small, flat, unpaged lists -- see queries.show_warehouses.
             return gateway.show_warehouses(allow_reconnect=allow_reconnect), None
