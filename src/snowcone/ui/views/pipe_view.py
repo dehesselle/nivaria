@@ -152,14 +152,6 @@ class PipeView(HistoryView, ObjectView):
         if history_scope is not None:
             self.ensure(history_scope, ttl)
 
-        # Both merge sources carry their own row cap, and either one hitting
-        # it leaves the merged table short -- see HistoryView.
-        self.sync_history_note(
-            self.repo,
-            activity_history_scope,
-            *([history_scope] if history_scope is not None else []),
-        )
-
         # Merged by (FILE_NAME, LAST_LOAD_TIME) -- see the module docstring
         # for why this needs no "which scope succeeded" branching.
         merged: dict[tuple[Any, Any], dict[str, Any]] = {}
@@ -177,6 +169,19 @@ class PipeView(HistoryView, ObjectView):
             if loaded_at is not None and loaded_at >= cutoff:
                 dated.append((loaded_at, r))
         dated.sort(key=lambda pair: pair[0], reverse=True)
+
+        # Both merge sources carry their own row cap, and either one hitting
+        # it leaves the merged table short -- see HistoryView. Judged against
+        # `dated`, not the merge sources' own row counts -- see
+        # HistoryView.sync_history_note.
+        self.sync_history_note(
+            self.repo,
+            dated,
+            show_days,
+            "load activity",
+            activity_history_scope,
+            *([history_scope] if history_scope is not None else []),
+        )
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
         table.clear(columns=True)

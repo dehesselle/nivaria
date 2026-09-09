@@ -31,7 +31,7 @@ from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
 from snowcone.cache.repository import Repository
 from snowcone.format import (
@@ -49,7 +49,12 @@ from snowcone.models import (
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
-from snowcone.ui.views.tables import LIST_TABLE, HoverTooltipTable
+from snowcone.ui.views.tables import (
+    LIST_NOTE,
+    LIST_TABLE,
+    HoverTooltipTable,
+    sync_list_note,
+)
 
 _COLUMNS = (
     "Name",
@@ -83,6 +88,7 @@ class ViewListView(CategoryView):
         self._rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
+        yield Static("", id=LIST_NOTE)
         table: DataTable[Text] = HoverTooltipTable(
             self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
         )
@@ -114,6 +120,11 @@ class ViewListView(CategoryView):
     def update_content(self) -> None:
         ttl = config.get(CACHE_TTL)
         self.ensure(self.scope, ttl)
+        sync_list_note(
+            self.query_one(f"#{LIST_NOTE}", Static),
+            self.repo.entry(self.scope),
+            "views",
+        )
         stats_scope = self.stats_scope()
         self.ensure(stats_scope, ttl)
         materialized_scope = self.materialized_stats_scope()

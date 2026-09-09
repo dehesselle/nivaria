@@ -39,7 +39,7 @@ from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
 from snowcone.cache.repository import Repository
 from snowcone.format import format_timestamp_minutes
@@ -47,7 +47,12 @@ from snowcone.models import ObjectRef, ObjectType, Scope, task_activity_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
-from snowcone.ui.views.tables import LIST_TABLE, HoverTooltipTable
+from snowcone.ui.views.tables import (
+    LIST_NOTE,
+    LIST_TABLE,
+    HoverTooltipTable,
+    sync_list_note,
+)
 
 _COLUMNS = (
     "Name",
@@ -75,6 +80,7 @@ class TaskListView(CategoryView):
         self._rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
+        yield Static("", id=LIST_NOTE)
         table: DataTable[Text] = HoverTooltipTable(
             self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
         )
@@ -102,6 +108,11 @@ class TaskListView(CategoryView):
     def update_content(self) -> None:
         ttl = config.get(CACHE_TTL)
         self.ensure(self.scope, ttl)
+        sync_list_note(
+            self.query_one(f"#{LIST_NOTE}", Static),
+            self.repo.entry(self.scope),
+            "tasks",
+        )
         activity_scope = self.activity_scope()
         self.ensure(activity_scope, ttl)
         # The cache already holds at most one row per task -- queries.

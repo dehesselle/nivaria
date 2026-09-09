@@ -27,6 +27,7 @@ three, under its own ids -- silently picked up none of it.
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Sequence
 from typing import Any, ClassVar, Protocol
 
 from rich.text import Text
@@ -36,12 +37,16 @@ from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Static, TabbedContent
 from textual.widgets.data_table import CellDoesNotExist
 
-from snowcone.cache.repository import Repository
+from snowcone.cache.repository import Entry, Repository
 from snowcone.format import format_timestamp_full
-from snowcone.models import Scope
+from snowcone.models import CacheState, Scope
 
 #: The one list/table in whichever detail view is mounted.
 LIST_TABLE = "detail-list"
+#: The line above LIST_TABLE saying so when its scope was fetched and came
+#: back empty, or errored with nothing to fall back on -- see
+#: `sync_list_note`.
+LIST_NOTE = "detail-list-note"
 #: A single object's history table, and the panel describing its cursor row.
 HISTORY_TABLE = "detail-history"
 HISTORY_DETAIL = "detail-history-error"
@@ -50,6 +55,29 @@ HISTORY_DETAIL = "detail-history-error"
 HISTORY_NOTE = "detail-history-note"
 #: A single object's defining SQL.
 DEFINITION = "detail-definition"
+
+
+def sync_list_note(note: Static, entry: Entry, noun: str) -> None:
+    """Say so when a category's primary scope was positively fetched and
+    came back with nothing, or its only fetch attempt errored with no prior
+    success to fall back on -- never when it simply has not been fetched
+    yet. `EMPTY` (never touched) and `PARTIAL` (mid-refresh) both stay
+    silent rather than guess; only `COMPLETE` with zero rows, or `ERROR`
+    with no prior `fetched_at`, say anything. Same toggle-display,
+    recompute-in-full-every-repaint shape as `HistoryView.sync_history_note`.
+    """
+    error = entry.state is CacheState.ERROR and entry.fetched_at is None
+    empty = entry.state is CacheState.COMPLETE and entry.row_count == 0
+    if error:
+        note.update(Text(f"Could not fetch: {entry.error}"))
+    elif empty:
+        note.update(Text(f"No {noun} in this schema."))
+    # Assigned unconditionally, not only in the branches above, so a note
+    # widget reused across CategoryView.show() (switching schemas without
+    # remounting) never carries a stale class or visibility from the
+    # previous schema's paint.
+    note.set_class(error, "-error")
+    note.display = error or empty
 
 
 class RowSource(Protocol):
@@ -144,18 +172,48 @@ class HistoryView(TabbedView):
     #: every repaint.
     history_rows: dict[str, dict[str, Any]]
 
-    def sync_history_note(self, repo: Repository, *scopes: Scope) -> None:
-        """Say so when a history was capped rather than exhausted.
+    def sync_history_note(
+        self,
+        repo: Repository,
+        dated: Sequence[Any],
+        show_days: int,
+        noun: str,
+        *scopes: Scope,
+    ) -> None:
+        """Say so when a history was capped rather than exhausted, when it
+        settled with nothing in the display window, or when its only fetch
+        attempt errored with nothing to fall back on.
 
         A history table has no natural bottom -- it just stops -- so a
         capped one is indistinguishable from a complete one by looking at
         it, which is exactly the kind of silent partial answer this app is
         not allowed to give. Both halves of the merge are checked: either
-        source hitting its cap means the merged table is short of rows,
-        and neither one knows about the other's depth.
+        source hitting its cap means the merged table is short of rows, and
+        neither one knows about the other's depth.
+
+        Emptiness is judged against `dated` -- this paint's post-window-
+        filter merge -- rather than the merge sources' own row counts, since
+        the display window (which can be narrower than the fetch window) is
+        what actually gates what ends up on screen: older history can exist
+        without making today's paint anything but empty.
         """
         note = self.query_one(f"#{HISTORY_NOTE}", Static)  # type: ignore[attr-defined]
-        capped = any(repo.entry(scope).truncated for scope in scopes)
+        entries = [repo.entry(scope) for scope in scopes]
+        capped = any(entry.truncated for entry in entries)
+        settled = all(
+            entry.state in (CacheState.COMPLETE, CacheState.ERROR) for entry in entries
+        )
+        errored = next(
+            (
+                entry
+                for entry in entries
+                if entry.state is CacheState.ERROR and entry.fetched_at is None
+            ),
+            None,
+        )
+        empty = settled and not dated and not capped
+        error = empty and errored is not None
+
         if capped:
             note.update(
                 Text(
@@ -164,7 +222,14 @@ class HistoryView(TabbedView):
                     "it in Settings, or narrow the fetch window."
                 )
             )
-        note.display = capped
+        elif error:
+            note.update(Text(f"Could not fetch: {errored.error}"))
+        elif empty:
+            note.update(Text(f"No {noun} in the last {show_days} days."))
+
+        note.set_class(capped, "-capped")
+        note.set_class(error, "-error")
+        note.display = capped or empty
 
     @abstractmethod
     def detail_text(self, row: dict[str, Any]) -> str | None:

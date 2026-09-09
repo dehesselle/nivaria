@@ -38,7 +38,7 @@ from typing import Any, ClassVar
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, TabbedContent, TabPane
+from textual.widgets import DataTable, Static, TabbedContent, TabPane
 
 from snowcone.cache.repository import Repository
 from snowcone.format import (
@@ -49,7 +49,17 @@ from snowcone.models import ObjectRef, ObjectType, Scope, pipe_activity_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
-from snowcone.ui.views.tables import LIST_TABLE, HoverTooltipTable, TabbedView
+from snowcone.ui.views.tables import (
+    LIST_NOTE,
+    LIST_TABLE,
+    HoverTooltipTable,
+    TabbedView,
+    sync_list_note,
+)
+
+#: The Status tab's own note -- see LIST_NOTE, reused for the Load history
+#: tab since both go empty/error together (both read `self.scope` alone).
+_STATUS_NOTE = "detail-status-note"
 
 _STATUS_COLUMNS = ("Name", "Execution State", "Invalid Reason")
 _HISTORY_COLUMNS = (
@@ -86,6 +96,7 @@ class PipeListView(TabbedView, CategoryView):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-status"):
             with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
+                yield Static("", id=_STATUS_NOTE)
                 status: DataTable[Text] = DataTable(
                     id="detail-status", cursor_type="row"
                 )
@@ -93,6 +104,7 @@ class PipeListView(TabbedView, CategoryView):
                 status.add_columns(*_STATUS_COLUMNS)
                 yield status
             with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
+                yield Static("", id=LIST_NOTE)
                 history: DataTable[Text] = HoverTooltipTable(
                     self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
                 )
@@ -126,6 +138,11 @@ class PipeListView(TabbedView, CategoryView):
         self.ensure(self.scope, ttl)
         activity_scope = self.activity_scope()
         self.ensure(activity_scope, ttl)
+        # Both tabs read self.scope alone, so one Entry drives both notes --
+        # activity_scope stays excluded, same as the merge below.
+        entry = self.repo.entry(self.scope)
+        sync_list_note(self.query_one(f"#{_STATUS_NOTE}", Static), entry, "pipes")
+        sync_list_note(self.query_one(f"#{LIST_NOTE}", Static), entry, "pipes")
         # The cache already holds at most one row per pipe -- queries.
         # pipe_activity's QUALIFY keeps only each pipe's latest load. Keyed
         # by PIPE_NAME so a missing/failed activity pass just means an empty

@@ -121,10 +121,6 @@ class TaskView(HistoryView, ObjectView):
         history_scope = self.history_scope()
         self.ensure(history_scope, ttl)
 
-        # Both merge sources carry their own row cap, and either one hitting
-        # it leaves the merged table short -- see HistoryView.
-        self.sync_history_note(self.repo, activity_history_scope, history_scope)
-
         # Merged by QUERY_ID -- see the module docstring for why this needs
         # no target resolution or compound key the way pipe's does.
         merged: dict[Any, dict[str, Any]] = {}
@@ -141,6 +137,19 @@ class TaskView(HistoryView, ObjectView):
             if scheduled_at is not None and scheduled_at >= cutoff:
                 dated.append((scheduled_at, r))
         dated.sort(key=lambda pair: pair[0], reverse=True)
+
+        # Both merge sources carry their own row cap, and either one hitting
+        # it leaves the merged table short -- see HistoryView. Judged against
+        # `dated`, not the merge sources' own row counts -- see
+        # HistoryView.sync_history_note.
+        self.sync_history_note(
+            self.repo,
+            dated,
+            show_days,
+            "run history",
+            activity_history_scope,
+            history_scope,
+        )
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
         table.clear(columns=True)

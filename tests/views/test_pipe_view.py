@@ -381,7 +381,9 @@ async def test_an_uncapped_history_shows_no_note(repo) -> None:
     """The common case. A note on every pipe would be noise, and noise is how
     a real warning gets ignored."""
     ref = put_pipe(repo, "LOAD_ORDERS")
-    put_pipe_activity_history(repo, "LOAD_ORDERS")
+    # Within the show window -- see _days_ago's docstring: a fixed calendar
+    # date would eventually age out and start looking like an empty history.
+    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)

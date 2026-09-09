@@ -249,11 +249,37 @@ StatusFooter #footer-pool {
     color: $error;
 }
 
-/* Not $error: a capped history is correct data, just not all of it. */
+#detail-list-note,
+#detail-status-note {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* Only the error case departs from the neutral default: a category that
+   was fetched and came back empty is a settled, unremarkable fact, not a
+   warning -- same $text-muted reasoning #detail-placeholder and
+   #connect-status already use. */
+#detail-list-note.-error,
+#detail-status-note.-error {
+    color: $error;
+}
+
+/* Unmarked default: a history window that came back empty is a settled,
+   unremarkable fact, same $text-muted reasoning as #detail-list-note. */
 #detail-history-note {
     height: auto;
     padding: 0 1;
+    color: $text-muted;
+}
+
+/* Not $error: a capped history is correct data, just not all of it. */
+#detail-history-note.-capped {
     color: $warning;
+}
+
+#detail-history-note.-error {
+    color: $error;
 }
 
 #detail-definition {
