@@ -34,6 +34,22 @@ class ObjectType(StrEnum):
         """Title-cased plural for a tree category label, e.g. `Tables`."""
         return self.plural.title()
 
+    @property
+    def pageable(self) -> bool:
+        """Whether `SHOW <plural>` actually honours `LIMIT`/`FROM`.
+
+        Not a guess and not a documented property: verified statement by
+        statement against two unrelated live accounts. `SHOW PIPES` and `SHOW
+        STAGES` accept both clauses and silently ignore them, returning every
+        row in the schema or database regardless -- which made the keyset
+        continuation in `FetchService._execute` non-terminating, since every
+        "next page" came back identical to the last. Declared here rather than
+        discovered at runtime, so the statement builder can stop asking for
+        something that does not work instead of the scheduler having to
+        recover from it. See DESIGN.md, "Bounding a result".
+        """
+        return self not in (ObjectType.PIPE, ObjectType.STAGE)
+
 
 class ScopeType(StrEnum):
     """What a cache scope covers: one fetchable, separately-refreshable set."""

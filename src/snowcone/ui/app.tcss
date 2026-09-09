@@ -249,6 +249,13 @@ StatusFooter #footer-pool {
     color: $error;
 }
 
+/* Not $error: a capped history is correct data, just not all of it. */
+#detail-history-note {
+    height: auto;
+    padding: 0 1;
+    color: $warning;
+}
+
 #detail-definition {
     height: 1fr;
 }

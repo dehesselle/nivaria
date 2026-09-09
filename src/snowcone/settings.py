@@ -19,10 +19,14 @@ configure(APP_NAME)
 
 __all__ = [
     "CACHE_TTL",
+    "HISTORY_MAX_ROWS",
+    "MAX_PAGES_PER_PASS",
     "PAGE_SIZE",
     "PIPE_HISTORY_FETCH_DAYS",
     "PIPE_HISTORY_SHOW_DAYS",
     "POOL_SIZE",
+    "PRIME_CHUNK_THRESHOLD",
+    "ROW_CEILING",
     "TASK_HISTORY_FETCH_DAYS",
     "TASK_HISTORY_SHOW_DAYS",
     "Setting",
@@ -117,4 +121,57 @@ TASK_HISTORY_SHOW_DAYS = Setting(
     ),
     group="Cache",
     default=90,
+)
+
+HISTORY_MAX_ROWS = Setting(
+    key="history_max_rows",
+    label="history row cap",
+    description=(
+        "The most rows any one pipe- or task-history statement may return. "
+        "The newest rows are kept: each history query orders by its own "
+        "timestamp descending before applying this. A busy pipe can otherwise "
+        "have tens of thousands of loads inside the fetch window above, and "
+        "nothing in COPY_HISTORY bounds that on its own."
+    ),
+    group="Cache",
+    default=5000,
+)
+
+MAX_PAGES_PER_PASS = Setting(
+    key="max_pages_per_pass",
+    label="max pages per refresh",
+    description=(
+        "How many pages one refresh pass may fetch before it gives up and "
+        "reports an error. A safety net, not a tuning knob: a SHOW that "
+        "silently ignores LIMIT would otherwise let the continuation chain "
+        "re-fetch the same page forever."
+    ),
+    group="Cache",
+    default=50,
+)
+
+ROW_CEILING = Setting(
+    key="row_ceiling",
+    label="result row ceiling",
+    description=(
+        "The most rows snowcone will read out of any single statement before "
+        "abandoning it with an error. The last line of defence against a "
+        "query that returns far more than expected; it is meant never to be "
+        "reached. 0 disables it."
+    ),
+    group="Cache",
+    default=200_000,
+)
+
+PRIME_CHUNK_THRESHOLD = Setting(
+    key="prime_chunk_threshold",
+    label="prime chunk threshold",
+    description=(
+        "How large a whole-database prime result has to be before it is "
+        "refetched in smaller chunks (per schema, then per table) instead of "
+        "being used as-is. Raising it keeps big databases on the cheaper "
+        "single round trip; lowering it chunks sooner."
+    ),
+    group="Cache",
+    default=10_000,
 )

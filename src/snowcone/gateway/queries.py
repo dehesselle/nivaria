@@ -23,7 +23,11 @@ from typing import Any
 
 from snowcone.models import ObjectType
 
-#: Snowflake caps a SHOW result at 10k rows regardless of what LIMIT asks for.
+#: The largest LIMIT worth asking a SHOW for. Snowflake caps most SHOW
+#: results near this, but not universally -- a real SHOW COLUMNS IN
+#: DATABASE returned 11511 rows in one response -- so this bounds what
+#: snowcone asks for, and is not a ceiling anything may rely on. The
+#: ceiling that is enforced is ROW_CEILING, applied in PoolGateway.
 MAX_PAGE_SIZE = 10_000
 
 
@@ -74,16 +78,15 @@ def show_objects(
 ) -> str:
     """One object type in one schema, keyset-paged by `after`/`limit`.
 
-    Verified correct for tables and views (see DESIGN.md, "Verified and
-    unverified paging"). Confirmed *not* honoured for `ObjectType.PIPE`: a
-    real `SHOW PIPES IN SCHEMA ... LIMIT n` returns every pipe in the schema
-    regardless of `n`, and a repeat with `FROM` returns the identical result
-    -- `jobs.fetch_page`'s continuation loop has no way to detect that and
-    would not terminate for a schema with more pipes than the caller's page
-    size. See DESIGN.md for the full finding; not worked around here.
+    Paged only for the types that actually honour it (`ObjectType.pageable`).
+    Pipes and stages return every row regardless of `LIMIT`, so asking for a
+    page would put a clause in the log that Snowflake never applied, and the
+    caller would page a result that never shrinks -- `jobs.fetch_page` treats
+    an unpageable type as a single complete result for the same reason.
     """
     scope = f"{quote_identifier(database)}.{quote_identifier(schema)}"
-    return f"SHOW {object_type.plural.upper()} IN SCHEMA {scope}{_paging(after, limit)}"
+    tail = _paging(after, limit) if object_type.pageable else ""
+    return f"SHOW {object_type.plural.upper()} IN SCHEMA {scope}{tail}"
 
 
 def show_objects_in_database(
@@ -100,11 +103,12 @@ def show_objects_in_database(
     would have cost 54 round trips at ~187ms each. Round trips dominate
     completely -- payload is nearly free -- so priming a database this way is
     an order of magnitude cheaper than filling it schema by schema.
+
+    The paging tail is omitted for an unpageable type, same as `show_objects`.
     """
     scope = quote_identifier(database)
-    return (
-        f"SHOW {object_type.plural.upper()} IN DATABASE {scope}{_paging(after, limit)}"
-    )
+    tail = _paging(after, limit) if object_type.pageable else ""
+    return f"SHOW {object_type.plural.upper()} IN DATABASE {scope}{tail}"
 
 
 def show_materialized_views(
@@ -167,37 +171,31 @@ def show_columns(database: str, schema: str, table: str) -> str:
     return f"SHOW COLUMNS IN TABLE {target}"
 
 
-def show_columns_in_database(
-    database: str, *, after: str | None = None, limit: int = 1000
-) -> str:
+def show_columns_in_database(database: str) -> str:
     """Every column of every table/view in a database, in one statement.
 
     Mirrors `show_objects_in_database`'s rationale: SHOW is metadata-layer, so
     this needs no warehouse either. Verified live against a 614-table/
-    11511-column database (see DESIGN.md, "Column cache priming"): the
-    result shape matches `map_show_columns`, but unlike `show_objects_in_database`
-    the `limit`/`after` (LIMIT/FROM) arguments below are a confirmed no-op for
-    this statement -- it always returns the whole database's columns
-    regardless, which is also why the 10k-row assumption in `MAX_PAGE_SIZE`'s
-    docstring does not hold here (a real call returned 11511 rows). See
-    DESIGN.md, "Verified and unverified paging", for what this means for a
-    schema with more columns than the caller's page size.
+    11511-column database (see DESIGN.md, "Column cache priming").
+
+    Deliberately takes no `after`/`limit`: both are a confirmed no-op for this
+    statement, and it used to accept them anyway, which put a `LIMIT 10000`
+    into the SQL log for a call that returned 11511 rows. There is no partial
+    result to ask for here -- one call is the whole database's columns, or
+    nothing. `jobs.fetch_columns_database` decides on the row count alone
+    whether that response was too big to be worth using as-is.
     """
-    scope = quote_identifier(database)
-    return f"SHOW COLUMNS IN DATABASE {scope}{_paging(after, limit)}"
+    return f"SHOW COLUMNS IN DATABASE {quote_identifier(database)}"
 
 
-def show_columns_in_schema(
-    database: str, schema: str, *, after: str | None = None, limit: int = 1000
-) -> str:
+def show_columns_in_schema(database: str, schema: str) -> str:
     """Every column of every table/view in one schema, in one statement.
 
-    The fallback when `show_columns_in_database` is truncated -- see there.
-    Also verified live, same caveat: `limit`/`after` are a confirmed no-op
-    for this statement too (see DESIGN.md, "Verified and unverified paging").
+    The smaller chunk when `show_columns_in_database` came back too big -- see
+    there, including why this one takes no `after`/`limit` either.
     """
     target = f"{quote_identifier(database)}.{quote_identifier(schema)}"
-    return f"SHOW COLUMNS IN SCHEMA {target}{_paging(after, limit)}"
+    return f"SHOW COLUMNS IN SCHEMA {target}"
 
 
 def table_stats(database: str) -> str:
@@ -309,8 +307,8 @@ def pipe_activity(fetch_days: int) -> str:
     )
 
 
-def pipe_activity_history(fetch_days: int) -> str:
-    """One pipe's full ACCOUNT_USAGE load history, back to `fetch_days` ago.
+def pipe_activity_history(fetch_days: int, max_rows: int) -> str:
+    """One pipe's newest `max_rows` ACCOUNT_USAGE loads, back to `fetch_days` ago.
 
     The backfill half of a single pipe's detail view -- `pipe_activity`
     above deliberately only keeps the latest row per pipe, so a pipe's own
@@ -322,6 +320,15 @@ def pipe_activity_history(fetch_days: int) -> str:
     PIPE_NAME as an ordinary column, so this needs no target-table
     resolution at all -- just one more bound `%s` alongside `pipe_activity`'s
     two.
+
+    One pipe is not by itself a small result. `pipe_activity`'s QUALIFY
+    bounds the schema-wide query to one row per pipe, but nothing bounds a
+    *single* pipe's history except the fetch window, and a pipe loading a
+    file a minute across a 90-day window is six figures of rows. So the
+    newest `max_rows` are taken, which is the half of the window the detail
+    view shows anyway -- the ORDER BY is what makes that "the newest"
+    rather than an arbitrary slice, and it is why this is a real bound and
+    not just a smaller unbounded query.
     """
     return (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
@@ -330,7 +337,8 @@ def pipe_activity_history(fetch_days: int) -> str:
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
-        f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP())"
+        f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        f"ORDER BY LAST_LOAD_TIME DESC LIMIT {int(max_rows)}"
     )
 
 
@@ -341,8 +349,10 @@ def pipe_activity_history(fetch_days: int) -> str:
 PIPE_HISTORY_RETENTION_DAYS = 14
 
 
-def pipe_history(target_catalog: str, target_schema: str, target_table: str) -> str:
-    """One pipe's near-real-time load history, the last 14 days.
+def pipe_history(
+    target_catalog: str, target_schema: str, target_table: str, max_rows: int
+) -> str:
+    """One pipe's newest `max_rows` near-real-time loads, the last 14 days.
 
     INFORMATION_SCHEMA.COPY_HISTORY, a table function that requires a
     TABLE_NAME argument -- Snowflake exposes no way to ask for "this pipe's"
@@ -358,6 +368,11 @@ def pipe_history(target_catalog: str, target_schema: str, target_table: str) -> 
     reasoning `queries.py`'s own module docstring already carries for
     `SHOW ... FROM`. PIPE_NAME, filtering the function's *output*, is an
     ordinary WHERE value and binds normally.
+
+    `max_rows` bounds the result the same way `pipe_activity_history` does,
+    and matters slightly more here: the PIPE_NAME filter is applied to the
+    table function's output, so several pipes loading into one target table
+    all have their history returned before anything is discarded.
     """
     target = f"{quote_identifier(target_catalog)}.INFORMATION_SCHEMA.COPY_HISTORY"
     qualified_table = quote_literal(f"{target_catalog}.{target_schema}.{target_table}")
@@ -369,7 +384,8 @@ def pipe_history(target_catalog: str, target_schema: str, target_table: str) -> 
         "START_TIME => DATEADD('day', "
         f"-{PIPE_HISTORY_RETENTION_DAYS}, CURRENT_TIMESTAMP())"
         ")) "
-        "WHERE PIPE_NAME = %s"
+        "WHERE PIPE_NAME = %s "
+        f"ORDER BY LAST_LOAD_TIME DESC LIMIT {int(max_rows)}"
     )
 
 
@@ -401,8 +417,8 @@ def task_activity(fetch_days: int) -> str:
     )
 
 
-def task_activity_history(fetch_days: int) -> str:
-    """One task's full ACCOUNT_USAGE run history, back to `fetch_days` ago.
+def task_activity_history(fetch_days: int, max_rows: int) -> str:
+    """One task's newest `max_rows` ACCOUNT_USAGE runs, back to `fetch_days` ago.
 
     The backfill half of a single task's detail view -- `task_activity` above
     deliberately only keeps the latest row per task, so a task's own "Run
@@ -411,14 +427,17 @@ def task_activity_history(fetch_days: int) -> str:
     for a whole schema. Like `pipe_activity_history`, this needs no
     target-table resolution: ACCOUNT_USAGE.TASK_HISTORY already carries NAME
     as an ordinary column, so this is just one more bound `%s` alongside
-    `task_activity`'s two.
+    `task_activity`'s two. `max_rows` bounds it for the same reason
+    `pipe_activity_history` needs one: a minute-schedule task over a 90-day
+    window is six figures of runs, and only the newest are ever displayed.
     """
     return (
         "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
         "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
         "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND NAME = %s "
-        f"AND SCHEDULED_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP())"
+        f"AND SCHEDULED_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        f"ORDER BY SCHEDULED_TIME DESC LIMIT {int(max_rows)}"
     )
 
 
@@ -429,9 +448,14 @@ def task_activity_history(fetch_days: int) -> str:
 #: under this: the two sources must jointly cover every day with no gap.
 TASK_HISTORY_RETENTION_DAYS = 7
 
+#: The largest RESULT_LIMIT INFORMATION_SCHEMA.TASK_HISTORY accepts. Also a
+#: platform constant, so the history row cap is clamped to it rather than
+#: being allowed to build a statement Snowflake would reject.
+TASK_HISTORY_RESULT_LIMIT_MAX = 10_000
 
-def task_history(database: str, schema: str, task: str) -> str:
-    """One task's near-real-time run history, the last 7 days.
+
+def task_history(database: str, schema: str, task: str, max_rows: int) -> str:
+    """One task's newest `max_rows` near-real-time runs, the last 7 days.
 
     INFORMATION_SCHEMA.TASK_HISTORY, a table function that -- unlike
     INFORMATION_SCHEMA.COPY_HISTORY -- accepts TASK_NAME/DATABASE_NAME/
@@ -459,11 +483,18 @@ def task_history(database: str, schema: str, task: str) -> str:
     where PIPE_NAME filters the function's *output* rather than being a named
     argument itself.
 
-    RESULT_LIMIT is set to the function's own maximum (10000) to avoid
-    truncation within the 7-day window -- a task history light enough to fit
-    on screen is never anywhere near that many rows in practice.
+    RESULT_LIMIT used to be pinned at the function's own maximum (10000) on
+    the grounds that a real task history never comes near it. That is the
+    wrong shape of argument twice over: the function documents no ordering,
+    so *which* rows RESULT_LIMIT keeps is undefined, and "never comes near
+    it" is exactly the kind of assumption this project has since been caught
+    out by elsewhere. The outer ORDER BY ... LIMIT is what actually bounds
+    the result now, deterministically and to the newest runs; RESULT_LIMIT is
+    still set alongside it, clamped to the function's maximum, so the bound
+    is pushed into the function too rather than only applied to its output.
     """
     target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.TASK_HISTORY"
+    result_limit = max(1, min(int(max_rows), TASK_HISTORY_RESULT_LIMIT_MAX))
     return (
         "SELECT NAME, QUERY_ID, SCHEDULED_TIME, QUERY_START_TIME, COMPLETED_TIME, "
         "STATE, ERROR_CODE, ERROR_MESSAGE "
@@ -471,10 +502,11 @@ def task_history(database: str, schema: str, task: str) -> str:
         f"DATABASE_NAME => {quote_literal(database)}, "
         f"SCHEMA_NAME => {quote_literal(schema)}, "
         f"TASK_NAME => {quote_literal(task)}, "
-        "RESULT_LIMIT => 10000, "
+        f"RESULT_LIMIT => {result_limit}, "
         "SCHEDULED_TIME_RANGE_START => DATEADD('day', "
         f"-{TASK_HISTORY_RETENTION_DAYS}, CURRENT_TIMESTAMP())"
-        "))"
+        ")) "
+        f"ORDER BY SCHEDULED_TIME DESC LIMIT {int(max_rows)}"
     )
 
 

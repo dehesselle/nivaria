@@ -36,13 +36,18 @@ from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Static, TabbedContent
 from textual.widgets.data_table import CellDoesNotExist
 
+from snowcone.cache.repository import Repository
 from snowcone.format import format_timestamp_full
+from snowcone.models import Scope
 
 #: The one list/table in whichever detail view is mounted.
 LIST_TABLE = "detail-list"
 #: A single object's history table, and the panel describing its cursor row.
 HISTORY_TABLE = "detail-history"
 HISTORY_DETAIL = "detail-history-error"
+#: The line above a history table admitting that it is not the whole
+#: history -- see `HistoryView.sync_history_note`.
+HISTORY_NOTE = "detail-history-note"
 #: A single object's defining SQL.
 DEFINITION = "detail-definition"
 
@@ -138,6 +143,28 @@ class HistoryView(TabbedView):
     #: -- looked back up when a row is highlighted. Set by the subclass on
     #: every repaint.
     history_rows: dict[str, dict[str, Any]]
+
+    def sync_history_note(self, repo: Repository, *scopes: Scope) -> None:
+        """Say so when a history was capped rather than exhausted.
+
+        A history table has no natural bottom -- it just stops -- so a
+        capped one is indistinguishable from a complete one by looking at
+        it, which is exactly the kind of silent partial answer this app is
+        not allowed to give. Both halves of the merge are checked: either
+        source hitting its cap means the merged table is short of rows,
+        and neither one knows about the other's depth.
+        """
+        note = self.query_one(f"#{HISTORY_NOTE}", Static)  # type: ignore[attr-defined]
+        capped = any(repo.entry(scope).truncated for scope in scopes)
+        if capped:
+            note.update(
+                Text(
+                    "Showing the newest rows only -- this history reached the "
+                    "history row cap, so older rows were not fetched. Raise "
+                    "it in Settings, or narrow the fetch window."
+                )
+            )
+        note.display = capped
 
     @abstractmethod
     def detail_text(self, row: dict[str, Any]) -> str | None:

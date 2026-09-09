@@ -1089,3 +1089,43 @@ def test_task_history_columns_round_trip_but_are_unverified(repo) -> None:
     stored = repo.raw_rows(scope)[0]
     assert stored["NAME"] == "REFRESH_ORDERS"
     assert stored["STATE"] == "SUCCEEDED"
+
+
+def test_a_pass_is_not_truncated_unless_it_says_so(repo) -> None:
+    """The default has to be the honest one: a scope nobody told anything
+    about must not claim rows are missing."""
+    scope = databases_scope()
+    generation = repo.begin_pass(scope)
+    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.finish_pass(scope, generation)
+    assert not repo.entry(scope).truncated
+
+
+def test_a_truncated_pass_is_still_complete_not_an_error(repo) -> None:
+    """Truncated is a third thing, and the distinction is the whole point:
+    ERROR means nothing arrived and the sweep must not run; truncated means
+    the newest rows arrived, were swept in normally, and there are simply more
+    of them upstream."""
+    scope = databases_scope()
+    generation = repo.begin_pass(scope)
+    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.finish_pass(scope, generation, truncated=True)
+    entry = repo.entry(scope)
+    assert entry.truncated
+    assert entry.state is CacheState.COMPLETE
+    assert entry.error is None
+
+
+def test_a_new_pass_clears_a_previous_truncation(repo) -> None:
+    """Raising the cap, or a pipe going quiet, has to be able to clear the
+    flag -- otherwise the note outlives the condition it describes."""
+    scope = databases_scope()
+    generation = repo.begin_pass(scope)
+    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.finish_pass(scope, generation, truncated=True)
+
+    generation = repo.begin_pass(scope)
+    assert not repo.entry(scope).truncated
+    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.finish_pass(scope, generation)
+    assert not repo.entry(scope).truncated

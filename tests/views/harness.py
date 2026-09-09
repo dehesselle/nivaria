@@ -48,10 +48,10 @@ class Harness(App[None]):
         self.selected.append(event.ref)
 
 
-def load(repo: Repository, scope, rows) -> None:
+def load(repo: Repository, scope, rows, *, truncated: bool = False) -> None:
     generation = repo.begin_pass(scope)
     repo.write_page(scope, generation, rows, None)
-    repo.finish_pass(scope, generation)
+    repo.finish_pass(scope, generation, truncated=truncated)
 
 
 def put_table(repo: Repository, name: str, **extra) -> ObjectRef:

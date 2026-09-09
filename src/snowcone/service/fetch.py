@@ -42,6 +42,7 @@ from snowcone.service.jobs import (
     fetch_database,
     fetch_page,
 )
+from snowcone.settings import MAX_PAGES_PER_PASS, config
 
 _log = logging.getLogger(__name__)
 
@@ -199,7 +200,7 @@ class FetchService:
                 pipe_target = self._repo.pipe_target_table(
                     scope.database, scope.schema, scope.table
                 )
-            rows, cursor = fetch_page(
+            page = fetch_page(
                 self._gateway,
                 scope,
                 job.cursor,
@@ -218,12 +219,46 @@ class FetchService:
             self._announce(scope, complete=True)
             return
 
-        if not self._repo.write_page(scope, generation, rows, cursor):
+        cursor = page.cursor
+        if not self._repo.write_page(scope, generation, page.rows, cursor):
             # A newer pass claimed this scope while the page was in flight.
             return
 
         if cursor is None:
-            self._repo.finish_pass(scope, generation)
+            self._repo.finish_pass(scope, generation, truncated=page.truncated)
+            self._announce(scope, complete=True)
+            return
+
+        # Two guards on the continuation chain, and neither is belt-and-braces:
+        # the chain re-issues the same statement with a new cursor and trusts
+        # the result to shrink, which is precisely the assumption Snowflake
+        # has been observed to break.
+        if cursor == job.cursor:
+            # The cursor did not move, so this page is the last one's result
+            # again -- a statement that accepted LIMIT/FROM and ignored both.
+            # Not data loss: that response was the entire result, so the pass
+            # completes normally. Worth a warning, because the statement
+            # builder is supposed to have known this type is unpageable.
+            _log.warning(
+                "paging made no progress for %s (cursor stuck at %r); "
+                "treating the page as the whole result",
+                scope,
+                cursor,
+            )
+            self._repo.finish_pass(scope, generation, truncated=page.truncated)
+            self._announce(scope, complete=True)
+            return
+        if job.page + 1 >= config.get(MAX_PAGES_PER_PASS):
+            # The cursor keeps moving but the result will not end. Fail
+            # rather than truncate silently: fail_pass does not sweep, so
+            # what was already on screen stays there and the error is
+            # visible instead of a half-fetched scope looking complete.
+            message = (
+                f"stopped after {job.page + 1} pages -- paging is not "
+                "reaching the end of this result"
+            )
+            self._repo.fail_pass(scope, generation, message)
+            self._report(scope, message)
             self._announce(scope, complete=True)
             return
 

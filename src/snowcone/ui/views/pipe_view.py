@@ -65,6 +65,7 @@ from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import (
     DEFINITION,
     HISTORY_DETAIL,
+    HISTORY_NOTE,
     HISTORY_TABLE,
     HistoryView,
 )
@@ -88,6 +89,7 @@ class PipeView(HistoryView, ObjectView):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
             with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
+                yield Static("", id=HISTORY_NOTE)
                 history: DataTable[Text] = DataTable(
                     id=HISTORY_TABLE, cursor_type="row"
                 )
@@ -149,6 +151,14 @@ class PipeView(HistoryView, ObjectView):
         history_scope = self.history_scope() if target is not None else None
         if history_scope is not None:
             self.ensure(history_scope, ttl)
+
+        # Both merge sources carry their own row cap, and either one hitting
+        # it leaves the merged table short -- see HistoryView.
+        self.sync_history_note(
+            self.repo,
+            activity_history_scope,
+            *([history_scope] if history_scope is not None else []),
+        )
 
         # Merged by (FILE_NAME, LAST_LOAD_TIME) -- see the module docstring
         # for why this needs no "which scope succeeded" branching.

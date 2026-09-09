@@ -186,6 +186,14 @@ class FakeGateway:
         #: flag, since SHOW GRANTS is metadata-layer like show_warehouses/
         #: show_roles above.
         self.raise_on_tag_references = False
+        #: Object types for which this fake reproduces Snowflake's own
+        #: LIMIT/FROM no-op: SHOW returns every row in the schema or
+        #: database whatever the caller asked for. Empty by default, so
+        #: ordinary tests still exercise real paging; a test that wants to
+        #: prove the scheduler survives the misbehaviour opts in. It is a
+        #: knob rather than a hard-coded {PIPE, STAGE} because the point of
+        #: the guard is that it holds for a type nobody has verified yet.
+        self.paging_noop_types: set[ObjectType] = set()
         #: Every call, so a test can assert *what was fetched*, not merely
         #: what ended up rendered.
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -237,9 +245,11 @@ class FakeGateway:
         self.calls.append(
             ("show_objects", (object_type, database, schema, after, limit))
         )
-        names = self._page(
-            self.objects.get((database, schema, object_type), []), after, limit
-        )
+        all_names = self.objects.get((database, schema, object_type), [])
+        if object_type in self.paging_noop_types:
+            names = sorted(all_names)
+        else:
+            names = self._page(all_names, after, limit)
         return [
             {
                 "name": name,
@@ -271,8 +281,10 @@ class FakeGateway:
                 continue
             everything.extend((name, schema) for name in names)
         everything.sort()
-        if after is not None:
-            everything = [pair for pair in everything if pair[0] > after]
+        if object_type not in self.paging_noop_types:
+            if after is not None:
+                everything = [pair for pair in everything if pair[0] > after]
+            everything = everything[:limit]
         return [
             {
                 "name": name,
@@ -283,7 +295,7 @@ class FakeGateway:
                 "rows": 0,
                 "bytes": 0,
             }
-            for name, schema in everything[:limit]
+            for name, schema in everything
         ]
 
     def show_columns(
@@ -335,39 +347,33 @@ class FakeGateway:
         ]
 
     def show_columns_in_database(
-        self,
-        database: str,
-        *,
-        after: str | None = None,
-        limit: int = 1000,
-        allow_reconnect: bool = True,
+        self, database: str, *, allow_reconnect: bool = True
     ) -> list[Row]:
         """Every column of every table in `database`, raw-shaped like the fake
-        `show_columns` above, so `map_show_columns` is exercised for real."""
-        self.calls.append(("show_columns_in_database", (database, after, limit)))
+        `show_columns` above, so `map_show_columns` is exercised for real.
+
+        Returns everything, with nothing to page or cap by, because that is
+        what the real statement does -- SHOW COLUMNS ignores LIMIT outright.
+        The caller chunks on the response's size instead.
+        """
+        self.calls.append(("show_columns_in_database", (database,)))
         raw: list[dict[str, Any]] = []
         for db, schema, table in sorted(self.columns):
             if db != database:
                 continue
             raw.extend(self._raw_columns(db, schema, table))
-        return queries.map_show_columns(raw[:limit])
+        return queries.map_show_columns(raw)
 
     def show_columns_in_schema(
-        self,
-        database: str,
-        schema: str,
-        *,
-        after: str | None = None,
-        limit: int = 1000,
-        allow_reconnect: bool = True,
+        self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]:
-        self.calls.append(("show_columns_in_schema", (database, schema, after, limit)))
+        self.calls.append(("show_columns_in_schema", (database, schema)))
         raw: list[dict[str, Any]] = []
         for db, sch, table in sorted(self.columns):
             if db != database or sch != schema:
                 continue
             raw.extend(self._raw_columns(db, sch, table))
-        return queries.map_show_columns(raw[:limit])
+        return queries.map_show_columns(raw)
 
     def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]:
         self.calls.append(("show_warehouses", ()))
@@ -421,17 +427,18 @@ class FakeGateway:
         schema: str,
         pipe: str,
         fetch_days: int,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         key = (database, schema, pipe)
-        self.calls.append(("pipe_activity_history", (*key, fetch_days)))
+        self.calls.append(("pipe_activity_history", (*key, fetch_days, max_rows)))
         if self.raise_on_pipe_activity_history:
             raise RuntimeError(
                 "SQL access control error: Insufficient privileges to "
                 "operate on database 'SNOWFLAKE'"
             )
-        return list(self._pipe_activity_history.get(key, []))
+        return list(self._pipe_activity_history.get(key, []))[:max_rows]
 
     def pipe_history(
         self,
@@ -439,14 +446,15 @@ class FakeGateway:
         target_schema: str,
         target_table: str,
         pipe_name: str,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         key = (target_catalog, target_schema, target_table, pipe_name)
-        self.calls.append(("pipe_history", key))
+        self.calls.append(("pipe_history", (*key, max_rows)))
         if self.raise_on_pipe_history:
             raise RuntimeError("No active warehouse selected in the current session")
-        return list(self._pipe_history.get(key, []))
+        return list(self._pipe_history.get(key, []))[:max_rows]
 
     def task_activity(
         self,
@@ -470,31 +478,33 @@ class FakeGateway:
         schema: str,
         task: str,
         fetch_days: int,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         key = (database, schema, task)
-        self.calls.append(("task_activity_history", (*key, fetch_days)))
+        self.calls.append(("task_activity_history", (*key, fetch_days, max_rows)))
         if self.raise_on_task_activity_history:
             raise RuntimeError(
                 "SQL access control error: Insufficient privileges to "
                 "operate on database 'SNOWFLAKE'"
             )
-        return list(self._task_activity_history.get(key, []))
+        return list(self._task_activity_history.get(key, []))[:max_rows]
 
     def task_history(
         self,
         database: str,
         schema: str,
         task: str,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         key = (database, schema, task)
-        self.calls.append(("task_history", key))
+        self.calls.append(("task_history", (*key, max_rows)))
         if self.raise_on_task_history:
             raise RuntimeError("No active warehouse selected in the current session")
-        return list(self._task_history.get(key, []))
+        return list(self._task_history.get(key, []))[:max_rows]
 
     def show_grants_on_schema(
         self, database: str, schema: str, *, allow_reconnect: bool = True

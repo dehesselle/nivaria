@@ -26,8 +26,12 @@ class RecordingCursor:
         self.description = [(name,) for name in self._owner.columns]
         self._rows = list(self._owner.rows)
 
-    def fetchall(self) -> list[tuple[Any, ...]]:
-        return self._rows
+    def fetchmany(self, size: int) -> list[tuple[Any, ...]]:
+        # Drains, like a real cursor: the gateway reads in batches so it can
+        # abandon a runaway result, and a fake that kept returning the same
+        # rows forever would make that loop look broken.
+        batch, self._rows = self._rows[:size], self._rows[size:]
+        return batch
 
     def close(self) -> None:
         self.closed = True
@@ -352,7 +356,7 @@ def test_pipe_activity_history_binds_database_schema_and_pipe_as_parameters() ->
             "ORDERS",
         )
     ]
-    rows = gateway.pipe_activity_history("MYDB", "PUBLIC", "MY_PIPE", 90)
+    rows = gateway.pipe_activity_history("MYDB", "PUBLIC", "MY_PIPE", 90, 5000)
     statement, params = connection.executed[-1]
     assert "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY" in statement
     assert "QUALIFY" not in statement
@@ -380,7 +384,7 @@ def test_pipe_history_binds_pipe_name_and_qualifies_the_target_table() -> None:
             "LOAD_ORDERS",
         )
     ]
-    rows = gateway.pipe_history("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS")
+    rows = gateway.pipe_history("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS", 5000)
     statement, params = connection.executed[-1]
     assert 'FROM TABLE("MYDB".INFORMATION_SCHEMA.COPY_HISTORY(' in statement
     assert "TABLE_NAME => 'MYDB.PUBLIC.ORDERS'" in statement
@@ -455,7 +459,7 @@ def test_task_activity_history_binds_database_schema_and_task_as_parameters() ->
             None,
         )
     ]
-    rows = gateway.task_activity_history("MYDB", "PUBLIC", "REFRESH_ORDERS", 90)
+    rows = gateway.task_activity_history("MYDB", "PUBLIC", "REFRESH_ORDERS", 90, 5000)
     statement, params = connection.executed[-1]
     assert "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY" in statement
     assert "QUALIFY" not in statement
@@ -491,7 +495,7 @@ def test_task_history_calls_the_table_function_with_no_bound_params() -> None:
             None,
         )
     ]
-    rows = gateway.task_history("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    rows = gateway.task_history("MYDB", "PUBLIC", "REFRESH_ORDERS", 5000)
     statement, params = connection.executed[-1]
     assert 'FROM TABLE("MYDB".INFORMATION_SCHEMA.TASK_HISTORY(' in statement
     assert "TASK_NAME => 'REFRESH_ORDERS'" in statement
@@ -510,3 +514,57 @@ def test_background_priority_retries_but_never_reconnects_unattended() -> None:
     # One real attempt, then the retry's own acquire fails fast -- no second
     # query attempt against a reconnected session.
     assert connection.attempts == 1
+
+
+def test_a_result_past_the_row_ceiling_is_abandoned() -> None:
+    """The bound that applies to every statement, not just the ones somebody
+    remembered to cap. Snowflake has returned more than snowcone asked for
+    often enough that the per-statement limits are an expectation rather than
+    a guarantee, and materialising an unbounded result pins a pool connection
+    for as long as it takes."""
+    from snowcone.gateway.gateway import ResultTooLargeError
+    from snowcone.settings import ROW_CEILING, config
+
+    config.set(ROW_CEILING, 100)
+    gateway, connection, _ = make_gateway()
+    connection.rows = [(f"T{index}",) for index in range(500)]
+    with pytest.raises(ResultTooLargeError) as excinfo:
+        gateway.show_databases()
+    assert "100" in str(excinfo.value)
+
+
+def test_a_result_at_the_row_ceiling_is_still_returned() -> None:
+    """The ceiling is a limit, not a threshold to stay under: a result of
+    exactly N rows is a complete, legitimate answer."""
+    from snowcone.settings import ROW_CEILING, config
+
+    config.set(ROW_CEILING, 100)
+    gateway, connection, _ = make_gateway()
+    connection.rows = [(f"T{index}",) for index in range(100)]
+    assert len(gateway.show_databases()) == 100
+
+
+def test_an_over_ceiling_result_is_not_retried() -> None:
+    """_fetch retries any failure once, which is right for a session the
+    server dropped and wrong here: the statement will return just as much the
+    second time, so the retry only pays for the damage twice."""
+    from snowcone.gateway.gateway import ResultTooLargeError
+    from snowcone.settings import ROW_CEILING, config
+
+    config.set(ROW_CEILING, 10)
+    gateway, connection, _ = make_gateway()
+    connection.rows = [(f"T{index}",) for index in range(50)]
+    with pytest.raises(ResultTooLargeError):
+        gateway.show_databases()
+    assert connection.attempts == 1
+
+
+def test_the_row_ceiling_can_be_switched_off() -> None:
+    """0 disables it, per the setting's own description -- someone who knows
+    what they are doing gets to decide the ceiling is in their way."""
+    from snowcone.settings import ROW_CEILING, config
+
+    config.set(ROW_CEILING, 0)
+    gateway, connection, _ = make_gateway()
+    connection.rows = [(f"T{index}",) for index in range(5000)]
+    assert len(gateway.show_databases()) == 5000

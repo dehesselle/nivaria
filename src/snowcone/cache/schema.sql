@@ -12,6 +12,15 @@
 -- or filter on. Anything not listed is dropped on ingest rather than failing,
 -- so Snowflake adding a column is a non-event.
 --
+-- There is no migration system here: every statement is CREATE TABLE IF NOT
+-- EXISTS, so a column added to an existing table never appears in a cache
+-- file that already exists, and the first write to it fails. snowcone is
+-- pre-1.0 with no backward-compatibility policy, so the answer is to edit
+-- this file in place and delete the cache file. Two columns have been added
+-- that way so far: FIRST_ERROR_MESSAGE/FIRST_ERROR_LINE_NUMBER on the
+-- copy-history tables, and cache_entry.truncated. A brand-new table is still
+-- the right move whenever "delete your cache" is not an acceptable answer.
+--
 -- Bookkeeping columns are underscore-prefixed so they can never collide with
 -- a Snowflake column name:
 --   _scope       which cache_entry row owns this row
@@ -558,5 +567,12 @@ CREATE TABLE IF NOT EXISTS cache_entry (
     fetched_at  REAL,
     next_cursor TEXT,
     row_count   INTEGER NOT NULL DEFAULT 0,
-    error       TEXT
+    error       TEXT,
+    -- Whether the statement behind the last completed pass hit its own
+    -- row cap, so rows exist that were deliberately not fetched. Distinct
+    -- from ERROR (nothing arrived) and from COMPLETE (everything did):
+    -- the rows here are real and current, there are just more of them
+    -- upstream. Added in place, which means an existing cache file has to
+    -- be deleted -- see the header above.
+    truncated   INTEGER NOT NULL DEFAULT 0
 );

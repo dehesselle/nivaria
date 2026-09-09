@@ -17,8 +17,25 @@ from typing import Any, Protocol
 from snowcone.gateway import queries, sql_log
 from snowcone.gateway.pool import ConnectionPool
 from snowcone.models import ObjectType
+from snowcone.settings import ROW_CEILING, config
 
 Row = dict[str, Any]
+
+#: How many rows are pulled off a cursor at a time while checking the row
+#: ceiling. Big enough that the check costs nothing on an ordinary result,
+#: small enough that a runaway one is noticed before it is fully in memory.
+_FETCH_BATCH = 5_000
+
+
+class ResultTooLargeError(RuntimeError):
+    """A statement returned more rows than the row ceiling allows.
+
+    Deliberately its own type rather than a bare RuntimeError, for one
+    reason: `PoolGateway._fetch` retries any failure once against a fresh
+    connection, which is right for a dropped session and wrong for this --
+    a statement that returned too much will return too much again, and the
+    retry would just pay for it twice.
+    """
 
 
 class SnowflakeGateway(Protocol):
@@ -70,22 +87,11 @@ class SnowflakeGateway(Protocol):
     ) -> list[Row]: ...
 
     def show_columns_in_database(
-        self,
-        database: str,
-        *,
-        after: str | None = None,
-        limit: int = 1000,
-        allow_reconnect: bool = True,
+        self, database: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
 
     def show_columns_in_schema(
-        self,
-        database: str,
-        schema: str,
-        *,
-        after: str | None = None,
-        limit: int = 1000,
-        allow_reconnect: bool = True,
+        self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
 
     def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]: ...
@@ -135,6 +141,7 @@ class SnowflakeGateway(Protocol):
         schema: str,
         pipe: str,
         fetch_days: int,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -145,6 +152,7 @@ class SnowflakeGateway(Protocol):
         target_schema: str,
         target_table: str,
         pipe_name: str,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -164,6 +172,7 @@ class SnowflakeGateway(Protocol):
         schema: str,
         task: str,
         fetch_days: int,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -173,6 +182,7 @@ class SnowflakeGateway(Protocol):
         database: str,
         schema: str,
         task: str,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -204,6 +214,10 @@ class PoolGateway:
         # round trip on an already-rare path.
         try:
             return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
+        except ResultTooLargeError:
+            # The one failure the retry above must not repeat: it is a
+            # property of the statement, not of the connection.
+            raise
         except Exception:  # noqa: BLE001 -- see pool.acquire, same boundary
             return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
 
@@ -223,11 +237,41 @@ class PoolGateway:
                 else:
                     cursor.execute(statement)
                 columns = [description[0] for description in cursor.description]
-                return [
-                    dict(zip(columns, row, strict=True)) for row in cursor.fetchall()
-                ]
+                return self._collect(cursor, columns, statement)
             finally:
                 cursor.close()
+
+    @staticmethod
+    def _collect(cursor: Any, columns: list[str], statement: str) -> list[Row]:
+        """Read a cursor out in batches, abandoning it past the row ceiling.
+
+        The last line of defence, and the only bound that applies to every
+        statement rather than to the ones somebody remembered to cap.
+        Snowflake has repeatedly returned more than snowcone asked for --
+        LIMIT is a no-op for several SHOW commands, and a single pipe's
+        COPY_HISTORY is bounded by nothing but its time window -- so the
+        statement builders' own caps are an expectation, not a guarantee.
+
+        Be clear about what this does buy: it bounds what snowcone
+        *materialises* and hands the pool connection back early, rather than
+        spending minutes building dicts nobody asked for. It does not stop
+        Snowflake from having produced the result. Raising rather than
+        truncating is deliberate: the ceiling is meant to be unreachable, so
+        reaching it is a bug worth seeing, and `fail_pass` keeps the rows
+        already on screen while it is investigated.
+        """
+        ceiling = config.get(ROW_CEILING)
+        rows: list[Row] = []
+        while True:
+            batch = cursor.fetchmany(_FETCH_BATCH)
+            if not batch:
+                return rows
+            rows.extend(dict(zip(columns, row, strict=True)) for row in batch)
+            if 0 < ceiling < len(rows):
+                raise ResultTooLargeError(
+                    f"statement returned more than {ceiling} rows "
+                    f"(row ceiling): {statement[:80]}"
+                )
 
     def show_databases(
         self,
@@ -304,30 +348,19 @@ class PoolGateway:
         return queries.map_show_columns(rows)
 
     def show_columns_in_database(
-        self,
-        database: str,
-        *,
-        after: str | None = None,
-        limit: int = 1000,
-        allow_reconnect: bool = True,
+        self, database: str, *, allow_reconnect: bool = True
     ) -> list[Row]:
         rows = self._fetch(
-            queries.show_columns_in_database(database, after=after, limit=limit),
+            queries.show_columns_in_database(database),
             allow_reconnect=allow_reconnect,
         )
         return queries.map_show_columns(rows)
 
     def show_columns_in_schema(
-        self,
-        database: str,
-        schema: str,
-        *,
-        after: str | None = None,
-        limit: int = 1000,
-        allow_reconnect: bool = True,
+        self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]:
         rows = self._fetch(
-            queries.show_columns_in_schema(database, schema, after=after, limit=limit),
+            queries.show_columns_in_schema(database, schema),
             allow_reconnect=allow_reconnect,
         )
         return queries.map_show_columns(rows)
@@ -422,11 +455,12 @@ class PoolGateway:
         schema: str,
         pipe: str,
         fetch_days: int,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.pipe_activity_history(fetch_days),
+            queries.pipe_activity_history(fetch_days, max_rows),
             (database, schema, pipe),
             allow_reconnect=allow_reconnect,
         )
@@ -437,11 +471,12 @@ class PoolGateway:
         target_schema: str,
         target_table: str,
         pipe_name: str,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.pipe_history(target_catalog, target_schema, target_table),
+            queries.pipe_history(target_catalog, target_schema, target_table, max_rows),
             (pipe_name,),
             allow_reconnect=allow_reconnect,
         )
@@ -466,11 +501,12 @@ class PoolGateway:
         schema: str,
         task: str,
         fetch_days: int,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.task_activity_history(fetch_days),
+            queries.task_activity_history(fetch_days, max_rows),
             (database, schema, task),
             allow_reconnect=allow_reconnect,
         )
@@ -480,11 +516,12 @@ class PoolGateway:
         database: str,
         schema: str,
         task: str,
+        max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.task_history(database, schema, task),
+            queries.task_history(database, schema, task, max_rows),
             (),
             allow_reconnect=allow_reconnect,
         )

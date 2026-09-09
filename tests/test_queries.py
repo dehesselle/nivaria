@@ -40,9 +40,43 @@ def test_show_schemas_scopes_to_a_quoted_database() -> None:
 
 
 def test_show_objects_uses_snowflakes_own_plural_noun() -> None:
-    assert queries.show_objects(ObjectType.PIPE, "MYDB", "PUBLIC", limit=10) == (
-        'SHOW PIPES IN SCHEMA "MYDB"."PUBLIC" LIMIT 10'
+    assert queries.show_objects(ObjectType.VIEW, "MYDB", "PUBLIC", limit=10) == (
+        'SHOW VIEWS IN SCHEMA "MYDB"."PUBLIC" LIMIT 10'
     )
+
+
+def test_an_unpageable_type_is_asked_for_without_a_limit() -> None:
+    """SHOW PIPES and SHOW STAGES accept LIMIT/FROM and ignore both, on two
+    verified accounts. Emitting the clause anyway would log a bound that
+    was never applied, and invite a caller to page a result that never
+    shrinks -- which is exactly how the continuation chain used to hang."""
+    for object_type in (ObjectType.PIPE, ObjectType.STAGE):
+        statement = queries.show_objects(
+            object_type, "MYDB", "PUBLIC", after="LOAD_ORDERS", limit=10
+        )
+        assert "LIMIT" not in statement
+        assert "FROM" not in statement
+        assert statement.endswith('IN SCHEMA "MYDB"."PUBLIC"')
+
+
+def test_an_unpageable_type_is_asked_for_without_a_limit_in_a_database() -> None:
+    """The whole-database prime carries the same finding -- SHOW PIPES IN
+    DATABASE ... LIMIT 300 returned all 614 pipes on a real account."""
+    statement = queries.show_objects_in_database(ObjectType.PIPE, "MYDB", limit=300)
+    assert statement == 'SHOW PIPES IN DATABASE "MYDB"'
+
+
+def test_a_pageable_type_still_gets_its_limit() -> None:
+    """The finding is per object type, not a property of SHOW ... IN
+    SCHEMA/IN DATABASE: tables and views honoured LIMIT correctly in the
+    same session that caught pipes ignoring it."""
+    for object_type in (ObjectType.TABLE, ObjectType.VIEW, ObjectType.TASK):
+        assert "LIMIT 10" in queries.show_objects(
+            object_type, "MYDB", "PUBLIC", limit=10
+        )
+        assert "LIMIT 10" in queries.show_objects_in_database(
+            object_type, "MYDB", limit=10
+        )
 
 
 def test_show_objects_pages_with_a_keyset_cursor() -> None:
@@ -126,14 +160,15 @@ def test_pipe_activity_history_targets_one_pipe_with_bound_params() -> None:
     """The per-pipe backfill for a single pipe's detail view: same source and
     window as pipe_activity, but filtered to one PIPE_NAME instead of
     QUALIFY-reduced, since it needs the full history, not just the latest."""
-    assert queries.pipe_activity_history(90) == (
+    assert queries.pipe_activity_history(90, 5000) == (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
         "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
         "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
-        "AND LAST_LOAD_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP())"
+        "AND LAST_LOAD_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "ORDER BY LAST_LOAD_TIME DESC LIMIT 5000"
     )
 
 
@@ -141,14 +176,15 @@ def test_pipe_history_targets_information_schema_copy_history() -> None:
     """TABLE_NAME and START_TIME are table-function named arguments, not
     ordinary WHERE values, so they are quote_literal'd/computed as plain SQL
     text; PIPE_NAME filters the function's output and binds normally."""
-    assert queries.pipe_history("MYDB", "PUBLIC", "ORDERS") == (
+    assert queries.pipe_history("MYDB", "PUBLIC", "ORDERS", 5000) == (
         "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME, "
         "FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
         'FROM TABLE("MYDB".INFORMATION_SCHEMA.COPY_HISTORY('
         "TABLE_NAME => 'MYDB.PUBLIC.ORDERS', "
         "START_TIME => DATEADD('day', -14, CURRENT_TIMESTAMP())"
         ")) "
-        "WHERE PIPE_NAME = %s"
+        "WHERE PIPE_NAME = %s "
+        "ORDER BY LAST_LOAD_TIME DESC LIMIT 5000"
     )
 
 
@@ -169,12 +205,13 @@ def test_task_activity_targets_account_usage_task_history_with_bound_params() ->
 def test_task_activity_history_targets_one_task_with_bound_params() -> None:
     """The per-task backfill: same source and window as task_activity, but
     filtered to one NAME instead of QUALIFY-reduced."""
-    assert queries.task_activity_history(90) == (
+    assert queries.task_activity_history(90, 5000) == (
         "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
         "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
         "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND NAME = %s "
-        "AND SCHEDULED_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP())"
+        "AND SCHEDULED_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "ORDER BY SCHEDULED_TIME DESC LIMIT 5000"
     )
 
 
@@ -187,7 +224,7 @@ def test_task_history_targets_information_schema_task_history_with_named_args() 
     happens to be current in the session, which the pool never sets -- see
     queries.task_history's docstring for the real-account error this caused
     before being qualified."""
-    statement = queries.task_history("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    statement = queries.task_history("MYDB", "PUBLIC", "REFRESH_ORDERS", 5000)
     assert statement == (
         "SELECT NAME, QUERY_ID, SCHEDULED_TIME, QUERY_START_TIME, COMPLETED_TIME, "
         "STATE, ERROR_CODE, ERROR_MESSAGE "
@@ -195,9 +232,45 @@ def test_task_history_targets_information_schema_task_history_with_named_args() 
         "DATABASE_NAME => 'MYDB', "
         "SCHEMA_NAME => 'PUBLIC', "
         "TASK_NAME => 'REFRESH_ORDERS', "
-        "RESULT_LIMIT => 10000, "
+        "RESULT_LIMIT => 5000, "
         "SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP())"
-        "))"
+        ")) "
+        "ORDER BY SCHEDULED_TIME DESC LIMIT 5000"
     )
     assert "%s" not in statement
     assert "WHERE" not in statement
+
+
+def test_every_history_statement_takes_its_newest_rows_and_stops() -> None:
+    """The four history statements are the only ones whose row count is
+    driven by how *busy* an object is rather than how many objects exist, so
+    they are the ones that can return six figures of rows for a single pipe.
+    ORDER BY ... DESC is half the bound: without it LIMIT would keep an
+    arbitrary slice, which is worse than no cap because it looks complete."""
+    for statement, column in (
+        (queries.pipe_activity_history(90, 250), "LAST_LOAD_TIME"),
+        (queries.pipe_history("MYDB", "PUBLIC", "ORDERS", 250), "LAST_LOAD_TIME"),
+        (queries.task_activity_history(90, 250), "SCHEDULED_TIME"),
+        (queries.task_history("MYDB", "PUBLIC", "T", 250), "SCHEDULED_TIME"),
+    ):
+        assert statement.endswith(f"ORDER BY {column} DESC LIMIT 250"), statement
+
+
+def test_the_task_history_function_argument_is_clamped_to_its_own_maximum() -> None:
+    """RESULT_LIMIT is a table-function argument with a documented ceiling of
+    10000; the row cap is an ordinary setting someone may raise past that. The
+    outer LIMIT still carries whatever was asked for."""
+    statement = queries.task_history("MYDB", "PUBLIC", "T", 50_000)
+    assert "RESULT_LIMIT => 10000," in statement
+    assert statement.endswith("ORDER BY SCHEDULED_TIME DESC LIMIT 50000")
+
+
+def test_show_columns_in_a_database_or_schema_asks_for_no_page() -> None:
+    """SHOW COLUMNS ignores LIMIT outright -- a real IN DATABASE call returned
+    11511 rows against a LIMIT of 10000 -- so the builders take no paging
+    arguments at all rather than logging a bound Snowflake never applies."""
+    assert queries.show_columns_in_database("MYDB") == 'SHOW COLUMNS IN DATABASE "MYDB"'
+    assert (
+        queries.show_columns_in_schema("MYDB", "PUBLIC")
+        == 'SHOW COLUMNS IN SCHEMA "MYDB"."PUBLIC"'
+    )

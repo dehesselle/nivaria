@@ -210,8 +210,20 @@ afterward.
 ### The freshness ledger and the pass protocol
 
 One ledger row per scope records its state, generation, last completion time,
-row count and last error. This is what makes a refresh *surgical* rather than
-"fetch everything again".
+row count, last error, and whether the pass was **truncated**. This is what
+makes a refresh *surgical* rather than "fetch everything again".
+
+`truncated` is a third thing alongside COMPLETE and ERROR, not a shade of
+either: the rows are real, current and swept in normally, there are simply
+more of them upstream than the statement's own row cap asked for. It exists
+because a history table has no natural bottom — it just stops — so a capped
+one is indistinguishable from a complete one by looking at it, and presenting
+a partial answer as a whole one is the thing this design does not allow.
+`HistoryView` renders a note above the table when it is set, and `begin_pass`
+clears it, so raising the cap (or a pipe going quiet) retires the note on its
+own. Adding the column meant editing `schema.sql` in place, which means
+deleting an existing cache file — the second time that trade has been taken,
+after `FIRST_ERROR_MESSAGE`.
 
 Refreshing a scope is a **pass**:
 
@@ -503,10 +515,16 @@ settle.
 > unique across schemas — an `ORDERS` table in forty schemas is forty rows
 > sharing one cursor value — so resuming after a name silently skips the rest
 > of them. The prime therefore issues one unpaged statement and, if the result
-> comes back at Snowflake's 10 000-row cap (truncated, and not safely
-> resumable), falls back to fetching schema by schema. Within a *single*
-> schema, where names are unique, keyset paging is verified correct and is
-> used.
+> comes back at or over `PRIME_CHUNK_THRESHOLD`, falls back to fetching schema
+> by schema. Within a *single* schema, where names are unique, keyset paging is
+> verified correct and is used — for the object types that honour it.
+
+That threshold used to be read as "Snowflake truncated us at 10 000". It is
+read as "this response is too big to take in one bite" now, which reaches the
+same decision for an honest reason: a `SHOW` result at the threshold may or
+may not be complete — `SHOW COLUMNS` has returned 11 511 rows against a
+limit of 10 000 — and either way the answer is the same: fall back to a chunk
+small enough to trust whole.
 
 ### Column cache priming
 
@@ -531,13 +549,13 @@ as an afterthought — see below.
 
 `COLUMNS_PRIME` mirrors `DATABASE_PRIME` one level deeper, in three tiers:
 
-1. **Whole database, one round trip**: `SHOW COLUMNS IN DATABASE`, capped at
-   the same 10 000-row `SHOW` limit.
-2. **Truncated → one round trip per schema**: `SHOW COLUMNS IN SCHEMA`. This
-   is the common case in practice, since columns multiply table count —
-   a database that fit under the cap for `DATABASE_PRIME` can easily blow it
-   here.
-3. **A single schema still truncated → one round trip per table**: the
+1. **Whole database, one round trip**: `SHOW COLUMNS IN DATABASE`, judged
+   against the same `PRIME_CHUNK_THRESHOLD` as `DATABASE_PRIME`.
+2. **Over the threshold → one round trip per schema**: `SHOW COLUMNS IN
+   SCHEMA`. This is the common case in practice, since columns multiply table
+   count — a database that fit under the threshold for `DATABASE_PRIME` can
+   easily blow it here.
+3. **A single schema still over it → one round trip per table**: the
    already-existing lazy per-table fetch, just requested proactively instead
    of on open.
 
@@ -554,7 +572,7 @@ finished first — which would be the one dependency this architecture
 otherwise has none of (see "Scopes: the unit of everything") — that fallback
 asks Snowflake for the schema names directly when the cache has none, and
 separately requests the `SCHEMAS` scope so the tree benefits too. The deeper
-per-schema-truncated-too fallback is left depending on cache being warm by
+per-schema-still-too-big fallback is left depending on cache being warm by
 then, an accepted gap: it only matters for one schema large enough to
 overflow the cap by itself, and the menu action's own object-list priming is
 already running concurrently by the time it could matter.
@@ -563,17 +581,17 @@ already running concurrently by the time it could matter.
 (Snowflake 10.32.102) against a database with 614 tables/11 511 columns
 across 25 schemas: the result shape matches `map_show_columns`'s assumptions
 exactly (`TEXT`/`FIXED`/`TIMESTAMP_NTZ`/`VARIANT` blobs all parsed as
-expected). Two things did **not** match the assumptions this tiering was
-built on, though neither breaks it in practice — see "Verified and
-unverified paging" for the first (`LIMIT`/`FROM` is a no-op for this command,
-at both scopes) and the note there on the 10k cap for the second (a real
-`SHOW COLUMNS IN DATABASE` call returned 11 511 rows, over the cap
-`MAX_PAGE_SIZE` assumes is a hard ceiling). Tier 1→2→3 still terminates
-correctly regardless: each tier issues exactly one call and reads
-`usable = len(rows) < cap`, never a `FROM`-based continuation, so a tier that
-comes back at or over `cap` simply falls through to the next one — see
-"Verified and unverified paging" for where an actual continuation loop
-*would* be affected.
+expected). Two things did **not** match the assumptions this tiering was built
+on: `LIMIT`/`FROM` is a no-op for this command at both scopes, and the same
+call returned 11 511 rows, over the 10k figure `MAX_PAGE_SIZE` was once
+documented as a hard ceiling.
+
+Neither breaks the tiering. Each tier issues exactly one call and reads
+`usable = len(rows) < threshold`, never a `FROM`-based continuation, so a tier
+that comes back at or over the threshold simply falls through to the next one.
+Columns are in fact the one place the no-op finding costs nothing: the tiers
+*are* the chunking mechanism here, and paging was never used. The builders no
+longer accept `after`/`limit` at all, so that cannot quietly be reintroduced.
 
 Priming always runs at **background** priority, the same tier as the
 staleness sweep: it can run for a while with nobody watching, so it must
@@ -607,46 +625,109 @@ far has had enough of them to page through.
 > against schemas at real scale: `SHOW PIPES IN SCHEMA ... LIMIT 10`
 > returned all 395 pipes in the schema; `SHOW COLUMNS IN SCHEMA ... LIMIT
 > 10` returned all 6655 columns; `SHOW STAGES IN SCHEMA ... LIMIT 10` also
-> returned every stage in its schema, unpaged — so stages carry the same
-> no-op, moved here from "unverified" above. This is now confirmed across
-> two unrelated accounts, not an artifact of the sandbox's data.
->
-> This matters for pipes specifically: `ObjectType.PIPE`'s `ScopeType.OBJECTS`
-> scope is the one caller that reaches `show_objects` through
-> `jobs.fetch_page`'s per-schema continuation (the path "Verified and
-> unverified paging" above says *is* used, unlike the database-wide prime),
-> which trusts `len(rows) < limit` to detect the end of a result and
-> re-issues the request with `FROM <last row's name>` otherwise. A schema
-> whose pipe count reaches the configured page size (`PAGE_SIZE`, default
-> 1000) would never see `len(rows) < limit` — every "next page" comes back as
-> the full, identical result, with the same last-row name, forever. Nothing
-> in `FetchService._execute` detects a repeated cursor or caps the number of
-> continuations (see there), so this is an unbounded loop, not merely a slow
-> one: the scope's pass never reaches `finish_pass`, and the fetch keeps
-> re-querying at whatever priority it started at. Neither probed account had
-> a single schema over 1000 pipes yet (395 on production, 27 on the
-> sandbox), so this was not observed to actually hang on either — the no-op
-> paging itself is what was directly observed, and the hang is what the
-> existing continuation code, read against it, implies. `ObjectType.STAGE`
-> has no per-object view and is not known to be fetched through this same
-> continuation path today, so its exposure is unclear rather than ruled out.
-> Columns carry no such risk despite the identical no-op finding: nothing in
-> the fetch scheduler ever calls `show_columns_in_schema`/`in_database`
-> through a continuation loop — both are one-shot calls from
-> `COLUMNS_PRIME`'s tiers (see "Column cache priming"), which read `usable`
-> off the row count directly rather than looping on it. Not investigated
-> further or fixed here — this document records what was verified, not a
-> patch.
+> returned every stage in its schema, unpaged. Confirmed across two
+> unrelated accounts, not an artifact of the sandbox's data.
 
-Snowflake's own "SHOW caps at 10k rows regardless of `LIMIT`"
-(`queries.MAX_PAGE_SIZE`'s docstring) does not hold universally either: a
-real `SHOW COLUMNS IN DATABASE` call against the 614-table database above
-returned 11 511 rows in one response, over that assumed ceiling. The
-`usable = len(rows) < cap` checks in `jobs.fetch_database`/
-`fetch_columns_database` stay correct regardless — they only need "did we get
-at least `cap` rows back" as a signal to fall through to the next tier, not a
-literal 10k truncation point — but the 10k figure itself should not be relied
-on elsewhere as a hard Snowflake-wide guarantee.
+`ObjectType.pageable` is where that finding lives in the code, and the
+statement builders consult it: `show_objects`/`show_objects_in_database` emit
+no paging tail at all for an unpageable type, and `show_columns_in_database`/
+`show_columns_in_schema` no longer take `after`/`limit` arguments. A clause
+Snowflake ignores is worse than no clause, because the SQL log then shows a
+bound that was never applied.
+
+`jobs.fetch_page` returns no cursor for an unpageable type, so one call is the
+whole result and no continuation is ever queued. That also means **truncation
+is undetectable for those statements** — without a working `LIMIT` there is no
+row count that can mean "there was more" — which is why the row ceiling below
+is their only bound.
+
+Snowflake's own "SHOW caps at 10k rows regardless of `LIMIT`" does not hold
+universally either: a real `SHOW COLUMNS IN DATABASE` call against the
+614-table database above returned 11 511 rows in one response. `MAX_PAGE_SIZE`
+is therefore documented as the largest `LIMIT` worth *asking* for, never as a
+ceiling anything may rely on.
+
+#### The hang this used to be
+
+Worth keeping on record, because the shape of the bug is the reason for the
+guards below rather than for a one-line fix.
+
+`FetchService._execute` decided "there is another page" from
+`len(rows) == limit` and resumed with `FROM '<last row's name>'`. Against a
+statement that ignores both clauses, every "next page" came back as the
+identical full result with the identical last name: **an unbounded loop, not
+merely a slow one.** The pass never reached `finish_pass`, and a worker thread
+plus a pool connection stayed pinned re-issuing the same query. The default
+pool is three workers, so three such scopes wedge the whole app.
+
+Two paths reached it, and the second is the one that matters:
+
+- `_fan_out`, after a whole-database prime came back over the chunk threshold,
+  queues one per-schema `OBJECTS` job. It is object-type agnostic, so **pipes
+  and stages sit on it identically** — stages were never a separate or lesser
+  exposure, which an earlier draft of this document guessed they might be.
+- **The staleness sweep** (`MainScreen._sweep`) requests
+  `tree.visible_scopes()` *directly*, so it never passes through
+  `on_scope_needed`'s `OBJECTS` → `DATABASE_PRIME` upgrade. An expanded Pipes
+  or Stages node in a schema with more objects than `PAGE_SIZE` was enough on
+  its own, with no truncated prime needed first. Anything that bypasses that
+  upgrade is on the paged path, and the sweep is not the only caller that
+  could.
+
+Neither probed account had a schema over 1000 pipes (395 on production, 27 on
+the sandbox), so this was never observed firing in the wild — the no-op paging
+is what was directly observed, and the hang is what the continuation code,
+read against it, implied. Lowering `PAGE_SIZE` below the pipe count
+reproduces it on a 395-pipe schema, which is also how the fix is verified.
+
+### Bounding a result
+
+Three layers, deliberately independent, because each covers what the others
+cannot. Every one of them is a `Setting`, so someone who knows their account
+can move it.
+
+1. **Declare what cannot be paged** (`ObjectType.pageable`, above). Fixes what
+   is known. Cannot cover a statement nobody has tested yet.
+2. **Guard the continuation chain** (`FetchService._execute`, see "The fetch
+   scheduler"). Catches an unpageable statement the builder did not know
+   about — tasks, most obviously, still unverified.
+3. **A row ceiling in the gateway** (`ROW_CEILING`, `PoolGateway._collect`).
+   The only bound that applies to every statement rather than to the ones
+   somebody remembered to cap. It reads the cursor in batches and raises
+   `ResultTooLargeError` past the ceiling, which routes through the ordinary
+   worker boundary to `fail_pass`: no sweep, yesterday's rows stay on screen,
+   the error is visible. Be clear about what it buys — it bounds what snowcone
+   *materialises* and hands the connection back early. It does not stop
+   Snowflake from having produced the result. `PoolGateway._fetch`'s blind
+   one-shot retry re-raises it explicitly rather than repeating a statement
+   that will return just as much the second time.
+
+On top of those, the **history statements carry their own row cap**
+(`HISTORY_MAX_ROWS`), because they are the only queries whose size follows how
+*busy* an object is rather than how many objects exist. `pipe_activity` and
+`task_activity` are `QUALIFY`-reduced to one row per object, but a *single*
+pipe's `pipe_activity_history` was bounded by nothing except its 90-day fetch
+window — and a production schema showed 433 892 raw `COPY_HISTORY` rows across
+190 pipes in 13 days. `ORDER BY <time> DESC LIMIT n` is the fix, and the
+`ORDER BY` is half of it: without it a `LIMIT` keeps an arbitrary slice, which
+is worse than no cap because it still looks complete.
+`INFORMATION_SCHEMA.TASK_HISTORY`'s `RESULT_LIMIT` was exactly that mistake
+— pinned at 10 000 with no documented ordering. It is still set, clamped to
+the function's maximum, but the outer `ORDER BY ... LIMIT` is what decides
+which rows survive.
+
+`pipe_activity`/`task_activity` are deliberately left uncapped: a cap there
+could only drop real pipes out of the "Pipes (n)" list, and layer 3 already
+covers the pathological case.
+
+> **Counts first was considered and rejected.** For a `SHOW` a count needs
+> `RESULT_SCAN(LAST_QUERY_ID())`, an ordinary `SELECT` — so it needs a
+> warehouse, breaking the rule the whole tree rests on, *and* the `SHOW` has
+> already returned everything by the time it could run. For the history
+> `SELECT`s a count costs the same scan as the query and doubles the round
+> trips, in a design where round trips dominate. A bounded query gets the rows
+> **and** the "was there more" signal in one trip (`len(rows) >= limit`) — the
+> same trick `fetch_database`'s `usable` check already used.
 
 ---
 
@@ -804,6 +885,22 @@ worker writes into sqlite and then posts a message naming the scope it changed.
   work five times.
 - **Cancellable**: switching database drops queued work for the old one. A page
   already in flight cannot be interrupted, but its continuation is suppressed.
+- **Guarded**: a continuation is only queued if the cursor actually *advanced*
+  and the pass is still inside its page budget (`MAX_PAGES_PER_PASS`). The two
+  guards reach different conclusions, and that difference is the point:
+
+  - *Cursor did not move* → the page was the whole result, so the rows are
+    complete and current. `finish_pass` runs normally, with a WARNING logged
+    naming the scope. Failing here would throw away a good result to report a
+    paging quirk the statement builder was supposed to have handled.
+  - *Page budget exhausted* → the cursor keeps moving but the result will not
+    end, so this one really is incomplete. `fail_pass`, which does not sweep,
+    so what was on screen stays there and the error surfaces rather than a
+    half-fetched scope looking finished.
+
+  Neither is belt-and-braces. The chain re-issues a statement and trusts the
+  result to shrink, which is exactly the assumption Snowflake has been caught
+  breaking — see "Bounding a result".
 
 Results reach the UI as a message naming **one scope**, which the main screen
 **routes** to the widget showing it — never broadcasts. An update to one
@@ -1245,6 +1342,19 @@ first read, so importing the module touches no disk.
 The ones that matter: **cache TTL** (`0` disables background refreshing),
 **pool size**, **fetch page size**.
 
+Four more exist purely so the measures in "Bounding a result" are adjustable
+rather than baked in: **history row cap** (`HISTORY_MAX_ROWS`), **max pages
+per refresh** (`MAX_PAGES_PER_PASS`), **result row ceiling** (`ROW_CEILING`,
+`0` disables) and **prime chunk threshold** (`PRIME_CHUNK_THRESHOLD`). Their
+defaults are starting points, not measured optima — an account whose shape
+makes one of them wrong should be able to say so without a code change.
+
+`PAGE_SIZE` is the one setting **not** read at the point of use: it is
+snapshotted into `FetchService` at construction, so a change only takes effect
+on the next `restart_fetch` (a reconnect or a role switch). Not deliberate,
+just unfixed — and worth knowing when lowering it to reproduce a paging
+problem.
+
 **Settings ...** (Connect menu) opens a modal listing every registered
 `Setting`, grouped under a heading per `Setting.group`, each editable in
 place. **OK** validates and writes, then closes; **Apply** does the same but
@@ -1443,10 +1553,18 @@ which turned out not to be worth chasing — see the last bullet below:
 Paging carries a related but different caveat now — see "Verified and
 unverified paging" for what was confirmed (and what was found actively
 broken, on two independent accounts: `LIMIT`/`FROM` is a no-op for `SHOW
-PIPES`, `SHOW COLUMNS` and `SHOW STAGES`). `SHOW COLUMNS IN DATABASE`/`IN
-SCHEMA` were exercised at real scale (614 tables, 11 511 columns on the
-sandbox; 6655 columns in one schema alone on production) — see "Column
+PIPES`, `SHOW COLUMNS` and `SHOW STAGES`). That finding is no longer only
+recorded: it is enforced in the statement builders, and guarded against for
+the types nobody has probed yet — see "Bounding a result". `SHOW COLUMNS IN
+DATABASE`/`IN SCHEMA` were exercised at real scale (614 tables, 11 511 columns
+on the sandbox; 6655 columns in one schema alone on production) — see "Column
 cache priming".
+
+**`SHOW TASKS` is still unverified for `LIMIT`/`FROM`**: no probed account has
+had enough tasks to page through one. It is no longer a hang risk either way
+— if it does ignore both clauses, the cursor-progress guard completes the pass
+after a single repeat instead of looping — but verifying it would let
+`ObjectType.pageable` state a fact rather than a default.
 
 ### Accepted design gaps
 

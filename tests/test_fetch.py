@@ -48,22 +48,22 @@ def test_a_short_page_ends_the_chain() -> None:
     """A page smaller than the limit means the result is exhausted; carrying
     on would re-query the same tail forever."""
     gateway = FakeGateway(databases=["ACME", "BETA"])
-    rows, cursor = fetch_page(gateway, databases_scope(), None, limit=10)
-    assert len(rows) == 2
-    assert cursor is None
+    page = fetch_page(gateway, databases_scope(), None, limit=10)
+    assert len(page.rows) == 2
+    assert page.cursor is None
 
 
 def test_a_full_page_yields_the_last_name_as_the_cursor() -> None:
     gateway = FakeGateway(databases=["ACME", "BETA", "GAMMA"])
-    rows, cursor = fetch_page(gateway, databases_scope(), None, limit=2)
-    assert [row["name"] for row in rows] == ["ACME", "BETA"]
-    assert cursor == "BETA"
+    page = fetch_page(gateway, databases_scope(), None, limit=2)
+    assert [row["name"] for row in page.rows] == ["ACME", "BETA"]
+    assert page.cursor == "BETA"
 
 
 def test_an_empty_result_ends_the_chain() -> None:
-    rows, cursor = fetch_page(FakeGateway(), databases_scope(), None, limit=10)
-    assert rows == []
-    assert cursor is None
+    page = fetch_page(FakeGateway(), databases_scope(), None, limit=10)
+    assert page.rows == []
+    assert page.cursor is None
 
 
 def test_columns_are_fetched_in_one_shot() -> None:
@@ -72,11 +72,9 @@ def test_columns_are_fetched_in_one_shot() -> None:
     gateway = FakeGateway(columns={("MYDB", "PUBLIC", "ORDERS"): ["ID", "TOTAL"]})
     from snowcone.models import columns_scope
 
-    rows, cursor = fetch_page(
-        gateway, columns_scope("MYDB", "PUBLIC", "ORDERS"), None, limit=1
-    )
-    assert len(rows) == 2
-    assert cursor is None
+    page = fetch_page(gateway, columns_scope("MYDB", "PUBLIC", "ORDERS"), None, limit=1)
+    assert len(page.rows) == 2
+    assert page.cursor is None
 
 
 def test_warehouses_and_roles_are_fetched_in_one_shot() -> None:
@@ -84,13 +82,13 @@ def test_warehouses_and_roles_are_fetched_in_one_shot() -> None:
     from snowcone.models import roles_scope, warehouses_scope
 
     gateway = FakeGateway(warehouses=["COMPUTE_WH"], roles=["SYSADMIN", "PUBLIC"])
-    rows, cursor = fetch_page(gateway, warehouses_scope(), None, limit=1)
-    assert [row["name"] for row in rows] == ["COMPUTE_WH"]
-    assert cursor is None
+    page = fetch_page(gateway, warehouses_scope(), None, limit=1)
+    assert [row["name"] for row in page.rows] == ["COMPUTE_WH"]
+    assert page.cursor is None
 
-    rows, cursor = fetch_page(gateway, roles_scope(), None, limit=1)
-    assert [row["name"] for row in rows] == ["PUBLIC", "SYSADMIN"]
-    assert cursor is None
+    page = fetch_page(gateway, roles_scope(), None, limit=1)
+    assert [row["name"] for row in page.rows] == ["PUBLIC", "SYSADMIN"]
+    assert page.cursor is None
 
 
 def test_table_stats_is_fetched_in_one_shot() -> None:
@@ -110,11 +108,9 @@ def test_table_stats_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
-        gateway, table_stats_scope("MYDB", "PUBLIC"), None, limit=1
-    )
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, table_stats_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_view_stats_is_fetched_in_one_shot() -> None:
@@ -134,11 +130,9 @@ def test_view_stats_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
-        gateway, view_stats_scope("MYDB", "PUBLIC"), None, limit=1
-    )
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, view_stats_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_materialized_view_stats_is_fetched_in_one_shot() -> None:
@@ -159,11 +153,11 @@ def test_materialized_view_stats_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
+    page = fetch_page(
         gateway, materialized_view_stats_scope("MYDB", "PUBLIC"), None, limit=1
     )
-    assert len(rows) == 1
-    assert cursor is None
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_schema_level_grants_are_fetched_in_one_shot() -> None:
@@ -179,9 +173,9 @@ def test_schema_level_grants_are_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(gateway, grants_scope("MYDB", "PUBLIC"), None, limit=1)
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, grants_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
     assert [c[0] for c in gateway.calls] == ["show_grants_on_schema"]
 
 
@@ -197,9 +191,9 @@ def test_database_level_grants_are_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(gateway, grants_scope("MYDB"), None, limit=1)
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, grants_scope("MYDB"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
     assert [c[0] for c in gateway.calls] == ["show_grants_on_database"]
 
 
@@ -213,11 +207,9 @@ def test_schema_level_tag_references_are_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
-        gateway, tag_references_scope("MYDB", "PUBLIC"), None, limit=1
-    )
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, tag_references_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
     assert [c[0] for c in gateway.calls] == ["tag_references_schema"]
 
 
@@ -231,9 +223,9 @@ def test_database_level_tag_references_are_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(gateway, tag_references_scope("MYDB"), None, limit=1)
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, tag_references_scope("MYDB"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
     assert [c[0] for c in gateway.calls] == ["tag_references_database"]
 
 
@@ -260,11 +252,9 @@ def test_pipe_activity_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
-        gateway, pipe_activity_scope("MYDB", "PUBLIC"), None, limit=1
-    )
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, pipe_activity_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_pipe_activity_history_is_fetched_in_one_shot() -> None:
@@ -292,11 +282,11 @@ def test_pipe_activity_history_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
+    page = fetch_page(
         gateway, pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE"), None, limit=1
     )
-    assert len(rows) == 1
-    assert cursor is None
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_pipe_history_is_fetched_in_one_shot_given_its_resolved_target() -> None:
@@ -318,15 +308,15 @@ def test_pipe_history_is_fetched_in_one_shot_given_its_resolved_target() -> None
             ]
         }
     )
-    rows, cursor = fetch_page(
+    page = fetch_page(
         gateway,
         pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
         None,
         limit=1,
         pipe_target=("MYDB", "PUBLIC", "ORDERS"),
     )
-    assert len(rows) == 1
-    assert cursor is None
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_pipe_history_without_a_resolved_target_raises() -> None:
@@ -364,11 +354,9 @@ def test_task_activity_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
-        gateway, task_activity_scope("MYDB", "PUBLIC"), None, limit=1
-    )
-    assert len(rows) == 1
-    assert cursor is None
+    page = fetch_page(gateway, task_activity_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_task_activity_history_is_fetched_in_one_shot() -> None:
@@ -390,14 +378,14 @@ def test_task_activity_history_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    rows, cursor = fetch_page(
+    page = fetch_page(
         gateway,
         task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"),
         None,
         limit=1,
     )
-    assert len(rows) == 1
-    assert cursor is None
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 def test_task_history_is_fetched_in_one_shot_with_no_target_resolution() -> None:
@@ -418,14 +406,14 @@ def test_task_history_is_fetched_in_one_shot_with_no_target_resolution() -> None
             ]
         }
     )
-    rows, cursor = fetch_page(
+    page = fetch_page(
         gateway,
         task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"),
         None,
         limit=1,
     )
-    assert len(rows) == 1
-    assert cursor is None
+    assert len(page.rows) == 1
+    assert page.cursor is None
 
 
 # -------------------------------------------------------------- end to end
@@ -1245,7 +1233,7 @@ def test_pipe_history_resolves_its_target_from_cached_pipe_activity(repo) -> Non
     ]
     assert (
         "pipe_history",
-        ("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS"),
+        ("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS", 5000),
     ) in gateway.calls
 
 
@@ -1593,3 +1581,218 @@ def test_a_failing_columns_prime_is_reported(repo) -> None:
     finally:
         service.stop()
     assert errors == ["no access"]
+
+
+# --------------------------------------------------------------- paging guards
+#
+# The scheduler's continuation chain asks for a page, and stops when the page
+# comes back short. Both assumptions underneath that have been observed to
+# fail against a real account, so both are tested with a gateway that breaks
+# them deliberately.
+
+
+def test_a_show_that_ignores_limit_is_not_paged_forever(repo) -> None:
+    """SHOW PIPES/STAGES return every row whatever LIMIT asks for, verified on
+    two unrelated accounts. The continuation used to read the full page as
+    "there is more", re-issue with FROM '<last name>', get the identical
+    result back, and never terminate -- pinning a worker and a pool connection
+    re-querying forever. One statement, one complete pass."""
+    from snowcone.models import objects_scope
+
+    pipes = [f"PIPE_{i:04d}" for i in range(25)]
+    gateway = FakeGateway(objects={("MYDB", "PUBLIC", ObjectType.PIPE): pipes})
+    gateway.paging_noop_types = {ObjectType.PIPE}
+    scope = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
+    # A page size under the pipe count is what makes the full page look like a
+    # partial one -- the real trigger is a schema with more pipes than the
+    # page-size setting, which a 400-pipe account reaches by lowering it.
+    service = make_service(gateway, repo, page_size=10)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert repo.child_count(scope) == 25
+    assert [call[0] for call in gateway.calls].count("show_objects") == 1
+
+
+def test_a_stuck_cursor_completes_the_pass_rather_than_failing_it(repo) -> None:
+    """Deliberately a type the builder still pages -- TASK, whose LIMIT
+    support no probed account has had enough tasks to verify. Layer one only
+    covers the types already caught misbehaving; this is the guard that has to
+    hold for the next one, without anybody having to have found it first.
+
+    Completing rather than failing is the point: a cursor that does not
+    advance means the page was the whole result, so the rows are complete and
+    current. Failing would throw away a good result to report a paging quirk.
+    """
+    from snowcone.models import objects_scope
+
+    gateway = FakeGateway(
+        objects={("MYDB", "PUBLIC", ObjectType.TASK): ["T1", "T2", "T3"]}
+    )
+    gateway.paging_noop_types = {ObjectType.TASK}
+    scope = objects_scope(ObjectType.TASK, "MYDB", "PUBLIC")
+    service = make_service(gateway, repo, page_size=2)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    entry = repo.entry(scope)
+    assert entry.error is None
+    assert entry.row_count == 3
+    # One page, then one repeat that gave the guard something to notice --
+    # and then it stops, rather than a third asking for the same tail again.
+    assert [call[0] for call in gateway.calls].count("show_objects") == 2
+
+
+def test_a_result_that_never_ends_stops_at_the_page_budget(repo) -> None:
+    """The cursor keeps moving, so the stuck-cursor guard never fires, and the
+    result never comes back short. Nothing else bounds the chain, so the page
+    budget does -- and it fails the pass rather than finishing one, because
+    unlike a stuck cursor this really is an incomplete result."""
+    from snowcone.models import databases_scope
+    from snowcone.settings import MAX_PAGES_PER_PASS, config
+
+    class NeverEndingGateway(FakeGateway):
+        """Every page is full, and every page has a new last name."""
+
+        def show_databases(self, *, after=None, limit=1000, allow_reconnect=True):
+            self.calls.append(("show_databases", (after, limit)))
+            start = 0 if after is None else int(after.split("_")[1]) + 1
+            return [
+                {"name": f"DB_{index:06d}", "comment": ""}
+                for index in range(start, start + limit)
+            ]
+
+    config.set(MAX_PAGES_PER_PASS, 4)
+    gateway = NeverEndingGateway()
+    scope = databases_scope()
+    service = make_service(gateway, repo, page_size=5)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.ERROR)
+    finally:
+        service.stop()
+    assert len(gateway.calls) == 4
+    assert "4 pages" in (repo.entry(scope).error or "")
+
+
+def test_a_failed_page_budget_leaves_the_rows_that_were_already_there(repo) -> None:
+    """Same rule as any other failed pass: no sweep, so what was on screen
+    stays on screen. A half-fetched scope must not look emptier than the last
+    good one."""
+    from snowcone.models import databases_scope
+    from snowcone.settings import MAX_PAGES_PER_PASS, config
+
+    class NeverEndingGateway(FakeGateway):
+        def show_databases(self, *, after=None, limit=1000, allow_reconnect=True):
+            self.calls.append(("show_databases", (after, limit)))
+            start = 0 if after is None else int(after.split("_")[1]) + 1
+            return [
+                {"name": f"DB_{index:06d}", "comment": ""}
+                for index in range(start, start + limit)
+            ]
+
+    scope = databases_scope()
+    generation = repo.begin_pass(scope)
+    repo.write_page(scope, generation, [{"name": "YESTERDAY", "comment": ""}], None)
+    repo.finish_pass(scope, generation)
+
+    config.set(MAX_PAGES_PER_PASS, 2)
+    service = make_service(NeverEndingGateway(), repo, page_size=5)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.ERROR)
+    finally:
+        service.stop()
+    assert "YESTERDAY" in [row["name"] for row in repo.raw_rows(scope)]
+
+
+# ------------------------------------------------------------ the history cap
+
+
+def _pipe_loads(count: int) -> list[dict[str, object]]:
+    return [
+        {
+            "PIPE_CATALOG_NAME": "MYDB",
+            "PIPE_SCHEMA_NAME": "PUBLIC",
+            "PIPE_NAME": "MY_PIPE",
+            "FILE_NAME": f"orders_{index:05d}.csv.gz",
+            "FILE_SIZE": 1024,
+            "ROW_COUNT": 1,
+            "STATUS": "Loaded",
+            "LAST_LOAD_TIME": f"2026-01-02T03:04:{index % 60:02d}+00:00",
+            "TABLE_CATALOG_NAME": "MYDB",
+            "TABLE_SCHEMA_NAME": "PUBLIC",
+            "TABLE_NAME": "ORDERS",
+        }
+        for index in range(count)
+    ]
+
+
+def test_a_history_at_its_row_cap_is_recorded_as_truncated(repo) -> None:
+    """A single busy pipe's history is the one result whose size follows how
+    often it *runs* rather than how many objects exist -- 433892 rows over 13
+    days on a real account. It is capped, and a capped pass has to say so:
+    the table would otherwise just stop, indistinguishable from a complete
+    one."""
+    from snowcone.models import pipe_activity_history_scope
+    from snowcone.settings import HISTORY_MAX_ROWS, config
+
+    config.set(HISTORY_MAX_ROWS, 10)
+    gateway = FakeGateway(
+        pipe_activity_history={("MYDB", "PUBLIC", "MY_PIPE"): _pipe_loads(50)}
+    )
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    entry = repo.entry(scope)
+    assert entry.truncated
+    assert entry.row_count == 10
+
+
+def test_a_history_inside_its_row_cap_is_not_recorded_as_truncated(repo) -> None:
+    """The common case, and the one that decides whether the note above is
+    noise: an ordinary pipe's history must not claim to be capped."""
+    from snowcone.models import pipe_activity_history_scope
+    from snowcone.settings import HISTORY_MAX_ROWS, config
+
+    config.set(HISTORY_MAX_ROWS, 100)
+    gateway = FakeGateway(
+        pipe_activity_history={("MYDB", "PUBLIC", "MY_PIPE"): _pipe_loads(7)}
+    )
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert not repo.entry(scope).truncated
+
+
+def test_the_history_row_cap_reaches_the_statement(repo) -> None:
+    """Read at the point of use, like every other setting -- a cap that only
+    took effect on restart would be worse than none, since the reason to reach
+    for it is a history that is hurting right now."""
+    from snowcone.models import task_activity_history_scope
+    from snowcone.settings import HISTORY_MAX_ROWS, config
+
+    config.set(HISTORY_MAX_ROWS, 42)
+    gateway = FakeGateway()
+    scope = task_activity_history_scope("MYDB", "PUBLIC", "MY_TASK")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert gateway.calls == [
+        ("task_activity_history", ("MYDB", "PUBLIC", "MY_TASK", 90, 42))
+    ]

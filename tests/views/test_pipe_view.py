@@ -18,6 +18,7 @@ from snowcone.ui.views.pipe_view import PipeView
 from snowcone.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
+    load,
     put_pipe,
     put_pipe_activity,
     put_pipe_activity_history,
@@ -347,3 +348,42 @@ def test_pipe_view_scopes_excludes_history_until_a_target_is_resolvable(repo) ->
 
     put_pipe_activity(repo, "LOAD_ORDERS")
     assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS") in view.scopes()
+
+
+async def test_a_capped_history_says_so_above_the_table(repo) -> None:
+    """A history table has no natural bottom -- it just stops -- so a capped
+    one is indistinguishable from a complete one by looking at it. That is the
+    one thing this app is not allowed to do: present a partial answer as if it
+    were whole."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_ORDERS")
+    load(
+        repo,
+        pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+        [
+            {k: v for k, v in row.items() if not k.startswith("_")}
+            for row in repo.raw_rows(
+                pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+            )
+        ],
+        truncated=True,
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = app.query_one("#detail-history-note", Static)
+        assert note.display
+        assert "history row cap" in str(note.render())
+
+
+async def test_an_uncapped_history_shows_no_note(repo) -> None:
+    """The common case. A note on every pipe would be noise, and noise is how
+    a real warning gets ignored."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert not app.query_one("#detail-history-note", Static).display

@@ -479,6 +479,10 @@ class Entry:
     fetched_at: float | None
     row_count: int
     error: str | None
+    #: The last completed pass hit its statement's row cap, so these rows
+    #: are current but not all of them. A view showing this scope is
+    #: expected to say so -- see `HistoryView`.
+    truncated: bool = False
 
     def age(self, now: float | None = None) -> float | None:
         if self.fetched_at is None:
@@ -548,6 +552,7 @@ class Repository:
             fetched_at=row["fetched_at"],
             row_count=row["row_count"],
             error=row["error"],
+            truncated=bool(row["truncated"]),
         )
 
     def _select(
@@ -849,14 +854,15 @@ class Repository:
                 """
                 INSERT INTO cache_entry
                     (scope, state, generation, fetched_at,
-                     next_cursor, row_count, error)
-                VALUES (?, ?, ?, ?, NULL, 0, NULL)
+                     next_cursor, row_count, error, truncated)
+                VALUES (?, ?, ?, ?, NULL, 0, NULL, 0)
                 ON CONFLICT(scope) DO UPDATE SET
                     state = excluded.state,
                     generation = excluded.generation,
                     next_cursor = NULL,
                     row_count = 0,
-                    error = NULL
+                    error = NULL,
+                    truncated = 0
                 """,
                 (
                     scope.key,
@@ -928,8 +934,17 @@ class Repository:
             ],
         )
 
-    def finish_pass(self, scope: Scope, generation: int) -> bool:
-        """Sweep rows this pass did not rewrite and mark the scope complete."""
+    def finish_pass(
+        self, scope: Scope, generation: int, *, truncated: bool = False
+    ) -> bool:
+        """Sweep rows this pass did not rewrite and mark the scope complete.
+
+        `truncated` records that the statement behind this pass hit its own
+        row cap. The pass is still a complete, swept, COMPLETE one -- the
+        rows written are the newest and entirely valid -- so this is not an
+        error state; it is the difference between 'this is the history' and
+        'this is as much of the history as was asked for'.
+        """
         spec = spec_for(scope)
         now = time.time()
         sweep = f"DELETE FROM {spec.name} WHERE _scope = ? AND _generation < ?"
@@ -943,10 +958,16 @@ class Repository:
                 """
                 UPDATE cache_entry
                    SET state = ?, fetched_at = ?, next_cursor = NULL,
-                       row_count = ?, error = NULL
+                       row_count = ?, error = NULL, truncated = ?
                  WHERE scope = ?
                 """,
-                (CacheState.COMPLETE.value, now, count, scope.key),
+                (
+                    CacheState.COMPLETE.value,
+                    now,
+                    count,
+                    int(truncated),
+                    scope.key,
+                ),
             )
         return True
 
