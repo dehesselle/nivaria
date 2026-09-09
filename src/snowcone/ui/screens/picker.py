@@ -24,9 +24,9 @@ from snowcone.fuzzy import highlight, rank
 MAX_RESULTS = 200
 
 #: Separates multiple hints on the same candidate. Same glyph SearchScreen
-#: uses between an object's kind and a matched column name, but spaced evenly
+#: uses between an object's type and a matched column name, but spaced evenly
 #: on both sides here: SearchScreen's "  · " is a connector appended after an
-#: already-spaced "  {kind}" segment, not a `str.join` separator sitting
+#: already-spaced "  {type}" segment, not a `str.join` separator sitting
 #: between two bare strings with nothing else contributing spacing.
 _HINT_SEPARATOR = " · "
 

@@ -2,7 +2,7 @@
 
 Every statement snowcone sends is built here and nowhere else, so the paging
 strategy can be swapped in one place if `LIMIT ... FROM` turns out to be
-unavailable for some object kind.
+unavailable for some object type.
 
 Two different mechanisms are used for injecting values, deliberately:
 
@@ -21,7 +21,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from snowcone.models import ObjectKind
+from snowcone.models import ObjectType
 
 #: Snowflake caps a SHOW result at 10k rows regardless of what LIMIT asks for.
 MAX_PAGE_SIZE = 10_000
@@ -65,7 +65,7 @@ def show_schemas(database: str, *, after: str | None = None, limit: int = 1000) 
 
 
 def show_objects(
-    kind: ObjectKind,
+    object_type: ObjectType,
     database: str,
     schema: str,
     *,
@@ -73,17 +73,17 @@ def show_objects(
     limit: int = 1000,
 ) -> str:
     scope = f"{quote_identifier(database)}.{quote_identifier(schema)}"
-    return f"SHOW {kind.plural.upper()} IN SCHEMA {scope}{_paging(after, limit)}"
+    return f"SHOW {object_type.plural.upper()} IN SCHEMA {scope}{_paging(after, limit)}"
 
 
 def show_objects_in_database(
-    kind: ObjectKind,
+    object_type: ObjectType,
     database: str,
     *,
     after: str | None = None,
     limit: int = 1000,
 ) -> str:
-    """Every object of a kind in a whole database, in one statement.
+    """Every object of a type in a whole database, in one statement.
 
     Measured against a live account: this returned 2145 tables across 54
     schemas in about a second, where visiting those schemas one at a time
@@ -92,7 +92,9 @@ def show_objects_in_database(
     an order of magnitude cheaper than filling it schema by schema.
     """
     scope = quote_identifier(database)
-    return f"SHOW {kind.plural.upper()} IN DATABASE {scope}{_paging(after, limit)}"
+    return (
+        f"SHOW {object_type.plural.upper()} IN DATABASE {scope}{_paging(after, limit)}"
+    )
 
 
 def show_materialized_views(
@@ -319,7 +321,7 @@ def pipe_activity_history(fetch_days: int) -> str:
 
 #: Snowflake's own retention limit for INFORMATION_SCHEMA.COPY_HISTORY -- a
 #: platform constant, not a preference, so it is not a Setting. This is also
-#: why ScopeKind.PIPE_ACTIVITY's TTL override (models.py) stays one day
+#: why ScopeType.PIPE_ACTIVITY's TTL override (models.py) stays one day
 #: under this: the two sources must jointly cover every day with no gap.
 PIPE_HISTORY_RETENTION_DAYS = 14
 
@@ -408,7 +410,7 @@ def task_activity_history(fetch_days: int) -> str:
 #: Snowflake's own hard retention limit for INFORMATION_SCHEMA.TASK_HISTORY --
 #: a platform constant, not a preference, so it is not a Setting. Shorter than
 #: PIPE_HISTORY_RETENTION_DAYS' 14 days. This is also why
-#: ScopeKind.TASK_ACTIVITY_HISTORY's TTL override (models.py) stays one day
+#: ScopeType.TASK_ACTIVITY_HISTORY's TTL override (models.py) stays one day
 #: under this: the two sources must jointly cover every day with no gap.
 TASK_HISTORY_RETENTION_DAYS = 7
 

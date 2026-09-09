@@ -25,9 +25,9 @@ from typing import Any
 from snowcone.cache.repository import Repository
 from snowcone.gateway.gateway import SnowflakeGateway
 from snowcone.models import (
-    ObjectKind,
+    ObjectType,
     Scope,
-    ScopeKind,
+    ScopeType,
     columns_prime_scope,
     columns_scope,
     objects_scope,
@@ -177,10 +177,10 @@ class FetchService:
             return True
 
     def _execute(self, job: FetchJob) -> None:
-        if job.scope.kind is ScopeKind.DATABASE_PRIME:
+        if job.scope.type is ScopeType.DATABASE_PRIME:
             self._execute_prime(job)
             return
-        if job.scope.kind is ScopeKind.COLUMNS_PRIME:
+        if job.scope.type is ScopeType.COLUMNS_PRIME:
             self._execute_columns_prime(job)
             return
         scope = job.scope
@@ -192,7 +192,7 @@ class FetchService:
             if generation == 0:
                 generation = self._repo.begin_pass(scope)
             pipe_target = None
-            if scope.kind is ScopeKind.PIPE_HISTORY:
+            if scope.type is ScopeType.PIPE_HISTORY:
                 assert scope.database is not None
                 assert scope.schema is not None
                 assert scope.table is not None
@@ -244,9 +244,9 @@ class FetchService:
         schemas, versus 54 round trips at ~187ms each.
         """
         scope = job.scope
-        assert scope.object_kind is not None
+        assert scope.object_type is not None
         assert scope.database is not None
-        kind: ObjectKind = scope.object_kind
+        object_type: ObjectType = scope.object_type
         database: str = scope.database
         allow_reconnect = job.priority is not Priority.BACKGROUND
         try:
@@ -263,7 +263,7 @@ class FetchService:
         if not usable:
             # Truncated at Snowflake's SHOW cap and not safely pageable, so
             # fall back to a job per schema. Slower, but correct.
-            self._fan_out(kind, database, job.priority)
+            self._fan_out(object_type, database, job.priority)
             self._announce(scope, complete=True)
             return
 
@@ -272,13 +272,13 @@ class FetchService:
         # objects still completes a pass and reads as "fetched, none" rather
         # than "never fetched" -- otherwise its node would never settle.
         for schema in self._repo.schemas(schemas_scope(database)).rows:
-            grouped[objects_scope(kind, database, schema.name)] = []
+            grouped[objects_scope(object_type, database, schema.name)] = []
         for row in rows:
             schema_name = row.get("schema_name")
             if not schema_name:
                 continue
             grouped.setdefault(
-                objects_scope(kind, database, str(schema_name)), []
+                objects_scope(object_type, database, str(schema_name)), []
             ).append(row)
 
         self._repo.replace_grouped(grouped)
@@ -286,10 +286,12 @@ class FetchService:
             self._announce(filled, complete=True)
         self._announce(scope, complete=True)
 
-    def _fan_out(self, kind: ObjectKind, database: str, priority: Priority) -> None:
+    def _fan_out(
+        self, object_type: ObjectType, database: str, priority: Priority
+    ) -> None:
         """Queue one job per known schema, the correct-but-slower path."""
         for schema in self._repo.schemas(schemas_scope(database)).rows:
-            self.request(objects_scope(kind, database, schema.name), priority)
+            self.request(objects_scope(object_type, database, schema.name), priority)
 
     def _execute_columns_prime(self, job: FetchJob) -> None:
         """Fill many tables' COLUMNS scopes from one statement.
@@ -386,8 +388,10 @@ class FetchService:
         columns prime always also starts a table/view prime for the whole
         database alongside it.
         """
-        for kind in (ObjectKind.TABLE, ObjectKind.VIEW):
-            for obj in self._repo.objects(objects_scope(kind, database, schema)).rows:
+        for object_type in (ObjectType.TABLE, ObjectType.VIEW):
+            for obj in self._repo.objects(
+                objects_scope(object_type, database, schema)
+            ).rows:
                 self.request(columns_scope(database, schema, obj.name), priority)
 
     def _announce(self, scope: Scope, *, complete: bool) -> None:

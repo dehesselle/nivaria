@@ -38,60 +38,61 @@ from typing import Any, ClassVar
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Static, TabbedContent, TabPane, TextArea
-from textual.widgets.data_table import CellDoesNotExist
 
 from snowcone.cache.repository import Repository
 from snowcone.format import format_timestamp_minutes, parse_timestamp
 from snowcone.models import (
-    ObjectKind,
     ObjectRef,
+    ObjectType,
     Scope,
     task_activity_history_scope,
     task_history_scope,
 )
 from snowcone.settings import CACHE_TTL, TASK_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
+from snowcone.ui.views.tables import (
+    DEFINITION,
+    HISTORY_DETAIL,
+    HISTORY_TABLE,
+    HistoryView,
+)
 
-_HISTORY_COLUMNS = ("Scheduled", "Started", "Completed", "Status")
+_HISTORY_COLUMNS = ("Scheduled", "Started", "Completed", "State")
 
 
 @register_view
-class TaskView(ObjectView):
-    OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.TASK
+class TaskView(HistoryView, ObjectView):
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TASK
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "show_tab('history')", "Run history", show=False),
-        Binding("d", "show_tab('definition')", "Definition", show=False),
+        *HistoryView.BINDINGS,
     ]
 
     def __init__(self, repo: Repository, ref: ObjectRef) -> None:
         super().__init__(repo, ref)
-        #: This paint's history rows, keyed by QUERY_ID -- looked back up
-        #: when a row is highlighted.
-        self._history_rows: dict[str, dict[str, Any]] = {}
+        #: Keyed by QUERY_ID here, unlike PipeView's positional key: a task
+        #: run has Snowflake's own identifier, a pipe's file load does not.
+        self.history_rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
             with TabPane("[$accent bold]R[/]un history", id="tab-history"):
                 history: DataTable[Text] = DataTable(
-                    id="task-history", cursor_type="row"
+                    id=HISTORY_TABLE, cursor_type="row"
                 )
                 history.zebra_stripes = True
                 yield history
-                yield Static("", id="task-history-detail")
+                yield Static("", id=HISTORY_DETAIL)
             with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
                 yield TextArea(
                     "",
-                    id="task-definition",
+                    id=DEFINITION,
                     read_only=True,
                     soft_wrap=True,
                     show_line_numbers=False,
                 )
-
-    def action_show_tab(self, tab: str) -> None:
-        self.query_one(TabbedContent).active = f"tab-{tab}"
 
     def activity_history_scope(self) -> Scope:
         return task_activity_history_scope(
@@ -135,13 +136,13 @@ class TaskView(ObjectView):
                 dated.append((scheduled_at, r))
         dated.sort(key=lambda pair: pair[0], reverse=True)
 
-        table = self.query_one("#task-history", DataTable)
+        table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
         table.clear(columns=True)
         table.add_columns(*_HISTORY_COLUMNS)
-        self._history_rows = {}
+        self.history_rows = {}
         for _, r in dated:
             key = str(r.get("QUERY_ID"))
-            self._history_rows[key] = r
+            self.history_rows[key] = r
             table.add_row(
                 Text(format_timestamp_minutes(r.get("SCHEDULED_TIME"))),
                 Text(format_timestamp_minutes(r.get("QUERY_START_TIME"))),
@@ -149,45 +150,17 @@ class TaskView(ObjectView):
                 Text(r.get("STATE") or ""),
                 key=key,
             )
-        self._sync_history_detail(table.cursor_row)
+        self.sync_history_detail(table.cursor_row)
 
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)
         text = (row or {}).get("definition") or "-- not cached"
-        self.query_one("#task-definition", TextArea).text = text
+        self.query_one(f"#{DEFINITION}", TextArea).text = text
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._sync_history_detail_from_key(
-            event.row_key.value if event.row_key is not None else None
-        )
-
-    def _sync_history_detail(self, cursor_row: int) -> None:
-        """Resync against whatever the cursor is actually on after a repaint
-        -- not left to RowHighlighted alone, since it's not guaranteed to
-        re-fire on a table.clear()-and-repopulate while a row is already
-        highlighted."""
-        table = self.query_one("#task-history", DataTable)
-        try:
-            row_key, _ = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
-        except CellDoesNotExist:
-            self._show_history_detail(None)
-            return
-        self._sync_history_detail_from_key(row_key.value)
-
-    def _sync_history_detail_from_key(self, key: str | None) -> None:
-        row = self._history_rows.get(key) if key is not None else None
-        message = row.get("ERROR_MESSAGE") if row else None
+    def detail_text(self, row: dict[str, Any]) -> str | None:
+        """A failed run's own error, for the panel under the history table."""
+        message = row.get("ERROR_MESSAGE")
         if not message:
-            self._show_history_detail(None)
-            return
+            return None
         code = row.get("ERROR_CODE")
-        text = f"[{code}] {message}" if code is not None else message
-        self._show_history_detail(text)
-
-    def _show_history_detail(self, text: str | None) -> None:
-        panel = self.query_one("#task-history-detail", Static)
-        if text:
-            panel.update(Text(text))
-            panel.display = True
-        else:
-            panel.display = False
+        return f"[{code}] {message}" if code is not None else message

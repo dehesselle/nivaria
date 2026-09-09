@@ -1,8 +1,8 @@
 """Detail view for a schema or database node: Grants and Tags.
 
-Neither a schema nor a database has an ObjectKind (see SchemaRef / DESIGN.md's
+Neither a schema nor a database has an ObjectType (see SchemaRef / DESIGN.md's
 "Choosing a hit"), so neither fits the ObjectView/CategoryView registry --
-there is exactly one view per node kind here, not one of several kinds
+there is exactly one view per node type here, not one of several types
 sharing a lookup, so DetailPane constructs SchemaView/DatabaseView directly
 rather than through a registry with a single entry.
 
@@ -43,6 +43,7 @@ from snowcone.format import format_timestamp_minutes
 from snowcone.models import SchemaRef, Scope, grants_scope, tag_references_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.views.base import _ScopedView
+from snowcone.ui.views.tables import TabbedView
 
 _GRANTS_COLUMNS = (
     "Created",
@@ -57,7 +58,7 @@ _GRANTS_COLUMNS = (
 _TAGS_COLUMNS = ("Tag", "Value")
 
 
-class _GrantsTagsView(_ScopedView):
+class _GrantsTagsView(TabbedView, _ScopedView):
     """Shared Grants/Tags tabs and rendering for SchemaView and DatabaseView."""
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -69,17 +70,14 @@ class _GrantsTagsView(_ScopedView):
         with TabbedContent(initial="tab-grants"):
             with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
                 grants: DataTable[Text] = DataTable(
-                    id="grants-table", cursor_type="row"
+                    id="detail-grants", cursor_type="row"
                 )
                 grants.zebra_stripes = True
                 yield grants
             with TabPane("[$accent bold]T[/]ags", id="tab-tags"):
-                tags: DataTable[Text] = DataTable(id="tags-table", cursor_type="row")
+                tags: DataTable[Text] = DataTable(id="detail-tags", cursor_type="row")
                 tags.zebra_stripes = True
                 yield tags
-
-    def action_show_tab(self, tab: str) -> None:
-        self.query_one(TabbedContent).active = f"tab-{tab}"
 
     def on_mount(self) -> None:
         self.update_content()
@@ -100,7 +98,7 @@ class _GrantsTagsView(_ScopedView):
         self.ensure(grants, ttl)
         self.ensure(tags, ttl)
 
-        grants_table = self.query_one("#grants-table", DataTable)
+        grants_table = self.query_one("#detail-grants", DataTable)
         grants_table.clear(columns=True)
         grants_table.add_columns(*_GRANTS_COLUMNS)
         for row in self.repo.raw_rows(grants):
@@ -115,7 +113,7 @@ class _GrantsTagsView(_ScopedView):
                 Text(row.get("granted_by") or ""),
             )
 
-        tags_table = self.query_one("#tags-table", DataTable)
+        tags_table = self.query_one("#detail-tags", DataTable)
         tags_table.clear(columns=True)
         tags_table.add_columns(*_TAGS_COLUMNS)
         for row in self.repo.raw_rows(tags):

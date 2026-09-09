@@ -32,15 +32,15 @@ from snowcone.cache.db import Database
 from snowcone.models import (
     CacheState,
     Column,
-    ObjectKind,
     ObjectRef,
+    ObjectType,
     SchemaRef,
     Scope,
-    ScopeKind,
+    ScopeType,
     SFObject,
+    is_stale,
     pipe_activity_scope,
     schemas_scope,
-    scope_ttl,
 )
 from snowcone.models import Database as DatabaseRow
 from snowcone.models import Role as RoleRow
@@ -91,8 +91,8 @@ _SCHEMAS = TableSpec(
     order_by=("name",),
 )
 
-_OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
-    ObjectKind.TABLE: TableSpec(
+_OBJECT_TABLES: dict[ObjectType, TableSpec] = {
+    ObjectType.TABLE: TableSpec(
         name="show_tables",
         columns=(
             "database_name",
@@ -119,7 +119,7 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
     ),
-    ObjectKind.VIEW: TableSpec(
+    ObjectType.VIEW: TableSpec(
         name="show_views",
         columns=(
             "database_name",
@@ -137,7 +137,7 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
     ),
-    ObjectKind.PIPE: TableSpec(
+    ObjectType.PIPE: TableSpec(
         name="show_pipes",
         columns=(
             "database_name",
@@ -159,7 +159,7 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
     ),
-    ObjectKind.STAGE: TableSpec(
+    ObjectType.STAGE: TableSpec(
         name="show_stages",
         columns=(
             "database_name",
@@ -181,7 +181,7 @@ _OBJECT_TABLES: dict[ObjectKind, TableSpec] = {
         key=("database_name", "schema_name", "name"),
         order_by=("name",),
     ),
-    ObjectKind.TASK: TableSpec(
+    ObjectType.TASK: TableSpec(
         name="show_tasks",
         columns=(
             "database_name",
@@ -280,7 +280,7 @@ _PIPE_ACTIVITY = TableSpec(
         "FIRST_ERROR_LINE_NUMBER",
     ),
     # One row per pipe (the QUALIFY in queries.pipe_activity keeps only the
-    # latest), not per historical load -- see ScopeKind.PIPE_ACTIVITY.
+    # latest), not per historical load -- see ScopeType.PIPE_ACTIVITY.
     key=(
         "PIPE_CATALOG_NAME",
         "PIPE_SCHEMA_NAME",
@@ -346,7 +346,7 @@ _TASK_ACTIVITY = TableSpec(
         "ERROR_MESSAGE",
     ),
     # One row per task (the QUALIFY in queries.task_activity keeps only the
-    # latest), not per historical run -- see ScopeKind.TASK_ACTIVITY.
+    # latest), not per historical run -- see ScopeType.TASK_ACTIVITY.
     key=("DATABASE_NAME", "SCHEMA_NAME", "NAME", "QUERY_ID"),
     order_by=("NAME", "SCHEDULED_TIME"),
 )
@@ -424,49 +424,49 @@ _TAG_REFERENCES = TableSpec(
 
 
 def spec_for(scope: Scope) -> TableSpec:
-    match scope.kind:
-        case ScopeKind.DATABASES:
+    match scope.type:
+        case ScopeType.DATABASES:
             return _DATABASES
-        case ScopeKind.SCHEMAS:
+        case ScopeType.SCHEMAS:
             return _SCHEMAS
-        case ScopeKind.OBJECTS:
-            assert scope.object_kind is not None
-            return _OBJECT_TABLES[scope.object_kind]
-        case ScopeKind.COLUMNS:
+        case ScopeType.OBJECTS:
+            assert scope.object_type is not None
+            return _OBJECT_TABLES[scope.object_type]
+        case ScopeType.COLUMNS:
             return _COLUMNS
-        case ScopeKind.TABLE_STATS:
+        case ScopeType.TABLE_STATS:
             return _TABLE_STATS
-        case ScopeKind.VIEW_STATS:
+        case ScopeType.VIEW_STATS:
             return _VIEW_STATS
-        case ScopeKind.MATERIALIZED_VIEW_STATS:
+        case ScopeType.MATERIALIZED_VIEW_STATS:
             return _MATERIALIZED_VIEW_STATS
-        case ScopeKind.PIPE_ACTIVITY:
+        case ScopeType.PIPE_ACTIVITY:
             return _PIPE_ACTIVITY
-        case ScopeKind.PIPE_ACTIVITY_HISTORY:
+        case ScopeType.PIPE_ACTIVITY_HISTORY:
             return _PIPE_ACTIVITY_HISTORY
-        case ScopeKind.PIPE_HISTORY:
+        case ScopeType.PIPE_HISTORY:
             return _PIPE_HISTORY
-        case ScopeKind.TASK_ACTIVITY:
+        case ScopeType.TASK_ACTIVITY:
             return _TASK_ACTIVITY
-        case ScopeKind.TASK_ACTIVITY_HISTORY:
+        case ScopeType.TASK_ACTIVITY_HISTORY:
             return _TASK_ACTIVITY_HISTORY
-        case ScopeKind.TASK_HISTORY:
+        case ScopeType.TASK_HISTORY:
             return _TASK_HISTORY
-        case ScopeKind.GRANTS:
+        case ScopeType.GRANTS:
             return _GRANTS
-        case ScopeKind.TAG_REFERENCES:
+        case ScopeType.TAG_REFERENCES:
             return _TAG_REFERENCES
-        case ScopeKind.WAREHOUSES:
+        case ScopeType.WAREHOUSES:
             return _WAREHOUSES
-        case ScopeKind.ROLES:
+        case ScopeType.ROLES:
             return _ROLES
-        case ScopeKind.DATABASE_PRIME:
+        case ScopeType.DATABASE_PRIME:
             # A prime is a fetch strategy, not a set of rows: it fills other
             # scopes' tables and owns none of its own.
-            raise ValueError(f"{scope.kind} has no mirror table")
-        case ScopeKind.COLUMNS_PRIME:
+            raise ValueError(f"{scope.type} has no mirror table")
+        case ScopeType.COLUMNS_PRIME:
             # Same as DATABASE_PRIME: fills other tables' COLUMNS scopes.
-            raise ValueError(f"{scope.kind} has no mirror table")
+            raise ValueError(f"{scope.type} has no mirror table")
 
 
 @dataclass(frozen=True)
@@ -605,19 +605,16 @@ class Repository:
         )
 
     def objects(self, scope: Scope) -> Cached[SFObject]:
-        assert scope.object_kind is not None
-        kind = scope.object_kind
-        mirrored = set(_OBJECT_TABLES[kind].columns)
+        assert scope.object_type is not None
+        object_type = scope.object_type
 
         def build(row: sqlite3.Row) -> SFObject:
             return SFObject(
                 database_name=row["database_name"],
                 schema_name=row["schema_name"],
                 name=row["name"],
-                kind=kind,
+                type=object_type,
                 comment=row["comment"] or "",
-                rows=row["rows"] if "rows" in mirrored else None,
-                bytes=row["bytes"] if "bytes" in mirrored else None,
             )
 
         return self._cached(scope, build)
@@ -649,7 +646,7 @@ class Repository:
         filtering in Python would mean building several hundred objects to
         show one.
         """
-        spec = _OBJECT_TABLES[ref.kind]
+        spec = _OBJECT_TABLES[ref.type]
         statement = (
             f"SELECT * FROM {spec.name} "
             "WHERE database_name = ? AND schema_name = ? AND name = ?"
@@ -709,14 +706,14 @@ class Repository:
         corpus: list[tuple[str, ObjectRef]] = []
         for row in rows:
             try:
-                kind = ObjectKind(row["kind"])
+                object_type = ObjectType(row["kind"])
             except ValueError:
                 continue
             corpus.append(
                 (
                     f"{row['schema_name']}.{row['name']}",
                     ObjectRef(
-                        kind=kind,
+                        type=object_type,
                         database=row["database_name"],
                         schema=row["schema_name"],
                         name=row["name"],
@@ -734,7 +731,7 @@ class Repository:
         `information_schema_columns` alone, so a column only surfaces if its
         owning table/view is itself still known there -- a stale leftover
         column row from a since-dropped table cannot spuriously appear. Only
-        TABLE/VIEW ever have columns, but the join excludes other kinds
+        TABLE/VIEW ever have columns, but the join excludes other types
         regardless of whether that ever actually matters.
 
         Currently unused -- SearchScreen.on_mount's call into this is
@@ -774,12 +771,12 @@ class Repository:
             if key != current_key:
                 current_key = key
                 try:
-                    kind = ObjectKind(row["kind"])
+                    object_type = ObjectType(row["kind"])
                 except ValueError:
                     current_ref = None
                 else:
                     current_ref = ObjectRef(
-                        kind=kind,
+                        type=object_type,
                         database=row["database_name"],
                         schema=row["schema_name"],
                         name=row["name"],
@@ -827,11 +824,12 @@ class Repository:
         with self._db.connect() as connection:
             for scope in among:
                 entry = self._entry(connection, scope)
-                if entry.state is CacheState.EMPTY:
-                    stale.append(scope)
-                    continue
-                age = entry.age(now)
-                if age is None or age >= scope_ttl(scope, ttl):
+                # EMPTY short-circuits is_stale: a scope claimed by a pass
+                # that has not finished yet carries the previous pass's
+                # fetched_at, so it can read as fresh while holding no rows.
+                if entry.state is CacheState.EMPTY or is_stale(
+                    scope, entry.age(now), ttl
+                ):
                     stale.append(scope)
         return stale
 

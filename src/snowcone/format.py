@@ -4,27 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-_AGE_UNITS: tuple[tuple[int, str], ...] = (
-    (86400, "d"),
-    (3600, "h"),
-    (60, "m"),
-)
-
-
-def format_age(seconds: float | None) -> str:
-    """A compact cache age: `never`, `12s`, `5m`, `3h`, `2d`.
-
-    Coarse on purpose -- this sits in a status bar next to a per-second
-    countdown, and a second changing figure there is just noise.
-    """
-    if seconds is None:
-        return "never"
-    seconds = max(0.0, seconds)
-    for size, suffix in _AGE_UNITS:
-        if seconds >= size:
-            return f"{int(seconds // size)}{suffix}"
-    return f"{int(seconds)}s"
-
 
 def format_count(count: int) -> str:
     """The parenthesised child count in a tree label, e.g. `(40)`."""
@@ -154,22 +133,3 @@ def format_timestamp_full(value: str | None) -> str:
         return _local(value).strftime("%Y-%m-%d %H:%M:%S %z").strip()
     except ValueError:
         return value
-
-
-def truncate_middle(text: str, width: int) -> str:
-    """Shorten to `width`, keeping both ends.
-
-    Object names share long prefixes (STG_/DIM_) *and* long suffixes
-    (_V2, _DAILY), so cutting from either end alone loses the distinguishing
-    part; an ellipsis in the middle keeps both.
-    """
-    if width <= 0:
-        return ""
-    if len(text) <= width:
-        return text
-    if width <= 3:
-        return text[:width]
-    keep = width - 1
-    head = (keep + 1) // 2
-    tail = keep - head
-    return f"{text[:head]}…{text[len(text) - tail :]}" if tail else f"{text[:head]}…"

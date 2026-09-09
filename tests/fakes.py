@@ -13,7 +13,7 @@ from typing import Any
 
 from snowcone.gateway import queries
 from snowcone.gateway.pool import ConnectionPool, ConnectParams
-from snowcone.models import ObjectKind
+from snowcone.models import ObjectType
 
 Row = dict[str, Any]
 
@@ -114,7 +114,7 @@ class FakeGateway:
         self,
         databases: list[str] | None = None,
         schemas: dict[str, list[str]] | None = None,
-        objects: dict[tuple[str, str, ObjectKind], list[str]] | None = None,
+        objects: dict[tuple[str, str, ObjectType], list[str]] | None = None,
         columns: dict[tuple[str, str, str], list[str]] | None = None,
         warehouses: list[str] | None = None,
         roles: list[str] | None = None,
@@ -226,7 +226,7 @@ class FakeGateway:
 
     def show_objects(
         self,
-        kind: ObjectKind,
+        object_type: ObjectType,
         database: str,
         schema: str,
         *,
@@ -234,14 +234,18 @@ class FakeGateway:
         limit: int = 1000,
         allow_reconnect: bool = True,
     ) -> list[Row]:
-        self.calls.append(("show_objects", (kind, database, schema, after, limit)))
-        names = self._page(self.objects.get((database, schema, kind), []), after, limit)
+        self.calls.append(
+            ("show_objects", (object_type, database, schema, after, limit))
+        )
+        names = self._page(
+            self.objects.get((database, schema, object_type), []), after, limit
+        )
         return [
             {
                 "name": name,
                 "database_name": database,
                 "schema_name": schema,
-                "kind": kind.value,
+                "kind": object_type.value,
                 "comment": "",
                 "rows": 0,
                 "bytes": 0,
@@ -251,17 +255,19 @@ class FakeGateway:
 
     def show_objects_in_database(
         self,
-        kind: ObjectKind,
+        object_type: ObjectType,
         database: str,
         *,
         after: str | None = None,
         limit: int = 1000,
         allow_reconnect: bool = True,
     ) -> list[Row]:
-        self.calls.append(("show_objects_in_database", (kind, database, after, limit)))
+        self.calls.append(
+            ("show_objects_in_database", (object_type, database, after, limit))
+        )
         everything: list[tuple[str, str]] = []
-        for (db, schema, object_kind), names in self.objects.items():
-            if db != database or object_kind != kind:
+        for (db, schema, row_type), names in self.objects.items():
+            if db != database or row_type != object_type:
                 continue
             everything.extend((name, schema) for name in names)
         everything.sort()
@@ -272,7 +278,7 @@ class FakeGateway:
                 "name": name,
                 "database_name": database,
                 "schema_name": schema,
-                "kind": kind.value,
+                "kind": object_type.value,
                 "comment": "",
                 "rows": 0,
                 "bytes": 0,

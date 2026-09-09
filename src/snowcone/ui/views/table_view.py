@@ -13,15 +13,15 @@ from textual.app import ComposeResult
 from textual.widgets import DataTable
 
 from snowcone.format import format_data_type
-from snowcone.models import ObjectKind, Scope, columns_scope
+from snowcone.models import ObjectType, Scope, columns_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.views.base import ObjectView, register_view
 
-_COLUMNS = ("Column", "Type", "Null", "Default", "Comment")
+_COLUMNS = ("Name", "Type", "Nullable", "Default", "Comment")
 
 
 class ColumnsView(ObjectView):
-    """Shared body for the kinds whose detail is a column list.
+    """Shared body for the types whose detail is a column list.
 
     Rows and size and comment for the table itself (not its columns) are
     not shown here -- they're already visible one step earlier, as columns
@@ -59,7 +59,10 @@ class ColumnsView(ObjectView):
                         datetime_precision=column.datetime_precision,
                     )
                 ),
-                Text("" if column.is_nullable else "NOT NULL"),
+                # YES/NO verbatim, as INFORMATION_SCHEMA.IS_NULLABLE
+                # reports it -- a column headed "Nullable" showing
+                # "NOT NULL" read backwards.
+                Text("YES" if column.is_nullable else "NO"),
                 Text(column.default or ""),
                 Text(column.comment or ""),
             )
@@ -67,4 +70,4 @@ class ColumnsView(ObjectView):
 
 @register_view
 class TableView(ColumnsView):
-    OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.TABLE
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TABLE

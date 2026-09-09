@@ -8,11 +8,12 @@ from textual.app import App, ComposeResult
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
-    ObjectKind,
+    ObjectType,
     SchemaRef,
     objects_scope,
     schemas_scope,
 )
+from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import (
     CategorySelected,
     DatabaseSelected,
@@ -60,7 +61,7 @@ def put_schemas(repo: Repository, database: str, *names: str) -> None:
 def put_tables(repo: Repository, database: str, schema: str, *names: str) -> None:
     load(
         repo,
-        objects_scope(ObjectKind.TABLE, database, schema),
+        objects_scope(ObjectType.TABLE, database, schema),
         [
             {
                 "database_name": database,
@@ -416,7 +417,7 @@ async def test_a_count_change_only_relabels(repo) -> None:
         assert tables.label.plain == "Tables (1)"
 
         put_tables(repo, "MYDB", "AAA", "T1", "T2")
-        tree.cache_updated(objects_scope(ObjectKind.TABLE, "MYDB", "AAA"))
+        tree.cache_updated(objects_scope(ObjectType.TABLE, "MYDB", "AAA"))
         await pilot.pause()
         assert tables.label.plain == "Tables (2)"
 
@@ -691,3 +692,42 @@ async def test_reveal_schema_finds_the_right_database_among_several_selected(
         await pilot.pause()
         assert tree.cursor_node is not None
         assert tree.cursor_node.data.key == "BBB"
+
+
+def age_scope(repo: Repository, scope, seconds: float) -> None:
+    """Backdate a scope's last completion, so staleness can be tested without
+    a real wait."""
+    with repo._db.connect() as connection:
+        connection.execute(
+            "UPDATE cache_entry SET fetched_at = fetched_at - ? WHERE scope = ?",
+            (seconds, scope.key),
+        )
+
+
+async def test_the_tree_reads_the_cache_ttl_at_the_point_of_use(repo) -> None:
+    """The TTL used to be snapshotted into the tree at construction, so
+    changing it in the settings dialog did nothing until a restart -- unlike
+    every other reader of a Setting in this app."""
+    put_schemas(repo, "MYDB", "AAA")
+    scope = schemas_scope("MYDB")
+    age_scope(repo, scope, 100)
+    config.set(CACHE_TTL, 3600)
+    try:
+        app = Harness(repo)
+        async with app.run_test(size=(80, 30)) as pilot:
+            tree = app.query_one(ObjectTree)
+            tree.set_databases(["MYDB"])
+            await pilot.pause()
+            assert scope.key not in [key for key, _ in app.needed]
+
+            # No remount, no reconstruction: the very next check picks the
+            # new value up, which is the whole point.
+            config.set(CACHE_TTL, 60)
+            node = tree.root.children[0]
+            node.collapse()
+            await pilot.pause()
+            node.expand()
+            await pilot.pause()
+            assert scope.key in [key for key, _ in app.needed]
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)

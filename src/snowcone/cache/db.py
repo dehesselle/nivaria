@@ -22,9 +22,12 @@ from pathlib import Path
 
 #: Every statement in these is CREATE TABLE/VIEW/INDEX IF NOT EXISTS, so
 #: applying all of them on every prepare() is as safe as applying them once.
+#: Two scripts, not one, because they are different layers: schema.sql is the
+#: mirror tables plus the freshness ledger, search.sql the derived view over
+#: them (and so has to run second).
 _SCHEMA_SCRIPTS: tuple[str, ...] = tuple(
     files("snowcone.cache").joinpath(name).read_text()
-    for name in ("schema.sql", "search.sql", "roles_warehouses.sql")
+    for name in ("schema.sql", "search.sql")
 )
 
 

@@ -1,10 +1,10 @@
 """The container that mounts one detail view at a time.
 
-The swap rule is the whole point: if the object being shown is of the same kind
+The swap rule is the whole point: if the object being shown is of the same type
 as the one already mounted, the view is re-pointed rather than remounted. That
 is what makes arrowing down a list of three hundred tables cheap -- the widget,
 its columns and its scroll position all survive, and there is no flicker.
-A different kind is a genuine change of shape, so that view is replaced.
+A different type is a genuine change of shape, so that view is replaced.
 """
 
 from __future__ import annotations
@@ -53,9 +53,9 @@ class DetailPane(Vertical):
         self._scope = None
         self._schema = None
         self._database = None
-        view_class = view_for(ref.kind)
+        view_class = view_for(ref.type)
         if view_class is None:
-            self._show_placeholder(f"No detail view for {ref.kind.value} yet.")
+            self._show_placeholder(f"No detail view for {ref.type.value} yet.")
             return None
 
         current = self._view
@@ -72,17 +72,17 @@ class DetailPane(Vertical):
     def show_category(self, scope: Scope) -> CategoryView | None:
         """Point the pane at a category node ("Tables (n)", ...).
 
-        Same swap rule as `show`: same kind re-points the mounted view, a
-        different kind (or one with no registered view) replaces it.
+        Same swap rule as `show`: same type re-points the mounted view, a
+        different type (or one with no registered view) replaces it.
         """
         self._ref = None
         self._scope = scope
         self._schema = None
         self._database = None
-        kind = scope.object_kind
-        view_class = category_view_for(kind) if kind is not None else None
+        object_type = scope.object_type
+        view_class = category_view_for(object_type) if object_type is not None else None
         if view_class is None:
-            label = kind.plural if kind is not None else "this"
+            label = object_type.plural if object_type is not None else "this"
             self._show_placeholder(f"No list view for {label} yet.")
             return None
 
@@ -101,7 +101,7 @@ class DetailPane(Vertical):
         """Point the pane at a schema's Grants/Tags view.
 
         No registry lookup, unlike `show`/`show_category`: there is exactly
-        one view for a schema node, not one of several kinds sharing a
+        one view for a schema node, not one of several types sharing a
         lookup, so this constructs SchemaView directly.
         """
         self._ref = None

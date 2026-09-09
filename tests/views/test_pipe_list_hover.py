@@ -1,40 +1,30 @@
 """Hovering "Loaded" tooltips the full timestamp behind a truncated cell.
 
 Same DataTable-subclass tooltip pattern as test_table_list_hover.py (see
-pipe_list_view.py's _PipeListDataTable) -- one tooltip-bearing column here
+views/tables.py's HoverTooltipTable) -- one tooltip-bearing column here
 instead of three.
 """
 
 from __future__ import annotations
 
-import pytest
-from test_detail_pane import Harness, put_pipe, put_pipe_activity
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable
 
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
 from snowcone.format import format_timestamp_full
-from snowcone.models import ObjectKind, objects_scope
+from snowcone.models import ObjectType, objects_scope
 from snowcone.ui.widgets.detail_pane import DetailPane
-
-
-@pytest.fixture
-def repo(tmp_path) -> Repository:
-    database = Database(tmp_path / "cache.db")
-    assert database.prepare()
-    return Repository(database)
+from tests.views.harness import Harness, put_pipe, put_pipe_activity
 
 
 async def _mounted_table(app: Harness, pilot) -> DataTable:
     pane = app.query_one(DetailPane)
-    view = pane.show_category(objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC"))
+    view = pane.show_category(objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC"))
     await pilot.pause()
     # The table lives on the "Load history" tab, not the default "Status"
     # one -- switch there first, same as a user pressing "l".
     view.action_show_tab("history")
     await pilot.pause()
-    return pane.query_one("#detail-table-list", DataTable)
+    return pane.query_one("#detail-list", DataTable)
 
 
 async def _hover_cell(pilot, table: DataTable, row: int, column: int) -> None:
@@ -79,7 +69,7 @@ async def test_hovering_past_the_last_row_clears_the_tooltip(repo) -> None:
     """DataTable leaves hover_coordinate untouched over filler space with no
     row/column meta, so a tooltip set while over a real cell would otherwise
     never get the reactive change needed to clear it -- see
-    _PipeListDataTable._on_mouse_move."""
+    HoverTooltipTable._on_mouse_move."""
     put_pipe(repo, "LOAD_ORDERS")
     put_pipe_activity(repo, "LOAD_ORDERS", LAST_LOAD_TIME="2026-01-02 13:45:07")
     app = Harness(repo)

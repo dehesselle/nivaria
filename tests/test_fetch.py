@@ -9,7 +9,7 @@ from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
     CacheState,
-    ObjectKind,
+    ObjectType,
     databases_scope,
     objects_scope,
     schemas_scope,
@@ -705,8 +705,8 @@ def test_stopping_an_unstarted_service_is_harmless(repo) -> None:
 
 
 def test_objects_scopes_reach_the_right_gateway_call(repo) -> None:
-    gateway = FakeGateway(objects={("MYDB", "PUBLIC", ObjectKind.PIPE): ["P1", "P2"]})
-    scope = objects_scope(ObjectKind.PIPE, "MYDB", "PUBLIC")
+    gateway = FakeGateway(objects={("MYDB", "PUBLIC", ObjectType.PIPE): ["P1", "P2"]})
+    scope = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
     service = make_service(gateway, repo)
     try:
         service.request(scope)
@@ -745,8 +745,8 @@ def prime_gateway() -> FakeGateway:
     return FakeGateway(
         schemas={"MYDB": ["AAA", "BBB", "EMPTY"]},
         objects={
-            ("MYDB", "AAA", ObjectKind.TABLE): ["A1", "A2", "A3"],
-            ("MYDB", "BBB", ObjectKind.TABLE): ["B1", "B2"],
+            ("MYDB", "AAA", ObjectType.TABLE): ["A1", "A2", "A3"],
+            ("MYDB", "BBB", ObjectType.TABLE): ["B1", "B2"],
         },
     )
 
@@ -769,20 +769,20 @@ def test_one_prime_fills_every_schemas_scope(repo) -> None:
     gateway = prime_gateway()
     load_schemas(repo, gateway)
     service = make_service(gateway, repo)
-    scope = prime_scope(ObjectKind.TABLE, "MYDB")
+    scope = prime_scope(ObjectType.TABLE, "MYDB")
     try:
         service.request(scope)
         assert wait_until(
             lambda: (
-                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", "BBB")).state
+                repo.entry(objects_scope(ObjectType.TABLE, "MYDB", "BBB")).state
                 is CacheState.COMPLETE
             )
         )
     finally:
         service.stop()
 
-    aaa = objects_scope(ObjectKind.TABLE, "MYDB", "AAA")
-    bbb = objects_scope(ObjectKind.TABLE, "MYDB", "BBB")
+    aaa = objects_scope(ObjectType.TABLE, "MYDB", "AAA")
+    bbb = objects_scope(ObjectType.TABLE, "MYDB", "BBB")
     assert [o.name for o in repo.objects(aaa).rows] == ["A1", "A2", "A3"]
     assert [o.name for o in repo.objects(bbb).rows] == ["B1", "B2"]
 
@@ -795,10 +795,10 @@ def test_a_prime_costs_one_round_trip_not_one_per_schema(repo) -> None:
     gateway.calls.clear()
     service = make_service(gateway, repo)
     try:
-        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"))
         assert wait_until(
             lambda: (
-                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", "AAA")).state
+                repo.entry(objects_scope(ObjectType.TABLE, "MYDB", "AAA")).state
                 is CacheState.COMPLETE
             )
         )
@@ -817,9 +817,9 @@ def test_a_schema_with_no_objects_still_completes_a_pass(repo) -> None:
     gateway = prime_gateway()
     load_schemas(repo, gateway)
     service = make_service(gateway, repo)
-    empty = objects_scope(ObjectKind.TABLE, "MYDB", "EMPTY")
+    empty = objects_scope(ObjectType.TABLE, "MYDB", "EMPTY")
     try:
-        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"))
         assert wait_until(lambda: repo.entry(empty).state is CacheState.COMPLETE)
     finally:
         service.stop()
@@ -839,7 +839,7 @@ def test_a_prime_announces_each_schema_it_filled(repo) -> None:
         gateway, repo, notify=lambda scope, complete: seen.append(scope.key)
     )
     try:
-        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"))
         assert wait_until(lambda: "tables@MYDB" in seen)
     finally:
         service.stop()
@@ -859,17 +859,17 @@ def test_duplicate_names_across_schemas_are_all_kept(repo) -> None:
         schemas={"MYDB": schemas},
         # The same three names in every schema -- the case that lost rows.
         objects={
-            ("MYDB", schema, ObjectKind.TABLE): ["ORDERS", "CUSTOMERS", "ITEMS"]
+            ("MYDB", schema, ObjectType.TABLE): ["ORDERS", "CUSTOMERS", "ITEMS"]
             for schema in schemas
         },
     )
     load_schemas_named(repo, gateway, "MYDB")
     service = make_service(gateway, repo)
     try:
-        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"))
         assert wait_until(
             lambda: all(
-                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", s)).state
+                repo.entry(objects_scope(ObjectType.TABLE, "MYDB", s)).state
                 is CacheState.COMPLETE
                 for s in schemas
             )
@@ -877,7 +877,7 @@ def test_duplicate_names_across_schemas_are_all_kept(repo) -> None:
     finally:
         service.stop()
     total = sum(
-        repo.child_count(objects_scope(ObjectKind.TABLE, "MYDB", s)) for s in schemas
+        repo.child_count(objects_scope(ObjectType.TABLE, "MYDB", s)) for s in schemas
     )
     assert total == 15
 
@@ -891,17 +891,17 @@ def test_a_result_at_the_show_cap_falls_back_to_per_schema(repo) -> None:
     gateway = FakeGateway(
         schemas={"MYDB": schemas},
         objects={
-            ("MYDB", "AAA", ObjectKind.TABLE): [f"T{i:05d}" for i in range(6000)],
-            ("MYDB", "BBB", ObjectKind.TABLE): [f"U{i:05d}" for i in range(6000)],
+            ("MYDB", "AAA", ObjectType.TABLE): [f"T{i:05d}" for i in range(6000)],
+            ("MYDB", "BBB", ObjectType.TABLE): [f"U{i:05d}" for i in range(6000)],
         },
     )
     load_schemas_named(repo, gateway, "MYDB")
     service = make_service(gateway, repo, workers=2)
     try:
-        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"))
         assert wait_until(
             lambda: all(
-                repo.entry(objects_scope(ObjectKind.TABLE, "MYDB", s)).state
+                repo.entry(objects_scope(ObjectType.TABLE, "MYDB", s)).state
                 is CacheState.COMPLETE
                 for s in schemas
             ),
@@ -909,8 +909,8 @@ def test_a_result_at_the_show_cap_falls_back_to_per_schema(repo) -> None:
         )
     finally:
         service.stop()
-    assert repo.child_count(objects_scope(ObjectKind.TABLE, "MYDB", "AAA")) == 6000
-    assert repo.child_count(objects_scope(ObjectKind.TABLE, "MYDB", "BBB")) == 6000
+    assert repo.child_count(objects_scope(ObjectType.TABLE, "MYDB", "AAA")) == 6000
+    assert repo.child_count(objects_scope(ObjectType.TABLE, "MYDB", "BBB")) == 6000
     assert any(call[0] == "show_objects" for call in gateway.calls)
 
 
@@ -922,7 +922,7 @@ def test_a_prime_scope_has_no_mirror_table_of_its_own(repo) -> None:
     from snowcone.models import prime_scope
 
     with _pytest.raises(ValueError):
-        spec_for(prime_scope(ObjectKind.TABLE, "MYDB"))
+        spec_for(prime_scope(ObjectType.TABLE, "MYDB"))
 
 
 def test_a_failing_prime_is_reported(repo) -> None:
@@ -937,7 +937,7 @@ def test_a_failing_prime_is_reported(repo) -> None:
         Boom(), repo, on_error=lambda scope, message: errors.append(message)
     )
     try:
-        service.request(prime_scope(ObjectKind.TABLE, "MYDB"))
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"))
         assert wait_until(lambda: bool(errors))
     finally:
         service.stop()
@@ -1399,8 +1399,8 @@ def columns_prime_gateway() -> FakeGateway:
     return FakeGateway(
         schemas={"MYDB": ["AAA", "BBB"]},
         objects={
-            ("MYDB", "AAA", ObjectKind.TABLE): ["A1", "A2"],
-            ("MYDB", "BBB", ObjectKind.TABLE): ["B1"],
+            ("MYDB", "AAA", ObjectType.TABLE): ["A1", "A2"],
+            ("MYDB", "BBB", ObjectType.TABLE): ["B1"],
         },
         columns={
             ("MYDB", "AAA", "A1"): ["ID", "TOTAL"],
@@ -1543,7 +1543,7 @@ def test_a_schema_still_truncated_falls_back_to_per_table(repo) -> None:
     tables = [f"T{i:03d}" for i in range(11)]
     gateway = FakeGateway(
         schemas={"MYDB": ["HUGE"]},
-        objects={("MYDB", "HUGE", ObjectKind.TABLE): tables},
+        objects={("MYDB", "HUGE", ObjectType.TABLE): tables},
         columns={
             ("MYDB", "HUGE", table): [f"C{i:04d}" for i in range(1000)]
             for table in tables
@@ -1551,10 +1551,10 @@ def test_a_schema_still_truncated_falls_back_to_per_table(repo) -> None:
     )
     load_schemas_named(repo, gateway, "MYDB")
     # The per-table fallback reads the schema's known table list from cache.
-    scope = objects_scope(ObjectKind.TABLE, "MYDB", "HUGE")
+    scope = objects_scope(ObjectType.TABLE, "MYDB", "HUGE")
     generation = repo.begin_pass(scope)
     repo.write_page(
-        scope, generation, gateway.show_objects(ObjectKind.TABLE, "MYDB", "HUGE"), None
+        scope, generation, gateway.show_objects(ObjectType.TABLE, "MYDB", "HUGE"), None
     )
     repo.finish_pass(scope, generation)
 

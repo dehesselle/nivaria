@@ -150,7 +150,7 @@ def probe(cursor, what: str, database: str | None, schema: str | None) -> None:
         run(cursor, f"{base} LIMIT 1 FROM {quote_literal(names[0])}")
     except Exception as error:  # noqa: BLE001
         say(f"  FROM       : FAILED -- {type(error).__name__}: {error}")
-        say("  --> this object kind needs the unpaged fallback")
+        say("  --> this object type needs the unpaged fallback")
         return
     say("  FROM       : accepted")
 
@@ -185,7 +185,7 @@ def probe(cursor, what: str, database: str | None, schema: str | None) -> None:
     say(f"    unexpected : {sorted(set(paged) - set(names))[:10]}")
     if sorted(paged) == sorted(names):
         say("    (same rows, different order -- SHOW is not ordered by name)")
-    say("  --> keyset paging is unusable for this object kind")
+    say("  --> keyset paging is unusable for this object type")
 
 
 def main() -> int:

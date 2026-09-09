@@ -19,61 +19,28 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from rich.text import Text
-from textual import events
 from textual.app import ComposeResult
-from textual.coordinate import Coordinate
 from textual.widgets import DataTable
-from textual.widgets.data_table import CellDoesNotExist
 
 from snowcone.cache.repository import Repository
-from snowcone.format import format_date, format_timestamp_full
-from snowcone.models import ObjectKind, ObjectRef, Scope
+from snowcone.format import format_date
+from snowcone.models import ObjectRef, ObjectType, Scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
+from snowcone.ui.views.tables import LIST_TABLE, HoverTooltipTable
 
 _COLUMNS = ("Name", "Type", "Storage Integration", "URL", "Created", "Comment")
 
-#: Which merged-row field a tooltip-bearing column's full value comes from,
-#: by column index. Every other column has no tooltip. See
+#: Which merged-row field a tooltip-bearing column's full value comes
+#: from, keyed by that column's header. Every other column has no tooltip. See
 #: table_list_view.py's identical map for the same reasoning.
-_TOOLTIP_FIELDS = {4: "created_on"}
-
-
-class _StageListDataTable(DataTable):
-    """Tooltips the full-precision timestamp on hover over a truncated cell.
-
-    Identical to table_list_view.py's `_TableListDataTable` -- see there.
-    """
-
-    def __init__(self, view: StageListView, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._view = view
-
-    def _on_mouse_move(self, event: events.MouseMove) -> None:
-        super()._on_mouse_move(event)
-        meta = event.style.meta
-        if not meta or meta.get("out_of_bounds", False):
-            self.tooltip = None
-
-    def watch_hover_coordinate(self, old: Coordinate, value: Coordinate) -> None:
-        super().watch_hover_coordinate(old, value)
-        field = _TOOLTIP_FIELDS.get(value.column)
-        if field is None:
-            self.tooltip = None
-            return
-        try:
-            row_key, _ = self.coordinate_to_cell_key(value)
-        except CellDoesNotExist:
-            self.tooltip = None
-            return
-        row = self._view.row_for(row_key.value) if row_key.value is not None else None
-        self.tooltip = (format_timestamp_full(row.get(field)) or None) if row else None
+_TOOLTIP_FIELDS = {"Created": "created_on"}
 
 
 @register_category_view
 class StageListView(CategoryView):
-    OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.STAGE
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.STAGE
 
     def __init__(self, repo: Repository, scope: Scope) -> None:
         super().__init__(repo, scope)
@@ -82,8 +49,8 @@ class StageListView(CategoryView):
         self._rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
-        table: DataTable[Text] = _StageListDataTable(
-            self, id="detail-table-list", cursor_type="row"
+        table: DataTable[Text] = HoverTooltipTable(
+            self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
         )
         table.zebra_stripes = True
         yield table
@@ -95,7 +62,7 @@ class StageListView(CategoryView):
         name = event.row_key.value
         if name is None:
             return
-        ref = ObjectRef(ObjectKind.STAGE, self.scope.database, self.scope.schema, name)
+        ref = ObjectRef(ObjectType.STAGE, self.scope.database, self.scope.schema, name)
         self.post_message(ObjectSelected(ref))
 
     def scopes(self) -> list[Scope]:
@@ -108,7 +75,7 @@ class StageListView(CategoryView):
         ttl = config.get(CACHE_TTL)
         self.ensure(self.scope, ttl)
 
-        table = self.query_one("#detail-table-list", DataTable)
+        table = self.query_one(f"#{LIST_TABLE}", DataTable)
         table.clear(columns=True)
         table.add_columns(*_COLUMNS)
         self._rows = {}

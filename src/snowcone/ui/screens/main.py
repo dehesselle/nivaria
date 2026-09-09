@@ -28,10 +28,11 @@ from textual.screen import Screen
 from snowcone.cache.repository import Repository
 from snowcone.gateway.pool import ConnectionPool
 from snowcone.models import (
-    ObjectKind,
     ObjectRef,
+    ObjectType,
     SchemaRef,
     Scope,
+    ScopeType,
     Warehouse,
     columns_prime_scope,
     databases_scope,
@@ -133,8 +134,7 @@ class MainScreen(Screen):
                     "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
                 )
         yield LogViewer()
-        tree = ObjectTree(self.repo, ttl=config.get(CACHE_TTL), id="tree")
-        yield tree
+        yield ObjectTree(self.repo, id="tree")
         yield DetailPane(self.repo, id="detail")
         yield StatusFooter(show_command_palette=False)
 
@@ -303,11 +303,19 @@ class MainScreen(Screen):
         A whole schema's objects are cheaper to fetch for the entire database
         at once -- one statement instead of a round trip per schema -- so an
         objects request is upgraded to a database-wide prime.
+
+        The upgrade tests the scope's own type, not whether it happens to
+        carry both an object type and a database. Several SELECT-backed
+        scopes could plausibly share that shape; only OBJECTS actually means
+        "a SHOW listing for one schema", which is the only thing a SHOW
+        prime can stand in for.
         """
         scope = event.scope
         priority = Priority.INTERACTIVE if event.interactive else Priority.VISIBLE
-        if scope.object_kind is not None and scope.database is not None:
-            self._request(prime_scope(scope.object_kind, scope.database), priority)
+        if scope.type is ScopeType.OBJECTS:
+            assert scope.object_type is not None
+            assert scope.database is not None
+            self._request(prime_scope(scope.object_type, scope.database), priority)
             return
         self._request(scope, priority)
 
@@ -501,8 +509,8 @@ class MainScreen(Screen):
         if self.pool is None or database is None:
             self.notify("Select a database first", severity="warning")
             return
-        self._request(prime_scope(ObjectKind.TABLE, database), Priority.BACKGROUND)
-        self._request(prime_scope(ObjectKind.VIEW, database), Priority.BACKGROUND)
+        self._request(prime_scope(ObjectType.TABLE, database), Priority.BACKGROUND)
+        self._request(prime_scope(ObjectType.VIEW, database), Priority.BACKGROUND)
         self._request(columns_prime_scope(database), Priority.BACKGROUND)
         self.notify(f"Pre-warming cache for {database}...", timeout=3)
 

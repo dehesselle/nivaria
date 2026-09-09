@@ -39,14 +39,17 @@ Use these names when discussing changes.
 │ ┌─────────────────┐│                                                     │
 │ │  MYDB (12)      ││                                                     │
 │ │  OTHERDB (5)    ││              Detail pane                            │
-│ │   Object tree   ││        (hosts exactly one Object view;              │
+│ │   Object tree   ││       (hosts exactly one detail view;               │
 │ │                 ││   drag this border to resize either pane)           │
 │ │                 ││                                                     │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ ^d Databases  / Search  F5 Refresh  F10 Quit  Role  Warehouse  Countdown  (2/5)│
+│ F1 Log  ^d Databases  / Search  F5 Refresh  F10 Quit  Role  Warehouse  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
+
+`F1` slides the **Log panel** down over the top third, showing every
+statement snowcone sends; `F1` again hides it. See "The SQL log".
 
 `/` opens the **Search modal** over this screen, at roughly 90 % of the
 terminal:
@@ -66,12 +69,13 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerScreen`, see "The database picker" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerScreen`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerScreen`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerScreen`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
-| **Detail pane** | Hosts exactly one **Object view** at a time, chosen by object kind. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
-| **Object view** | The per-kind detail UI (e.g. Table view, Pipe view). Owns its whole detail body. |
+| **Detail pane** | Hosts exactly one detail view at a time, chosen by whatever node the cursor is on. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
+| **Object view** | The per-type detail UI for one object (e.g. Table view, Pipe view). Owns its whole detail body. One of four view families the pane can host -- see "Detail views" below for the other three. |
 | **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
+| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen: every statement snowcone sends, live. `tcw`'s `LogViewer`, fed by `gateway/sql_log.py` -- see "The SQL log" below. |
 
 The tree/Detail split starts at 25 % / 75 % of the width, in `fr` units, and
 is now genuinely resizable: dragging `ObjectTree`'s right border (the same
@@ -106,12 +110,35 @@ price.
 
 Two derived layers sit on top, and only these two:
 
-- a **uniform object view** used by search, flattening every kind to
-  `(database, schema, name, kind)`;
+- a **uniform object view** used by search, flattening every type to
+  `(database, schema, name, kind)` — `kind` there is Snowflake's own column
+  name, kept because this layer still mirrors; snowcone's own word for the
+  same idea is `ObjectType` (see "Vocabulary" below);
 - the **freshness ledger**, below.
 
 Bookkeeping columns are underscore-prefixed so they can never collide with a
 Snowflake column name.
+
+### Vocabulary: Snowflake's words, and where snowcone's differ
+
+Snowflake's own terms are used throughout, in identifiers as well as prose,
+and column headers follow the same rule (see "Column headers mirror
+Snowflake"). Where snowcone needs a name Snowflake has none for, it is
+obviously snowcone's: `Scope`, `CacheState`, `NodeType`, the `_`-prefixed
+bookkeeping columns.
+
+The one place the two collide is **type**. Snowflake's docs, `GRANT ... ON
+<object_type>`, `INFORMATION_SCHEMA.TABLES.TABLE_TYPE` and Snowsight's own
+filters all call "table vs view vs pipe" an *object type*, so that is what
+`ObjectType` is called here. But several `SHOW` results also carry a column
+literally named `kind` — `SHOW DATABASES` returns `STANDARD`/`IMPORTED
+DATABASE` in it, `SHOW TABLES` a per-row detail — and those are mirrored
+under that name, unchanged, because the mirror layer never renames anything.
+So `kind` in `schema.sql`, in `search.sql` and in a `TableSpec.columns` tuple
+is always Snowflake's column; `type` everywhere else is snowcone's word for
+the concept. `Repository.search_corpus` is the one function that crosses the
+seam, reading `row["kind"]` into an `ObjectType`.
+
 
 ### Scopes: the unit of everything
 
@@ -140,7 +167,7 @@ constructor, every mirror table's key, a schema migration) for a problem that
 has a far cheaper fix.
 
 That fix: `SHOW` output is filtered by role, so the whole cache — not one
-table, not one scope kind, all of it — is only ever valid for the role that
+table, not one scope type, all of it — is only ever valid for the role that
 was active while it was built. So instead of tagging rows, snowcone keeps a
 **separate sqlite file per (account, role)** (`paths.cache_file`), and treats
 switching roles as switching *which file* `Repository` points at, the same way
@@ -164,10 +191,11 @@ opened at app startup — `SnowconeApp.on_mount` no longer creates a `Repository
 before the connect dialog even runs. It is opened once a pool exists
 (`SnowconeApp.switch_repo`), and re-opened by the same call after a role
 switch or a reconnect. `MainScreen.set_repo` (and the matching method on
-`ObjectTree`, `DetailPane`, `SearchBar`) is what repoints a widget at a
-different `Repository` object entirely; it resets browsing state exactly like
-a fresh connect would, since whatever was on screen was read out of a file
-that no longer applies.
+`ObjectTree` and `DetailPane`) is what repoints a widget at a different
+`Repository` object entirely; it resets browsing state exactly like a fresh
+connect would, since whatever was on screen was read out of a file that no
+longer applies. The search modal needs no such method: it is built fresh
+against whatever repository it is handed each time it opens.
 
 The one sequencing rule this depends on: the running `FetchService` must be
 stopped *before* `ConnectionPool.set_role` actually changes the role on every
@@ -238,128 +266,162 @@ each field — only the source changed. A type that cannot be parsed degrades to
 
 `SHOW` remains the strong default above: it needs no warehouse and covers
 almost everything the tree and detail pane show. But some facts genuinely do
-not exist in any `SHOW` output — a table's last-DDL/last-altered timestamp is
-only in `INFORMATION_SCHEMA.TABLES`, an ordinary `SELECT` that needs a
-running warehouse. Rather than treat that as a reason to avoid the feature,
-or as a reason to make the whole detail pane depend on a warehouse, such a
-feature gets its own scope, needing its own warehouse, degrading on its own:
-a failed or missing pass for that one scope renders blank, while everything
-`SHOW`-sourced in the same view keeps showing yesterday's data. This is
-free — a SELECT-backed scope is an ordinary `Scope`/`TableSpec`, so
-`begin_pass`/`write_page`/`finish_pass`/`fail_pass`, the staleness sweep, and
-"a failed pass does not sweep" all apply unmodified. It also gets no special
-treatment from the sweep itself: a scope currently on screen is refreshed on
-the same TTL as everything else, warehouse or not — the sweep already only
-ever touches what is on screen, so there is nothing extra to opt in or out of.
+not exist in any `SHOW` output — a table's last-DDL timestamp is only in
+`INFORMATION_SCHEMA.TABLES`, a pipe's load history only in `COPY_HISTORY`.
+Rather than avoid those features, or make the whole detail pane depend on a
+warehouse, **each such fact gets its own scope, needing its own privileges,
+degrading on its own.**
 
-The shape rule is the mirror convention above, applied literally: **never
-retrofit a column onto an existing mirror table** — `schema.sql` is all
-`CREATE TABLE IF NOT EXISTS`, with no migration system, so there is no safe
-path to `ALTER` one. Each new SELECT-backed source instead gets a brand-new
-mirror table, named and shaped like the INFORMATION_SCHEMA view it reads
-(upper-case columns) — the same exception `information_schema_columns`
-already established for `SHOW COLUMNS`, just literally true this time
-instead of a SHOW result mapped onto that vocabulary.
+That is free, and it is what makes this a rule rather than a series of
+special cases: a SELECT-backed scope is an ordinary `Scope`/`TableSpec`, so
+`begin_pass`/`write_page`/`finish_pass`/`fail_pass`, the staleness sweep and
+"a failed pass does not sweep" all apply unmodified. A failed or missing pass
+renders those columns blank while everything `SHOW`-sourced in the same view
+keeps showing yesterday's data. It gets no special treatment from the sweep
+either: a scope on screen is refreshed on the same TTL as everything else,
+warehouse or not.
 
-`information_schema_tables` (`LAST_DDL`, `LAST_ALTERED` on the "Tables (n)"
-list) is the first instance of this. `account_usage_copy_history` (Rows,
-Size, Loaded, Status, Target Table, Filename on the "Pipes (n)" list) is the
-second: each pipe's *latest* load in a schema, read from `SNOWFLAKE.
-ACCOUNT_USAGE.COPY_HISTORY` rather than `INFORMATION_SCHEMA` — the latter's
-`COPY_HISTORY` table function requires a `TABLE_NAME` argument with no
-schema-wide form, which would mean one round trip per distinct target table
-(worst case one per pipe) every time the list opens, against the
-round-trips-dominate principle below. `ACCOUNT_USAGE.COPY_HISTORY` is an
-ordinary view filterable by `PIPE_CATALOG_NAME`/`PIPE_SCHEMA_NAME`, so one
-query covers a whole schema's pipes at once, the same shape `table_stats`
-uses for tables — bound by the "pipe history fetch window" setting (default
-90 days) rather than a fixed lookback, and reduced to one row per pipe with
-a `QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME
-DESC) = 1`, since the list only ever wants each pipe's most recent load and
-so does `Repository.pipe_target_table`'s resolution (below). Collapsing this
-in SQL, not just in Python the way the list already did, is the fix for a
-real incident: on an account with ~400 pipes and frequent ingestion, the
-unreduced query returned unboundedly many historical rows — one per load,
-over 90 days, across every pipe in the schema — and the app hung for
-minutes fetching and materializing all of them just to throw away everything
-but the newest per pipe a moment later. The trade-off that remains: it needs
-`IMPORTED PRIVILEGES` on the `SNOWFLAKE` database (or `ACCOUNTADMIN`) and can
-lag real activity by up to ~2 hours — both are just another way this one
-scope degrades blank, the same as a missing warehouse does for `table_stats`,
-so nothing new had to be built to accommodate them.
+**The shape rule: never retrofit a column onto an existing mirror table.**
+`schema.sql` is all `CREATE TABLE IF NOT EXISTS` with no migration system, so
+an added column silently never appears in an existing cache file and the
+first write to it fails. Each new source instead gets a brand-new mirror
+table, named and shaped like the view it reads (upper-case columns for an
+`INFORMATION_SCHEMA`/`ACCOUNT_USAGE` source — the same exception
+`information_schema_columns` established).
 
-A single pipe's own "Load history" needs more than the latest row, so it
-does *not* share this scope — it has its own, `pipe_activity_history`,
-querying the same view with the same fetch-window bound but filtered to one
-`PIPE_NAME` instead of `QUALIFY`-reduced, and — like `information_schema_
-copy_history` below — fetched lazily, only once that pipe's detail view is
-open, never eagerly for every pipe in the schema. Unlike that
-`INFORMATION_SCHEMA` sibling, this needs no target-table resolution first:
-`ACCOUNT_USAGE.COPY_HISTORY` already carries `PIPE_NAME` as an ordinary
-column. It also gets its own mirror table (`account_usage_copy_history_
-detail`) rather than reusing `account_usage_copy_history` under a different
-`_scope` value — that table's primary key predates having two different
-scopes write into it and does not include `_scope`, so a row visible to both
-the schema-wide latest-per-pipe scope and a per-pipe backfill scope would let
-whichever pass wrote it last silently steal its `_scope` tag from the other.
+There is one deliberate exception on record, and it is not a counterexample:
+`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` were added straight onto both
+copy-history tables. snowcone is pre-1.0 with no migration system and no
+backward-compatibility policy, so the usual objection was answered the
+cheaper way — `schema.sql` was edited in place and anyone with an existing
+cache file deletes it. A new table stays the right move whenever "delete your
+cache" is not an acceptable answer.
 
-`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` were added later, directly
-onto both `account_usage_copy_history` and `information_schema_copy_history`
-below — the pipe detail view's Load History tab shows them for whichever
-row is currently highlighted. This is a deliberate exception to "never
-retrofit a column onto an existing mirror table" (above), not a
-counterexample to it: snowcone is pre-1.0 with no migration system and no
-backward-compatibility policy, so the usual reason to avoid a retrofit --
-an old cache file's table keeps its old shape and a write to the new column
-then crashes (`schema.sql`'s `CREATE TABLE IF NOT EXISTS` never alters an
-existing table) -- is resolved the simpler way here: `schema.sql` is edited
-in place, and anyone with a pre-existing cache file deletes it after
-upgrading. A new mirror table (as the rule above would otherwise call for)
-stays the right move whenever a straight cache wipe is not an acceptable
-answer.
+#### The second-source scopes
 
-`information_schema_copy_history` is the third instance, and the first to
-pair with another SELECT-backed scope rather than stand alone: a single
-pipe's "Load history" merges it with `account_usage_copy_history_detail`
-above (that pipe's own backfill, not the schema-wide `account_usage_copy_
-history` the list uses).
-`INFORMATION_SCHEMA.COPY_HISTORY` gives near-real-time data but only for the
-last 14 days (Snowflake's own retention limit for that function, not a
-setting), and awkwardly requires a `TABLE_NAME` argument rather than a
-`PIPE_NAME` one — Snowflake exposes no way to ask it for "this pipe's"
-history directly. Rather than parse the pipe's target table out of its COPY
-INTO definition text, `Repository.pipe_target_table` reads it straight off
-whatever `account_usage_copy_history` already has cached for that pipe:
-Snowflake's own resolution, already being fetched for the "Pipes (n)" list
-anyway, not a guess. That is an opportunistic read of a sibling scope's
-cache, the same pattern `_fan_out_columns_by_schema` already uses for
-`SCHEMAS` — not a hard dependency between scopes.
+| Scope | Source | Feeds | Needs |
+|---|---|---|---|
+| `TABLE_STATS` | `INFORMATION_SCHEMA.TABLES`, `TABLE_TYPE = 'BASE TABLE'` | Tables (n): Last DDL, Last Altered | warehouse |
+| `VIEW_STATS` | the same statement, `TABLE_TYPE = 'VIEW'` | Views (n): Last DDL, Last Altered | warehouse |
+| `MATERIALIZED_VIEW_STATS` | `SHOW MATERIALIZED VIEWS` | Views (n): Rows, Size | — |
+| `PIPE_ACTIVITY` | `ACCOUNT_USAGE.COPY_HISTORY`, latest row per pipe | Pipes (n) activity columns; target-table resolution | warehouse, `IMPORTED PRIVILEGES` |
+| `PIPE_ACTIVITY_HISTORY` | the same view, one pipe, unreduced | Pipe view Load history (older half) | warehouse, `IMPORTED PRIVILEGES` |
+| `PIPE_HISTORY` | `INFORMATION_SCHEMA.COPY_HISTORY` | Pipe view Load history (recent half) | warehouse, a resolved target table |
+| `TASK_ACTIVITY` | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | Tasks (n): Last Scheduled, Last Run State | warehouse, `IMPORTED PRIVILEGES` |
+| `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view Run history (older half) | warehouse, `IMPORTED PRIVILEGES` |
+| `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view Run history (recent half) | warehouse |
+| `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE` | Schema/Database view Grants | — |
+| `TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES` | Schema/Database view Tags | warehouse |
 
-A pipe that has never loaded anything has no cached activity row to resolve
-a target from, and that is a normal, *permanent* state for plenty of real
-pipes — not a transient failure to retry. Treating it as one was the first
-version's mistake: it queued `PIPE_HISTORY` anyway, `fetch_page` raised for
-lack of a target, and the fetch layer dutifully reported that as an error on
-every fetch, forever, for a pipe that will never resolve one. The fix lives
-above the fetch layer entirely: `PipeView.scopes()` only lists
-`pipe_history_scope` once `pipe_target_table` actually resolves something,
-and `update_content` only calls `ensure()` on it under the same condition.
-An unresolvable pipe is therefore never queued at all — by the interactive
-path or by the background sweep, which watches `scopes()` too — so it just
-renders an empty history table, and starts fetching real near-real-time data
-the moment `account_usage_copy_history` first gets a row for it (which
-`ensure()` on the always-present activity scope keeps checking for on the
-ordinary cadence). `fetch_page` still raises if `PIPE_HISTORY` is ever
-requested with no resolvable target regardless — a genuine safety net for a
-caller that skips this gate, not the expected path.
+Two of these are second sources without being `SELECT`s:
+`MATERIALIZED_VIEW_STATS` and `GRANTS` are additional `SHOW` commands, so
+they need no warehouse and degrade the way any `SHOW` scope does. `SHOW
+MATERIALIZED VIEWS` is genuinely a different command from `SHOW VIEWS`, with
+its own column set carrying `rows`/`bytes` that `SHOW VIEWS` never returns —
+which is also why a regular view's Rows/Size are blank, and why the Views (n)
+list shows a Materialized column at all: it is the only thing that explains
+the blank.
 
-The two sources are merged in the view by `(FILE_NAME, LAST_LOAD_TIME)`, with
-the near-real-time rows inserted last so they win on overlap — deliberately
-not a date-based split (e.g. "recent from one source, older from the other"),
-since that would hide real data whenever one source is thin or has failed
-outright. Rows older than the "pipe history display window" setting are
-filtered out of the *view* only; they stay in the fetch-window-bounded cache
-regardless, so shrinking the display window later needs no refetch.
+`TAG_REFERENCES` is `INFORMATION_SCHEMA.TAG_REFERENCES`, deliberately not
+`SHOW TAGS IN SCHEMA`: that lists tag *objects defined inside* a container,
+not tags *applied to* it. `ACCOUNT_USAGE.TAG_REFERENCES` was rejected too —
+it needs `IMPORTED PRIVILEGES` and lags hours, for no gain over the
+`INFORMATION_SCHEMA` view on a single object.
+
+Snowflake's own visibility rules still apply on top: `SHOW GRANTS ON <object>`
+only returns what the active role owns, has `MANAGE GRANTS` on, or reaches
+via `ACCOUNTADMIN`/`SECURITYADMIN`, so a short or empty Grants tab under a
+lesser role is correct, not an incomplete fetch.
+
+#### One row per pipe, in SQL — a real incident
+
+`PIPE_ACTIVITY` is reduced to each pipe's latest load by a `QUALIFY
+ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1`,
+and that `QUALIFY` is load-bearing. Without it, on an account with ~400 pipes
+and frequent ingestion, the query returned unboundedly many historical rows —
+one per load, over the whole fetch window, across every pipe in the schema —
+and the app hung for minutes materialising them just to throw away all but
+the newest per pipe a moment later. Collapsing in Python is not enough; it
+has to happen in SQL. `TASK_ACTIVITY` carries the same reduction for the same
+reason.
+
+`ACCOUNT_USAGE.COPY_HISTORY` is what the schema-wide list reads at all
+because `INFORMATION_SCHEMA.COPY_HISTORY` requires a `TABLE_NAME` argument
+with no schema-wide form — one round trip per distinct target table every
+time the list opens, against the round-trips-dominate principle below.
+
+#### Why a per-object history is a separate scope, and a separate table
+
+A single pipe's or task's own history needs more than the latest row, so it
+does not share the schema-wide scope: `PIPE_ACTIVITY_HISTORY` and
+`TASK_ACTIVITY_HISTORY` query the same views filtered to one object,
+**fetched lazily, only once that object's detail view is open** — a schema
+full of pipes never pays for history nobody has looked at.
+
+They get their own mirror tables rather than reusing the schema-wide ones
+under a different `_scope` value, because those tables' primary keys predate
+having two scopes write into them and do not include `_scope`: a row visible
+to both would let whichever pass wrote it last steal its `_scope` tag from
+the other.
+
+#### Merging the two halves of a history
+
+A pipe's or task's history merges an `ACCOUNT_USAGE` backfill with a
+near-real-time `INFORMATION_SCHEMA` source, the latter inserted last so it
+wins on overlap. Deliberately **not** a date-based split ("recent from one,
+older from the other"): that would hide real data whenever one source is thin
+or has failed outright, whereas overlaying needs no reasoning about which
+scope succeeded.
+
+The merge key differs, and the reason is Snowflake's: a task run has
+`QUERY_ID`, Snowflake's own identifier for one run, present in both sources.
+A pipe's file load has no equivalent, so it is keyed on `(FILE_NAME,
+LAST_LOAD_TIME)`.
+
+Rows older than the "display window" setting are filtered out of the *view*
+only; they stay in the fetch-window-bounded cache, so shrinking the display
+window later needs no refetch.
+
+#### Resolving a pipe's target table, and the pipe that never loaded
+
+`INFORMATION_SCHEMA.COPY_HISTORY` wants a `TABLE_NAME`, and Snowflake exposes
+no way to ask it for "this pipe's" history. Rather than parse the target out
+of the pipe's `COPY INTO` text, `Repository.pipe_target_table` reads it off
+whatever `PIPE_ACTIVITY` already has cached for that pipe — Snowflake's own
+resolution, already being fetched for the Pipes (n) list, not a guess. That
+is an opportunistic read of a sibling scope's cache, the same pattern
+`_fan_out_columns_by_schema` uses for `SCHEMAS`, not a dependency between
+scopes.
+
+A pipe that has never loaded anything has no cached row to resolve a target
+from, and that is a normal, **permanent** state for plenty of real pipes, not
+a transient failure to retry. Treating it as one was the first version's
+mistake: it queued `PIPE_HISTORY` anyway, `fetch_page` raised, and the fetch
+layer reported an error on every attempt, forever. The fix lives above the
+fetch layer: `PipeView.scopes()` only lists `pipe_history_scope` once a
+target actually resolves, and `update_content` only `ensure()`s it under the
+same condition — so neither the interactive path nor the background sweep
+(which watches `scopes()` too) ever queues it. Such a pipe renders an empty
+history and starts fetching real data the moment `PIPE_ACTIVITY` first gets a
+row for it. `fetch_page` still raises if `PIPE_HISTORY` is requested with no
+target: a safety net for a caller that skips the gate, not the expected path.
+
+`TaskView` needs none of this. `INFORMATION_SCHEMA.TASK_HISTORY` accepts
+`TASK_NAME`/`DATABASE_NAME`/`SCHEMA_NAME` as direct named arguments, all of
+which a task's own `ObjectRef` already carries, so both its history scopes
+are always requested once the view is open.
+
+One thing that looks redundant and is not: `queries.task_history` still
+database-qualifies the function name (`"<database>".INFORMATION_SCHEMA.
+TASK_HISTORY(...)`) even though `DATABASE_NAME` is also one of its named
+arguments. Those are two different things, and this was a real incident: an
+unqualified `INFORMATION_SCHEMA.TASK_HISTORY` resolves against whichever
+database is current in the session, which the pool never sets (only `USE
+ROLE`/`USE WAREHOUSE` are ever issued), so it failed on a live account with
+"invalid identifier" regardless of where the task lived — silently, since the
+`ACCOUNT_USAGE` half of the merge still returned data. `queries.pipe_history`
+qualifies `COPY_HISTORY` the same way.
+
 
 #### A scope whose data does not age on the ordinary cadence
 
@@ -373,14 +435,19 @@ sweep tick for no new data.
 
 Rather than build a new "background job that knows to skip itself" concept,
 `models.scope_ttl(scope, default)` generalizes the existing TTL check itself:
-a small `{ScopeKind: float}` override table, consulted from both places
-staleness is ever decided — `Repository.stale_scopes` (the background sweep)
-and `_ScopedView.ensure` (a view's own paint-time check) — so neither a view
-nor a call site needs to know that one particular scope is special, and a
-first-ever fetch (nothing cached yet) still happens immediately regardless.
-It only ever *lengthens* the caller's TTL, never shortens it, so an
-aggressively short `CACHE_TTL` setting is still honoured for every scope with
-no override.
+a small `{ScopeType: float}` override table. It only ever *lengthens* the
+caller's TTL, never shortens it, so an aggressively short `CACHE_TTL` setting
+is still honoured for every scope with no override, and a first-ever fetch
+(nothing cached yet) still happens immediately regardless.
+
+`scope_ttl` is reached only through **`models.is_stale(scope, age, ttl)`,
+which is the one place staleness is decided anywhere in the app.** All three
+callers go through it: `Repository.stale_scopes` (the background sweep),
+`_ScopedView.ensure` (a detail view's paint-time check) and
+`ObjectTree._ensure` (the tree's). Having one function is not tidiness — the
+three had already drifted, with the tree checking a `CACHE_TTL` snapshotted
+into it at construction (so a settings change did nothing until a restart)
+and skipping `scope_ttl` altogether.
 
 `PIPE_ACTIVITY_HISTORY`'s own override is 13 days, one short of
 `INFORMATION_SCHEMA.COPY_HISTORY`'s 14-day retention rather than the full 14:
@@ -399,15 +466,14 @@ near-real-time source the way `PipeView` does -- so this isn't a regression,
 but it's worth revisiting on its own if the list turns out to need fresher
 data than that.
 
-One landmine worth naming for whoever builds the next one: `object_kind` on
-a `Scope` is not a general "this is about tables" marker — it specifically
-means "this is a `SHOW`-listing request for one schema", and
-`MainScreen.on_scope_needed` upgrades any scope carrying both a database and
-an object kind into a whole-database `SHOW`-prime. A new SELECT-backed scope
-that happens to also be about one object kind must leave `object_kind` unset
-(`table_stats_scope`, `pipe_activity_scope` and the existing `columns_scope`
-all do), or it gets silently redirected into fetching the wrong thing
-entirely.
+`object_type` on a `Scope` means "this is a `SHOW` listing of one object
+type", and nothing else keys off it: `MainScreen.on_scope_needed` upgrades a
+scope to a whole-database `SHOW`-prime when its *type* is `OBJECTS`, not when
+it happens to carry both a database and an object type. That distinction used
+to be a live landmine — the check was structural, so any new SELECT-backed
+scope that set `object_type` was silently redirected into fetching `SHOW
+TABLES` instead of its own statement, and six scope constructors carried a
+defensive comment about it. A new scope no longer has to know.
 
 ### Round trips dominate; payload is nearly free
 
@@ -423,7 +489,7 @@ Lowering the page size setting mainly makes things slower.
 ### Database priming
 
 Because round trips dominate, a schema's objects are **not** fetched per
-schema. One `SHOW <kind> IN DATABASE` returns every schema's objects at once —
+schema. One `SHOW <type> IN DATABASE` returns every schema's objects at once —
 measured at ~1 s for 2145 tables across 54 schemas, against ~10 s for 54
 separate calls. Any request for one schema's objects is therefore upgraded to a
 database-wide prime, which then completes *every* schema's scope from that
@@ -719,175 +785,136 @@ must be deferred by one refresh** or it silently lands on the first row.
 
 ---
 
-## Detail views: the registry
+## Detail views
 
-The Detail pane hosts **one Object view at a time**, looked up by object kind
-from a registry that views add themselves to at import time.
+The Detail pane hosts **exactly one view at a time**, chosen by whatever the
+tree cursor is on.
 
-Not a switcher holding every view mounted: with a growing set of kinds that
-means a dozen widget trees resident at all times, each needing a coherent
-"nothing selected" state and each subscribing to updates it does not care
-about. Mounting on demand keeps exactly one view alive.
+Not a switcher holding every view mounted: with a growing set of object types
+that means a dozen widget trees resident at all times, each needing a
+coherent "nothing selected" state and each subscribing to updates it does not
+care about. Mounting on demand keeps exactly one view alive.
 
-**The swap is on object *kind*, not on object.** Moving between two tables
-re-points the existing view, so the widget, its columns and its scroll position
-all survive — which is what makes arrowing down three hundred tables cheap. A
-different kind is a genuine change of shape, so that view is replaced.
+**The swap is on object *type*, not on object.** Moving between two tables
+re-points the existing view, so the widget, its columns and its scroll
+position all survive — which is what makes arrowing down three hundred tables
+cheap. A different type is a genuine change of shape, so that view is
+replaced.
 
-**A view owns its whole body.** There used to be a second registry contract --
+**A view owns its whole body.** There used to be a second registry contract —
 a view's `compose_context()` fed a separate "Context bar" pane above the
-Detail pane -- but that pane was never a distinct concept, only
+Detail pane — but that pane was never a distinct concept, only
 selection-dependent content cramped into a one-line strip by its own
-container. The Context bar and the Detail pane are now one pane, and
-`compose_context()` is gone with it: whatever a view wants to show is
-content it composes as part of its own body, wherever in that body it
-belongs, with no second registry to keep in sync.
+container. The two are one pane now, and `compose_context()` is gone with it.
 
-A view declares which cache scopes it reads. That is how it knows whether an
-update concerns it, and how its data joins the staleness sweep.
+**A view declares which cache scopes it reads** (`scopes()`). That is how it
+knows whether an update concerns it, and how its data joins the staleness
+sweep.
 
-An object kind with no registered view shows a placeholder rather than
-crashing, so the tree can list kinds ahead of their views existing.
+### Four families, two registries
 
-The kinds are genuinely different shapes, which is the justification for the
-seam: a table shows columns; a pipe has no columns at all, so its body is a
-`TabbedContent` instead -- **Load history** (see "A second source" for where
-that comes from, plus a detail panel below the table for whatever the
-currently highlighted row wants to say about itself -- today that's a load
-error's message and line number, if it has one) and **Definition** (the
-pipe's raw `COPY INTO` SQL, unformatted -- no syntax highlighting, a
-deliberate scope boundary for now). The two tabs are also keyboard-mnemonic
-switchable (`l`/`d`, hidden from the footer), the same pattern sibling
-project snakecam's `JobDetailsScreen` already established.
+| Node under the cursor | View family | Found by |
+|---|---|---|
+| an object leaf (`ORDERS`) | `ObjectView` | `view_for(type)` — registry, `@register_view` |
+| a category node (`Tables (n)`) | `CategoryView` | `category_view_for(type)` — registry, `@register_category_view` |
+| a schema node | `SchemaView` | constructed directly by `DetailPane.show_schema` |
+| a database node | `DatabaseView` | constructed directly by `DetailPane.show_database` |
 
-The "Pipes (n)" category node (`PipeListView`) is tabbed the same way, for
-the same reason a single pipe's own view is not: **Status** (name,
-running/stopped, and `invalid_reason` as three columns, one row per pipe --
-a stopped pipe is otherwise indistinguishable from a healthy one) needs
-every pipe in the schema to be useful, not just whichever one happens to be
-open, so it lives on the list view instead. It opens by default (mnemonic
-`s`), alongside **Load history** (mnemonic `l`) -- last load activity per
-pipe, the same data this view already showed before it had tabs.
-`invalid_reason` costs no new scope here either: it is already mirrored onto
-the same `SHOW PIPES` rows this view reads for the Name column.
+Both registries are module-level dicts populated by a decorator at import
+time. No entry points, nothing to configure — adding an object type is one
+new module plus one import. An object type with no registered view shows a
+placeholder rather than crashing, so the tree can list types ahead of their
+views existing.
 
-A task's own view (`TaskView`) follows the same shape as `PipeView` --
-**Run history** (Snowsight's own term, matching what its task detail page
-calls this) and **Definition** (the task's raw SQL statement, unformatted),
-mnemonic-switchable `r`/`d` -- backed by the same dual-source pattern
-`PipeView`'s Load history uses, just against `SNOWFLAKE.ACCOUNT_USAGE.
-TASK_HISTORY` (a task's full backfill, `TASK_ACTIVITY_HISTORY`) and
-`INFORMATION_SCHEMA.TASK_HISTORY` (near-real-time, but limited to Snowflake's
-own hard 7-day retention for that function -- shorter than `COPY_HISTORY`'s
-14) merged by `QUERY_ID`, Snowflake's own identifier for a single run. One
-real divergence from `PipeView`: `INFORMATION_SCHEMA.TASK_HISTORY` accepts
-`TASK_NAME`/`DATABASE_NAME`/`SCHEMA_NAME` as direct named arguments, unlike
-`COPY_HISTORY`'s `TABLE_NAME`, which a pipe does not carry itself and which
-`PipeView` resolves through `Repository.pipe_target_table` as a result. A
-task's own `ObjectRef` already has everything `TASK_HISTORY` needs, so
-`TaskView` has no analogous resolution step and no gating on `scopes()` --
-both history scopes are always requested once the view is open.
+A schema and a database go through no registry because neither has an
+`ObjectType` and there is exactly one view for each — a lookup with a single
+possible answer is a lookup worth not having. They share their whole
+implementation (`_GrantsTagsView`) and differ only in which scopes they read,
+since a database has no schema dimension.
 
-`queries.task_history` still database-qualifies the function name itself
-(`"<database>".INFORMATION_SCHEMA.TASK_HISTORY(...)`, the same way
-`pipe_history` qualifies `COPY_HISTORY`) even though `DATABASE_NAME` is also
-one of its named arguments -- those are two different things. This was a
-real incident, not a defensive guess: an unqualified `INFORMATION_SCHEMA.
-TASK_HISTORY` resolves against whichever database happens to be current in
-the session, and the connection pool never sets one (only `USE ROLE`/`USE
-WAREHOUSE` are ever issued -- see "The connection pool"), so the first
-version of this query failed on a real account with "invalid identifier
-INFORMATION_SCHEMA.TASK_HISTORY" regardless of which database the task
-actually lived in -- silently, since the schema-wide `ACCOUNT_USAGE`-backed
-half of the merge still returned data and the failure only surfaced as an
-error toast.
+### What decides a view's shape
 
-The "Tasks (n)" category node (`TaskListView`) is deliberately **not**
-tabbed the way `PipeListView` is: there is only one thing to show for a
-schema's tasks today, so it is a single `DataTable`, the same shape
-`TableListView` uses. Its columns merge `SHOW TASKS` (Name, Warehouse,
-Schedule, State -- `state` is Snowflake's own started/suspended wording,
-shown verbatim per the mirror-don't-reinterpret rule above, not relabelled
-into invented vocabulary) with `TASK_ACTIVITY` (`SNOWFLAKE.ACCOUNT_USAGE.
-TASK_HISTORY`, reduced to each task's latest run by the same
-`QUALIFY ROW_NUMBER()` technique `PIPE_ACTIVITY` uses, for the same scale
-reason: an unreduced query over a schema of frequently-running tasks risks
-the same kind of hang the ~400-pipe incident above describes) for Last Run
-and Last Run Status. Unlike `PIPE_ACTIVITY`, `TASK_ACTIVITY` carries **no**
-TTL override (see `scope_ttl` below) -- a task can run every few minutes, so
-a multi-day-stale "last run" column here would be actively misleading, not
-merely questionable the way `PIPE_ACTIVITY`'s own inherited override already
-admits it is.
+Views vary in exactly three ways, and each is a consequence of what Snowflake
+actually returns rather than a style choice:
 
-A view's own view (`ViewView`) is tabbed the same way `PipeView`/`TaskView`
-are, but for a different reason: it is the first kind that is genuinely
-**both** shapes the registry already has, not a third shape of its own -- a
-real column list, like a table (`ColumnsView`, `table_view.py`, reused here
-directly rather than duplicated), *and* one defining SQL statement, like a
-pipe or task (`show_views.text`, mirrored the same way `show_pipes.
-definition`/`show_tasks.definition` are, read the same way through
-`Repository.object_detail` with no scope of its own). Columns and Definition,
-mnemonic-switchable `c`/`d`.
+- **A single `DataTable`** when there is one thing to show: `TableListView`,
+  `ViewListView`, `StageListView`, `TaskListView`, `TableView`.
+- **Tabs** when there are two genuinely different shapes for one node, with
+  mnemonic switching (hidden from the footer, the pattern sibling project
+  snakecam's `JobDetailsScreen` established): `PipeView` and `TaskView`
+  (history + definition), `ViewView` (columns + definition), `PipeListView`
+  (status + history), `SchemaView`/`DatabaseView` (grants + tags).
+- **A detail panel under a table**, for what does not fit in a cell: the
+  history views' error message for the highlighted row.
 
-The "Views (n)" category node (`ViewListView`) stays a single `DataTable`
-like `TableListView`, **not** tabbed like `PipeListView`/`TaskListView` --
-a view carries no per-row status or activity concept those tabs exist for.
-Its columns are `TableListView`'s own shape (Name, Rows, Size, Created, Last
-DDL, Last Altered, Comment) plus Materialized, merging three scopes: the base
-`SHOW VIEWS` scope for Name/Created/Comment/Materialized (already fetched for
-the tree); `VIEW_STATS` for Last DDL/Last Altered, the exact
-`INFORMATION_SCHEMA.TABLES` statement `TABLE_STATS` uses, just bound to
-`TABLE_TYPE = 'VIEW'`; and `MATERIALIZED_VIEW_STATS` for Rows/Size, sourced
-from `SHOW MATERIALIZED VIEWS` -- a distinct Snowflake command from `SHOW
-VIEWS`, with its own column set that actually carries row/byte stats, which
-`SHOW VIEWS` never does even for materialized views. `MATERIALIZED_VIEW_STATS`
-is the first dual-source scope sourced from a second `SHOW` rather than an
-`INFORMATION_SCHEMA` `SELECT`, so -- unlike `TABLE_STATS`/`VIEW_STATS`/
-`PIPE_ACTIVITY`/`TASK_ACTIVITY`/`TAG_REFERENCES` -- it needs no warehouse and
-degrades the same way every other SHOW-sourced scope does, not the way a
-missing-warehouse SELECT does. Only materialized views ever appear in its
-rows, so a regular view simply has no match on merge; Materialized itself is
-shown because it is the only thing that explains why most rows' Rows/Size are
-blank -- by Snowflake design, not a cache miss.
+Two of those decisions are worth their reasoning:
 
-The "Stages (n)" category node (`StageListView`) is the same single-`DataTable`
-shape again, for a stronger reason than Views' own: a stage carries no
-per-row status or activity concept either, but unlike a table or a view it
-also has no natural per-object drill-down -- there are no columns, no defining
-SQL, nothing that does not fit in one `SHOW STAGES` row. So this list is the
-only place a stage is shown in any detail; opening one from here (or from
-search) still lands on the generic "no detail view yet" placeholder, same as
-today, and needs no new fetch scope -- `Type`, `Storage Integration`, `URL`
-and `Created` all come straight from `show_stages`, already mirrored for the
-tree's own count. `Type` earns a column not for its own sake but because
-`Storage Integration`/`URL` are blank for an internal stage -- the same role
-`Materialized` plays above for its own blank cells. The "Stages (n)" node
-stays expandable like every other category despite this, rather than becoming
-the first exception: nothing is saved by suppressing it (an unregistered kind
-already falls back to the same placeholder for free), and `ObjectTree.reveal`
-would have to special-case a stage hit to avoid force-expanding down to a leaf
-that is unreachable by ordinary browsing otherwise (Textual's
-`TreeNode.expand()` ignores `allow_expand` -- that flag only gates the
-user-facing arrow/click/keyboard toggle).
+`PipeListView` is tabbed but `TaskListView` is not, even though a pipe and a
+task look symmetrical. Status ("which of my pipes are broken?") needs *every*
+pipe in the schema to be useful, so it lives on the list rather than on a
+single pipe's view — and it costs no new scope, since `invalid_reason` is
+already on the `SHOW PIPES` rows the list reads anyway. A schema's tasks have
+only the one thing to show today, so a single table is enough.
 
-A **schema** or **database** node is a further departure from the registry
-above: neither has an `ObjectKind`, so neither `ObjectView` nor `CategoryView`
-fits, and there is exactly one view per node kind rather than one of several
-kinds needing a lookup -- so `DetailPane.show_schema`/`show_database`
-construct `SchemaView`/`DatabaseView` (`ui/views/schema_view.py`) directly,
-with no registry entry at all. Both are tabbed the same way pipes are --
-**Grants** (`SHOW GRANTS ON SCHEMA`/`ON DATABASE`, metadata layer, needs no
-warehouse; `granted_to` can be `ROLE`, `DATABASE ROLE`, `USER`, `SHARE` or
-`APPLICATION ROLE`, deliberately not filtered down to roles only) and
-**Tags** (`INFORMATION_SCHEMA.TAG_REFERENCES`, an ordinary SELECT that needs
-a running warehouse and so degrades blank without one -- the fourth instance
-of the dual-source pattern `TABLE_STATS` established, see "A second source"
-above; deliberately not `SHOW TAGS IN SCHEMA`/`IN DATABASE`, which lists tag
-*objects defined inside* that container, not tags *applied to* it). Both
-scopes are fetched lazily, only once the schema or database's own view is
-open, the same convention every other detail-view scope in this app follows.
-Mnemonic-switchable (`g`/`t`, hidden from the footer), same pattern as
-`PipeView`/`PipeListView`.
+`ViewView` is tabbed because a view is the first type that is genuinely
+**both** shapes the registry already had: a real column list, like a table
+(`ColumnsView` from `table_view.py`, reused directly rather than duplicated),
+*and* one defining SQL statement, like a pipe or task (`show_views.text`,
+read through `Repository.object_detail` with no scope of its own — the same
+way `show_pipes.definition` and `show_tasks.definition` are).
+
+A **stage** is the one type with a category view and no per-object view, and
+that is deliberate rather than a gap: a `SHOW STAGES` row is the whole
+picture, so `StageListView` is the only place a stage is shown at all.
+Opening one still lands on the generic placeholder. The node stays expandable
+anyway — nothing is saved by suppressing it, and `ObjectTree.reveal` would
+have to special-case a stage hit to avoid force-expanding to a leaf otherwise
+unreachable (Textual's `TreeNode.expand()` ignores `allow_expand`, which only
+gates the user-facing toggle).
+
+### Shared machinery
+
+`ui/views/tables.py` holds what the views above have in common, and each
+piece is there because the duplicated version had already drifted:
+
+- **`HoverTooltipTable`** — shows a cell's full-precision timestamp on
+  hover, for the five list views whose columns are too narrow for one. It
+  maps a **column header** to the field holding the untruncated value; the
+  five copies it replaced each mapped a *column index*, so reordering a
+  view's columns would have silently aimed its tooltips at the wrong one.
+- **`TabbedView`** — the mnemonic tab switch, in one place instead of five.
+- **`HistoryView`** — the two-source history table plus its detail panel,
+  shared by `PipeView` and `TaskView`. Only the message a row wants to show
+  actually differs, which is the one method a subclass supplies.
+
+The widget ids are shared too (`detail-list`, `detail-history`,
+`detail-definition`, ...), and deliberately: exactly one view is mounted at a
+time, so `#detail-history` means "whichever history table is on screen". The
+per-view ids these replaced had already cost something real — `app.tcss`
+styled the pipe view's history table, error panel and definition pane, and
+the task view, a later copy of all three under its own ids, silently picked
+up none of it.
+
+### Column headers mirror Snowflake
+
+Headers follow the same rule as the cache: **Snowflake's own word, not a
+nicer one.** Where two different Snowflake columns would collide in one
+table, the header is qualified rather than renamed — `SHOW TASKS` and
+`ACCOUNT_USAGE.TASK_HISTORY` both have a column called `state`, so the Tasks
+(n) list shows "State" and "Last Run State", not "State" and "Status".
+Likewise "Last Scheduled" is `SCHEDULED_TIME` and says so; a task scheduled
+but never started still has one, which "Last Run" would have misrepresented.
+
+There is exactly one derived column in the app, and it is called out as such
+in `pipe_list_view.py`: the Pipes (n) Status tab's **Execution State**, which
+is `RUNNING` when `invalid_reason` is empty and `STOPPED` when it is not.
+Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`' `executionState`,
+which snowcone never queries — it is a per-pipe function call, so covering a
+schema with it would cost one round trip per pipe. The column earns its place
+because an empty `invalid_reason` cell alone reads as "nothing fetched"
+rather than "this pipe is fine", but only two of `executionState`'s values
+are reachable this way.
+
 
 ---
 
@@ -997,11 +1024,11 @@ Choosing an object or column hit **reveals it in the tree** (`ObjectTree.
 reveal`) as well as opening it in the detail pane, so search leaves you
 somewhere you can keep browsing from. A **schema** hit is different —
 `SchemaRef` carries only `database`/`name`, deliberately not an `ObjectRef`
-with some placeholder kind, since a schema has no `ObjectKind` and no mirror
+with some placeholder type, since a schema has no `ObjectType` and no mirror
 row of its own to show. Choosing one instead **reveals and expands it** in
 the tree (`ObjectTree.reveal_schema`), which moves the cursor onto the
 schema node itself — and since a schema node now announces itself on
-highlight (`SchemaSelected`, see "Detail views: the registry" below), that
+highlight (`SchemaSelected`, see "Detail views" below), that
 also opens its Grants/Tags view, not just the tree navigation alone.
 
 ---
@@ -1088,6 +1115,42 @@ consults no warehouse, so nothing about the cache needs to change when it does.
 
 ---
 
+## The SQL log
+
+`F1` slides a log panel down over the top third of the screen; `F1` again
+hides it. It is `tcw`'s `LogViewer` (see "Shared widgets"), mounted in
+`MainScreen.compose` with its defaults, so snowcone wires nothing for it: the
+widget installs its own key binding and its own screen layer, owns a rolling
+in-memory buffer that exists whether or not the panel is mounted, and offers
+level and source filters of its own.
+
+What snowcone contributes is the content. **`gateway/sql_log.py` logs every
+statement before it is sent**, not after, and that ordering is the point:
+`cursor.query` — the driver's public "what did I run" attribute — is only
+populated once `execute()` has already returned, which answers nothing about
+a connection that is currently hung. `Cursor._preprocess_pyformat_query` is
+what the connector itself calls, synchronously, just before the round trip,
+so reusing it means the logged text is guaranteed to be what actually goes
+over the wire with no pyformat substitution re-implemented here.
+
+It deliberately does *not* route through `Connection._format_query_for_log`,
+which truncates to 80 characters by default — sized for the connector's own
+terse debug stream, not for "show me the whole statement". That function's
+other job, masking credentials, is not reproduced either: it exists for
+statements that can embed cloud storage secrets (`COPY`, `CREATE STAGE
+CREDENTIALS=(...)`, `PUT`/`GET`), and `queries.py` — the only place any SQL
+text is built at all — never constructs one; every statement is a `SHOW`, an
+`INFORMATION_SCHEMA`/`ACCOUNT_USAGE` `SELECT`, or a bare `USE ROLE`/`USE
+WAREHOUSE`. Reaching for that masking would also mean importing
+`snowflake.connector` from a module `gateway.py` and `pool.py` import
+unconditionally — exactly what the fake-gateway seam exists to keep out of
+every test.
+
+Logging is gated on `_log.isEnabledFor(DEBUG)`, so with the panel's filter
+anywhere above Debug the whole path costs one level check per statement.
+
+---
+
 ## Settings
 
 Settings are declared once and self-register, so a settings UI can enumerate
@@ -1125,9 +1188,10 @@ dialog originally came from.
 
 ## Shared widgets
 
-The menu bar, the settings system, and the dialog chrome underneath both
-(`DialogScreen`, `ConfirmScreen`) live in **`tcw`** ("Textual Common
-Widgets"), a sibling project shared with `snakecam` and `vc`. They were
+The menu bar, the settings system, the log panel (`LogViewer`, see "The SQL
+log") and the dialog chrome underneath the dialogs (`DialogScreen`,
+`ConfirmScreen`) live in **`tcw`** ("Textual Common Widgets"), a sibling
+project shared with `snakecam` and `vc`. They were
 extracted because the same code had been copied into three apps and had
 already started to drift.
 
@@ -1202,90 +1266,87 @@ Three things about it are worth knowing from inside snowcone:
 
 ## Known gaps
 
-- Paging is unverified for views, pipes, stages and tasks (see above).
-- `SHOW COLUMNS IN DATABASE`/`IN SCHEMA` (column cache priming) are likewise
-  unverified against a live account at scale.
-- `information_schema_tables`'s `LAST_DDL`/`LAST_ALTERED` columns are
-  documentation-only, unverified against a live account, same caveat as the
-  two gaps above.
-- `account_usage_copy_history`'s and `account_usage_copy_history_detail`'s
-  columns are likewise documentation-only, unverified against a live
-  account. They additionally need `IMPORTED PRIVILEGES` on the `SNOWFLAKE`
-  database (or `ACCOUNTADMIN`) and can lag real pipe activity by up to ~2
-  hours — neither has been confirmed against a live account either, so the
-  "Pipes (n)" list's activity columns, and a single pipe's older load
-  history, may render blank on an account without that grant even though
-  everything else here works. The `QUALIFY ROW_NUMBER() OVER (PARTITION BY
-  PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1` that reduces
-  `account_usage_copy_history` to one row per pipe is likewise unverified
-  against a live account -- confirmed only by a hung, hand-tested account
-  with the *unreduced* query, not by re-running the reduced one against it.
-- `information_schema_copy_history`'s columns are likewise documentation-only
-  and unverified, including the shape of its `PIPE_NAME` output column
-  (assumed bare/unqualified for the `WHERE PIPE_NAME = %s` filter in
-  `queries.pipe_history`) and whether Snowflake accepts a fully-qualified
-  `catalog.schema.table` string for its `TABLE_NAME` argument the way
-  `Repository.pipe_target_table`'s result is used to build one. Either
-  assumption being wrong would surface as a single pipe's near-real-time
-  load history rendering empty while the `ACCOUNT_USAGE`-backed older
-  history keeps working — not a crash, per this codebase's usual
-  degrade-blank convention, but worth a real-account check before relying
-  on it.
-- `FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` on `account_usage_copy_
-  history`/`information_schema_copy_history` are likewise documentation-only,
-  unverified against a live account -- same caveat as the two gaps above,
-  now covering two more columns on both sources.
-- `show_grants`'s and `information_schema_tag_references`'s column sets are
-  likewise documentation-only and unverified against a live account, same
-  caveat as the sources above. `granted_by_role_type` in particular is a
-  speculative companion to the `owner_role_type` column every SHOW-sourced
-  mirror already carries, not confirmed to exist on `SHOW GRANTS` output.
-  Separately, `SHOW GRANTS ON <object>` only ever shows grants the active
-  role owns, has been granted `MANAGE GRANTS` on, or reaches via
-  `ACCOUNTADMIN`/`SECURITYADMIN` — a role without one of those sees a
-  shorter (or empty) Grants tab, which is Snowflake's own visibility rule,
-  not a bug or an incomplete fetch.
-- `account_usage_task_history`'s, `account_usage_task_history_detail`'s and
-  `information_schema_task_history`'s columns are likewise documentation-only
-  and unverified against a live account, same caveat as
-  `account_usage_copy_history`/`information_schema_copy_history` above. The
-  `ACCOUNT_USAGE`-backed pair additionally need `IMPORTED PRIVILEGES` on the
-  `SNOWFLAKE` database (or `ACCOUNTADMIN`) and can lag real task activity by
-  up to ~45 minutes per Snowflake's published docs (not independently
-  confirmed). Whether `INFORMATION_SCHEMA.TASK_HISTORY` needs a running
-  warehouse to query at all is likewise assumed, not documented or verified
-  -- by analogy with every other `INFORMATION_SCHEMA` table function here
-  (`COPY_HISTORY`, `TAG_REFERENCES`), not confirmed against a live account.
-- The tree/Detail drag-resize (see "Screen anatomy") does not persist across
-  sessions, and does not re-clamp an already-narrow pane if the terminal is
-  then resized smaller -- both accepted, ported as-is from sibling project
-  snakecam's identical mechanism, not engineered around.
-- A single stage's own leaf node still has no Object view -- it shows a
-  placeholder, same as any unregistered kind. This is not treated as an open
-  gap the way it is for other kinds without their own view yet: see the
-  "Stages (n)" category-node paragraph above for why a stage has nothing left
-  to show beyond its `StageListView` row.
-- **Multiple databases can now be browsed and searched at once** — this
-  reverses what used to be a deliberate constraint here ("cross-database
-  browsing is out of scope by design"). The database picker (`ctrl+d`) is a
-  multi-select modal (`MultiPickerScreen`), each selected database gets its
-  own top-level node in the Object tree showing its schema count directly,
-  and search spans every selected database. The concern the old constraint
-  was protecting against — total object counts across many databases getting
-  impractical — is not addressed by anything new here; it simply hasn't been
-  hit yet at the scales this has been exercised against. Treat performance at
-  a large multi-database selection as an open question for a future session,
-  not one this change already answered.
-- Databases still aren't themselves a *searchable hit* the way a schema is —
-  a schema hit reveals and expands it in the tree via `SchemaRef`; there is
-  no equivalent for a database, since selecting or deselecting one is a
-  picker action, not a search result. This part of the old constraint stands.
-- Column search across selected databases is implemented at the repository
-  layer (`Repository.search_column_corpus`, `Sequence[str]`-scoped and ready)
-  but its one call site in `SearchScreen.on_mount` is commented out, not
-  deleted — cross-database column search specifically was judged not ready
-  for prime time yet. Re-enabling it is restoring one call, not writing new
-  code.
-- There is no automatic trigger for column cache priming — no signal was
-  found for "the user wants this now" short of asking, so it is a manual
-  menu action rather than something that runs on its own.
+### Unverified against a live account
+
+Every `SHOW`-sourced mirror in `schema.sql` was verified against a live
+account (see that file's header). **Everything sourced from
+`INFORMATION_SCHEMA` or `ACCOUNT_USAGE` was not**: those column sets are
+taken from Snowflake's published documentation only, so a wrong column name
+would surface as that one scope rendering blank — never a crash, per the
+degrade-blank convention. That applies to `information_schema_tables`,
+`information_schema_views`, `account_usage_copy_history`,
+`account_usage_copy_history_detail`, `information_schema_copy_history`,
+`account_usage_task_history`, `account_usage_task_history_detail`,
+`information_schema_task_history`, `information_schema_tag_references` and
+`show_grants`.
+
+Two exceptions were checked: `information_schema_views` and
+`show_materialized_views` had their column *names* confirmed live on
+2026-09-09 (Snowflake 10.32.102), but not their values — the probed databases
+held no user view and no materialized view to read one back from.
+
+Specific assumptions inside that, worth naming because each would fail
+silently:
+
+- `granted_by_role_type` on `SHOW GRANTS` is a speculative companion to the
+  `owner_role_type` every other SHOW mirror carries; if it does not exist,
+  ingest just leaves it NULL.
+- `information_schema_copy_history`'s `PIPE_NAME` output column is assumed
+  bare/unqualified (for `queries.pipe_history`'s `WHERE PIPE_NAME = %s`), and
+  its `TABLE_NAME` argument is assumed to accept a fully-qualified
+  `catalog.schema.table` string.
+- The `QUALIFY ROW_NUMBER()` reduction on `PIPE_ACTIVITY` is confirmed only
+  by the hang it fixed, tested with the *unreduced* query — the reduced one
+  has not been re-run against that account.
+- Whether `INFORMATION_SCHEMA.TASK_HISTORY` needs a running warehouse is
+  assumed by analogy with `COPY_HISTORY`/`TAG_REFERENCES`, not verified.
+- `ACCOUNT_USAGE` lag figures (~2 h for copy history, ~45 min for task
+  history) are Snowflake's published numbers, not measured here.
+
+Paging carries the same caveat — see "Verified and unverified paging" for
+which object types were confirmed and why the exposure is small. `SHOW
+COLUMNS IN DATABASE`/`IN SCHEMA`, which column-cache priming depends on, was
+never observed truncating at scale either.
+
+### Accepted design gaps
+
+- The Pipes (n) **Execution State** column is derived from `invalid_reason`,
+  not read from `SYSTEM$PIPE_STATUS` — see "Column headers mirror Snowflake".
+  Only `RUNNING` and `STOPPED` are reachable; Snowflake's `PAUSED` and
+  `STOPPED_*` variants are not distinguishable this way.
+- The tree/Detail drag-resize does not persist across sessions, and does not
+  re-clamp an already-narrow pane if the terminal is then resized smaller --
+  both ported as-is from sibling project snakecam's identical mechanism.
+- A single stage's own leaf node has no Object view. Deliberate, not an open
+  gap: see "What decides a view's shape".
+- **Multiple databases can be browsed and searched at once**, reversing what
+  used to be a deliberate constraint here. The concern that constraint was
+  protecting against — total object counts across many databases getting
+  impractical — is not addressed by anything new; it simply hasn't been hit
+  at the scales exercised so far. Treat performance at a large multi-database
+  selection as an open question.
+- Databases still aren't themselves a *searchable hit* the way a schema is:
+  selecting one is a picker action, not a search result.
+- Column search is implemented end to end at the repository layer
+  (`Repository.search_column_corpus`) but its one call site in
+  `SearchScreen.on_mount` is commented out — cross-database column search was
+  judged not ready. Re-enabling it is restoring one call, not writing code.
+- There is no automatic trigger for column cache priming — no good signal was
+  found for "the user wants this now" short of asking, so it is a manual menu
+  action.
+
+### The cost of adding a scope
+
+Adding one scope currently touches ten places, and there is no shortcut:
+
+1. a `ScopeType` member, 2. a `*_scope()` constructor, 3. a case in
+`Scope.key`, 4. a `TableSpec`, 5. a case in `Repository.spec_for`, 6. a table
+in `schema.sql`, 7. a builder in `gateway/queries.py`, 8. a method on the
+`SnowflakeGateway` protocol, 9. the same on `PoolGateway`, 10. a case in
+`jobs.fetch_page`.
+
+That grew from six scopes to twenty without anyone deciding it should. A
+table-driven scope registry would collapse most of it, but it is a large
+change with no bug behind it, so the list above is the checklist until it
+starts hurting.
+

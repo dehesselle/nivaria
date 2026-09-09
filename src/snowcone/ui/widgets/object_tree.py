@@ -37,13 +37,15 @@ from textual.widgets.tree import TreeNode
 from snowcone.cache.repository import Repository
 from snowcone.format import format_count
 from snowcone.models import (
-    ObjectKind,
     ObjectRef,
+    ObjectType,
     SchemaRef,
     Scope,
+    is_stale,
     objects_scope,
     schemas_scope,
 )
+from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import (
     CategorySelected,
     DatabaseSelected,
@@ -53,17 +55,17 @@ from snowcone.ui.messages import (
 )
 from snowcone.ui.widgets.plan import Child, plan_children
 
-#: Which object kinds get a category node under each schema, in display order.
-TREE_KINDS: tuple[ObjectKind, ...] = (
-    ObjectKind.TABLE,
-    ObjectKind.VIEW,
-    ObjectKind.PIPE,
-    ObjectKind.STAGE,
-    ObjectKind.TASK,
+#: Which object types get a category node under each schema, in display order.
+TREE_TYPES: tuple[ObjectType, ...] = (
+    ObjectType.TABLE,
+    ObjectType.VIEW,
+    ObjectType.PIPE,
+    ObjectType.STAGE,
+    ObjectType.TASK,
 )
 
 
-class NodeKind(StrEnum):
+class NodeType(StrEnum):
     #: The hidden root. Its children are one DATABASE node per selected
     #: database, flowing through the same _desired/_apply machinery as every
     #: other level -- see set_databases.
@@ -80,7 +82,7 @@ class NodeKind(StrEnum):
 
 @dataclass(frozen=True)
 class NodeData:
-    kind: NodeKind
+    type: NodeType
     key: str
     #: The cache scope whose rows fill this node's *children*, if any.
     scope: Scope | None = None
@@ -101,10 +103,9 @@ class ObjectTree(Tree[NodeData]):
     _MIN_WIDTH = 15
     _MIN_SIBLING_WIDTH = 20
 
-    def __init__(self, repo: Repository, *, ttl: float = 900.0, **kwargs) -> None:
-        super().__init__("root", data=NodeData(NodeKind.ROOT, "root"), **kwargs)
+    def __init__(self, repo: Repository, **kwargs) -> None:
+        super().__init__("root", data=NodeData(NodeType.ROOT, "root"), **kwargs)
         self.repo = repo
-        self.ttl = ttl
         self.show_root = False
         self.databases: list[str] = []
         #: Nodes whose children come from a scope, so an update can be routed
@@ -201,7 +202,7 @@ class ObjectTree(Tree[NodeData]):
         """
         if ref.database not in self.databases:
             return False
-        node = self._walk((ref.database, ref.schema, ref.kind.value, ref.name))
+        node = self._walk((ref.database, ref.schema, ref.type.value, ref.name))
         if node is None:
             return False
         # Not an immediate move_cursor: the node just materialised on the way
@@ -276,7 +277,7 @@ class ObjectTree(Tree[NodeData]):
             self._ensure(data.scope, interactive=True)
         # A schema's categories each have their own scope, and all of them are
         # about to be on screen, so their counts need to be right too.
-        if data.kind is NodeKind.SCHEMA:
+        if data.type is NodeType.SCHEMA:
             for child in node.children:
                 if child.data is not None and child.data.scope is not None:
                     self._ensure(child.data.scope, interactive=False)
@@ -290,21 +291,28 @@ class ObjectTree(Tree[NodeData]):
             return
         if data.ref is not None:
             self.post_message(ObjectSelected(data.ref))
-        elif data.kind is NodeKind.CATEGORY and data.scope is not None:
+        elif data.type is NodeType.CATEGORY and data.scope is not None:
             self.post_message(CategorySelected(data.scope))
-        elif data.kind is NodeKind.SCHEMA and data.database is not None:
+        elif data.type is NodeType.SCHEMA and data.database is not None:
             self.post_message(
                 SchemaSelected(SchemaRef(database=data.database, name=data.key))
             )
-        elif data.kind is NodeKind.DATABASE and data.database is not None:
+        elif data.type is NodeType.DATABASE and data.database is not None:
             self.post_message(DatabaseSelected(data.database))
 
     # ------------------------------------------------------------ freshness
 
     def _ensure(self, scope: Scope, *, interactive: bool) -> None:
-        entry = self.repo.entry(scope)
-        age = entry.age()
-        if age is None or (self.ttl > 0 and age >= self.ttl):
+        """Ask for `scope` if it is missing or stale.
+
+        The TTL is read at the point of use rather than snapshotted at
+        construction, so a change in the settings dialog reaches the tree
+        without a restart -- and the decision itself is `models.is_stale`,
+        shared with the detail pane and the background sweep, so a scope with
+        a longer natural cadence is aged the same way wherever it is asked
+        about.
+        """
+        if is_stale(scope, self.repo.entry(scope).age(), config.get(CACHE_TTL)):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
 
     def visible_scopes(self) -> list[Scope]:
@@ -321,21 +329,21 @@ class ObjectTree(Tree[NodeData]):
             f"{database} {format_count(self.repo.child_count(schemas_scope(database)))}"
         )
 
-    def _category_label(self, kind: ObjectKind, scope: Scope) -> Text:
-        return Text(f"{kind.title} {format_count(self.repo.child_count(scope))}")
+    def _category_label(self, object_type: ObjectType, scope: Scope) -> Text:
+        return Text(f"{object_type.title} {format_count(self.repo.child_count(scope))}")
 
     def _relabel(self, node: TreeNode[NodeData]) -> None:
         data = node.data
         if data is None:
             return
-        if data.kind is NodeKind.DATABASE and data.database is not None:
+        if data.type is NodeType.DATABASE and data.database is not None:
             node.set_label(self._database_label(data.database))
         elif (
-            data.kind is NodeKind.CATEGORY
+            data.type is NodeType.CATEGORY
             and data.scope is not None
-            and data.scope.object_kind is not None
+            and data.scope.object_type is not None
         ):
-            node.set_label(self._category_label(data.scope.object_kind, data.scope))
+            node.set_label(self._category_label(data.scope.object_type, data.scope))
 
     # ------------------------------------------------------------- children
 
@@ -344,8 +352,8 @@ class ObjectTree(Tree[NodeData]):
         data = node.data
         if data is None:
             return []
-        match data.kind:
-            case NodeKind.ROOT:
+        match data.type:
+            case NodeType.ROOT:
                 return [
                     Child(
                         key=database,
@@ -354,27 +362,28 @@ class ObjectTree(Tree[NodeData]):
                     )
                     for database in self.databases
                 ]
-            case NodeKind.OBJECT:
+            case NodeType.OBJECT:
                 return []
-            case NodeKind.DATABASE:
+            case NodeType.DATABASE:
                 assert data.scope is not None
                 return [
                     Child(key=schema.name, label=schema.name, expandable=True)
                     for schema in self.repo.schemas(data.scope).rows
                 ]
-            case NodeKind.SCHEMA:
+            case NodeType.SCHEMA:
                 assert data.database is not None
                 return [
                     Child(
-                        key=kind.value,
+                        key=object_type.value,
                         label=self._category_label(
-                            kind, objects_scope(kind, data.database, data.key)
+                            object_type,
+                            objects_scope(object_type, data.database, data.key),
                         ).plain,
                         expandable=True,
                     )
-                    for kind in TREE_KINDS
+                    for object_type in TREE_TYPES
                 ]
-            case NodeKind.CATEGORY:
+            case NodeType.CATEGORY:
                 assert data.scope is not None
                 return [
                     Child(key=obj.name, label=obj.name)
@@ -384,36 +393,36 @@ class ObjectTree(Tree[NodeData]):
     def _child_data(self, parent: TreeNode[NodeData], child: Child) -> NodeData:
         data = parent.data
         assert data is not None
-        match data.kind:
-            case NodeKind.ROOT:
+        match data.type:
+            case NodeType.ROOT:
                 return NodeData(
-                    NodeKind.DATABASE,
+                    NodeType.DATABASE,
                     child.key,
                     scope=schemas_scope(child.key),
                     database=child.key,
                 )
-            case NodeKind.DATABASE:
+            case NodeType.DATABASE:
                 assert data.database is not None
-                return NodeData(NodeKind.SCHEMA, child.key, database=data.database)
-            case NodeKind.SCHEMA:
+                return NodeData(NodeType.SCHEMA, child.key, database=data.database)
+            case NodeType.SCHEMA:
                 assert data.database is not None
-                kind = ObjectKind(child.key)
+                object_type = ObjectType(child.key)
                 return NodeData(
-                    NodeKind.CATEGORY,
+                    NodeType.CATEGORY,
                     child.key,
-                    scope=objects_scope(kind, data.database, data.key),
+                    scope=objects_scope(object_type, data.database, data.key),
                     database=data.database,
                 )
             case _:
                 assert data.scope is not None
-                assert data.scope.object_kind is not None
+                assert data.scope.object_type is not None
                 assert data.scope.schema is not None
                 assert data.database is not None
                 return NodeData(
-                    NodeKind.OBJECT,
+                    NodeType.OBJECT,
                     child.key,
                     ref=ObjectRef(
-                        kind=data.scope.object_kind,
+                        type=data.scope.object_type,
                         database=data.database,
                         schema=data.scope.schema,
                         name=child.key,
@@ -467,7 +476,7 @@ class ObjectTree(Tree[NodeData]):
         )
         if data.scope is not None:
             self._scoped[data.scope] = node
-        if data.kind is NodeKind.DATABASE:
+        if data.type is NodeType.DATABASE:
             # A database node is always directly visible under the hidden
             # root, unlike a collapsed schema's categories -- so its schema
             # list is requested right away rather than waiting for an

@@ -524,6 +524,31 @@ CREATE TABLE IF NOT EXISTS information_schema_tag_references (
 CREATE INDEX IF NOT EXISTS information_schema_tag_references_scope
     ON information_schema_tag_references(_scope);
 
+-- Warehouses and roles. Unlike the object mirrors above these are small,
+-- flat, unpaged lists (see gateway/queries.py), so there is nothing to key
+-- beyond the name -- but they are ordinary SHOW mirrors with the same
+-- bookkeeping columns, which is why they live here rather than in a third
+-- schema script of their own.
+CREATE TABLE IF NOT EXISTS show_warehouses (
+    name        TEXT NOT NULL PRIMARY KEY,
+    comment     TEXT,
+    size        TEXT,
+    is_default  TEXT,
+    _scope      TEXT    NOT NULL,
+    _generation INTEGER NOT NULL,
+    _fetched_at REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS show_warehouses_scope ON show_warehouses(_scope);
+
+CREATE TABLE IF NOT EXISTS show_roles (
+    name        TEXT NOT NULL PRIMARY KEY,
+    comment     TEXT,
+    _scope      TEXT    NOT NULL,
+    _generation INTEGER NOT NULL,
+    _fetched_at REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS show_roles_scope ON show_roles(_scope);
+
 -- The freshness ledger: one row per separately-refreshable scope. This is
 -- what makes a refresh surgical rather than "fetch everything again".
 CREATE TABLE IF NOT EXISTS cache_entry (

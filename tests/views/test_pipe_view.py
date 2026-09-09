@@ -1,0 +1,349 @@
+"""PipeView: one pipe's load history and definition."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+from textual.widgets import DataTable, Static, TabbedContent, TextArea
+
+from snowcone.models import (
+    ObjectRef,
+    ObjectType,
+    pipe_activity_history_scope,
+    pipe_activity_scope,
+    pipe_history_scope,
+)
+from snowcone.settings import PIPE_HISTORY_SHOW_DAYS, config
+from snowcone.ui.views.pipe_view import PipeView
+from snowcone.ui.widgets.detail_pane import DetailPane
+from tests.views.harness import (
+    Harness,
+    put_pipe,
+    put_pipe_activity,
+    put_pipe_activity_history,
+    put_pipe_history,
+)
+
+
+async def test_a_pipe_shows_load_history_not_columns(repo) -> None:
+    """A different shape entirely -- which is what the registry is for."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history", DataTable)
+        assert len(pane.query("#detail-columns")) == 0
+
+
+async def test_opening_a_pipe_requests_its_activity_scope(repo) -> None:
+    """The base facts came with the SHOW PIPES row already cached, but load
+    history is backed by its own SELECT scope -- see pipe_view.py -- and is
+    requested the moment the view opens, same as a table's columns scope."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+    assert pipe_activity_scope("MYDB", "PUBLIC").key in app.needed
+
+
+async def test_a_pipe_with_no_activity_data_never_requests_history_or_errors(
+    repo,
+) -> None:
+    """A pipe that has never loaded anything has no cached activity data, so
+    its target table cannot be resolved (Snowflake exposes it nowhere else --
+    see Repository.pipe_target_table). That must not repeatedly fail a fetch
+    it can never succeed at: history_scope is simply never requested until a
+    target becomes resolvable, and the view shows an empty table instead of
+    an error."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history", DataTable).row_count == 0
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").key not in app.needed
+
+
+async def test_a_pipe_with_activity_data_requests_its_history_scope_too(repo) -> None:
+    """Once account_usage_copy_history has a row for this pipe, its target
+    table is resolvable and history_scope becomes worth asking for."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").key in app.needed
+
+
+async def test_a_pipes_history_table_is_empty_with_no_activity_or_history_cached(
+    repo,
+) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history", DataTable).row_count == 0
+
+
+def _days_ago(days: float) -> str:
+    """A relative, always-recent-enough timestamp -- these tests filter by
+    the show window against the real current time, so a fixed calendar date
+    would eventually age out of it."""
+    return (datetime.now().astimezone() - timedelta(days=days)).isoformat()
+
+
+async def test_a_pipes_history_table_lists_rows_from_both_sources(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_ORDERS")  # resolves the target table
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=_days_ago(60),
+        ROW_COUNT=42,
+    )
+    put_pipe_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_9.csv.gz",
+        LAST_LOAD_TIME=_days_ago(5),
+        ROW_COUNT=100,
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-history", DataTable)
+        assert table.row_count == 2
+        # Sorted newest first.
+        assert table.get_cell_at((0, 4)).plain == "orders_9.csv.gz"
+        assert table.get_cell_at((1, 4)).plain == "orders_1.csv.gz"
+
+
+async def test_a_pipes_history_ignores_another_pipes_activity_rows(repo) -> None:
+    """account_usage_copy_history_detail is scoped per pipe -- a row cached
+    for another pipe must never leak into this one's history table."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_OTHER", FILE_NAME="other.csv.gz")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history", DataTable).row_count == 0
+
+
+async def test_the_near_real_time_source_wins_on_an_overlapping_row(repo) -> None:
+    """Merged by (FILE_NAME, LAST_LOAD_TIME) -- the near-real-time source is
+    inserted last, so an identical key from the backfill is overlaid rather
+    than duplicated."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    when = _days_ago(10)
+    put_pipe_activity(repo, "LOAD_ORDERS")  # resolves the target table
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=when,
+        STATUS="Load in progress",
+    )
+    put_pipe_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=when,
+        STATUS="Loaded",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-history", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 3)).plain == "Loaded"
+
+
+async def test_rows_older_than_the_show_window_are_hidden_but_stay_cached(repo) -> None:
+    """The display window can be shorter than the fetch window on purpose --
+    shrinking it is a display-only change, since the wider range is still in
+    the cache either way (see settings.PIPE_HISTORY_SHOW_DAYS)."""
+    config.set(PIPE_HISTORY_SHOW_DAYS, 30)
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    old = datetime.now().astimezone() - timedelta(days=31)
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="ancient.csv.gz",
+        LAST_LOAD_TIME=old.isoformat(),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history", DataTable).row_count == 0
+    # Still in the cache -- only hidden from this paint.
+    assert repo.raw_rows(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
+
+
+async def test_the_highlighted_rows_error_shows_in_the_history_detail_panel(
+    repo,
+) -> None:
+    """Too long for a table column -- shown below the table instead, for
+    whichever row the cursor is currently on."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        LAST_LOAD_TIME=_days_ago(1),
+        FIRST_ERROR_MESSAGE="Numeric value 'x' is not recognized",
+        FIRST_ERROR_LINE_NUMBER=42,
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        panel = pane.query_one("#detail-history-error", Static)
+        assert panel.display
+        assert "Line 42" in str(panel.render())
+        assert "Numeric value 'x' is not recognized" in str(panel.render())
+
+
+async def test_a_row_with_no_error_leaves_the_history_detail_panel_hidden(
+    repo,
+) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        panel = pane.query_one("#detail-history-error", Static)
+        assert not panel.display
+
+
+async def test_highlighting_a_different_history_row_updates_the_detail_panel(
+    repo,
+) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="bad.csv.gz",
+        LAST_LOAD_TIME=_days_ago(1),
+        FIRST_ERROR_MESSAGE="boom",
+        FIRST_ERROR_LINE_NUMBER=1,
+    )
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="good.csv.gz",
+        LAST_LOAD_TIME=_days_ago(2),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-history", DataTable)
+        panel = pane.query_one("#detail-history-error", Static)
+        # Newest first: row 0 is "bad.csv.gz", the errored one.
+        assert panel.display
+        table.move_cursor(row=1)
+        await pilot.pause()
+        assert not panel.display
+        table.move_cursor(row=0)
+        await pilot.pause()
+        assert panel.display
+
+
+async def test_a_repaint_does_not_leave_a_stale_error_showing(repo) -> None:
+    """A cache update while a row is highlighted must resync against
+    whatever is actually on that row now, not trust the last message."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    when = _days_ago(1)
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        LAST_LOAD_TIME=when,
+        FIRST_ERROR_MESSAGE="boom",
+        FIRST_ERROR_LINE_NUMBER=1,
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history-error", Static).display
+
+        # Same file/time key, now with no error -- overwrites the row.
+        put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=when)
+        pane.cache_updated(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
+        await pilot.pause()
+        assert not pane.query_one("#detail-history-error", Static).display
+
+
+async def test_the_definition_tab_shows_the_pipes_raw_sql(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS", definition="COPY INTO t FROM @s")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert (
+            pane.query_one("#detail-definition", TextArea).text == "COPY INTO t FROM @s"
+        )
+
+
+async def test_the_definition_tab_falls_back_when_uncached(repo) -> None:
+    ref = ObjectRef(ObjectType.PIPE, "MYDB", "PUBLIC", "GHOST")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-definition", TextArea).text == "-- not cached"
+
+
+async def test_the_tab_mnemonic_actions_switch_tabs(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        tabs = view.query_one(TabbedContent)
+        assert tabs.active == "tab-history"
+        view.action_show_tab("definition")
+        assert tabs.active == "tab-definition"
+        view.action_show_tab("history")
+        assert tabs.active == "tab-history"
+
+
+def test_pipe_view_scopes_always_includes_activity(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    view = PipeView(repo, ref)
+    assert pipe_activity_scope("MYDB", "PUBLIC") in view.scopes()
+
+
+def test_pipe_view_scopes_excludes_history_until_a_target_is_resolvable(repo) -> None:
+    """This is what keeps the background sweep (MainScreen._sweep, which
+    watches self.detail.scopes()) from repeatedly retrying a fetch that has
+    no target table to give -- not just the interactive ensure() path."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    view = PipeView(repo, ref)
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS") not in view.scopes()
+
+    put_pipe_activity(repo, "LOAD_ORDERS")
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS") in view.scopes()

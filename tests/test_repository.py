@@ -8,7 +8,7 @@ from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
     CacheState,
-    ObjectKind,
+    ObjectType,
     columns_scope,
     databases_scope,
     objects_scope,
@@ -99,8 +99,8 @@ def test_warehouses_and_roles_read_back_by_name(repo) -> None:
 
 
 def test_scopes_do_not_leak_into_each_other(repo) -> None:
-    tables = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
-    other = objects_scope(ObjectKind.TABLE, "MYDB", "STAGING")
+    tables = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
+    other = objects_scope(ObjectType.TABLE, "MYDB", "STAGING")
     load(repo, tables, table_rows("ORDERS"))
     load(
         repo,
@@ -114,8 +114,8 @@ def test_scopes_do_not_leak_into_each_other(repo) -> None:
 def test_tables_and_views_in_one_schema_are_separate_scopes(repo) -> None:
     """They share a schema but refresh independently; one must not sweep the
     other's rows away."""
-    tables = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
-    views = objects_scope(ObjectKind.VIEW, "MYDB", "PUBLIC")
+    tables = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
+    views = objects_scope(ObjectType.VIEW, "MYDB", "PUBLIC")
     load(repo, tables, table_rows("ORDERS"))
     load(
         repo,
@@ -165,7 +165,7 @@ def test_a_refresh_never_shows_an_empty_list_on_the_way_to_a_full_one(repo) -> N
 
 
 def test_a_deleted_object_disappears_after_the_sweep(repo) -> None:
-    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
     load(repo, scope, table_rows("ORDERS", "CUSTOMERS"))
     load(repo, scope, table_rows("ORDERS"))
     assert [o.name for o in repo.objects(scope).rows] == ["ORDERS"]
@@ -195,12 +195,14 @@ def test_the_age_shown_during_a_refresh_is_still_the_age_of_the_visible_rows(
 
 
 def test_updating_an_existing_row_replaces_its_columns(repo) -> None:
-    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
     load(repo, scope, table_rows("ORDERS"))
     changed = table_rows("ORDERS")
     changed[0]["rows"] = 99
     load(repo, scope, changed)
-    assert repo.objects(scope).rows[0].rows == 99
+    # Through raw_rows, which is how every list view reads a SHOW column --
+    # SFObject carries only what the tree needs (name, type, comment).
+    assert repo.raw_rows(scope)[0]["rows"] == 99
 
 
 def test_a_superseded_pass_cannot_write(repo) -> None:
@@ -424,7 +426,7 @@ def test_only_the_scopes_offered_are_considered(repo) -> None:
 def test_pipe_activitys_ttl_override_outlasts_the_ordinary_sweep_interval(repo) -> None:
     """An ordinary scope this old is stale at a 0.01s ttl; PIPE_ACTIVITY's
     13-day floor (models.scope_ttl) must keep it fresh regardless -- see
-    ScopeKind.PIPE_ACTIVITY's comment for why re-fetching it on the ordinary
+    ScopeType.PIPE_ACTIVITY's comment for why re-fetching it on the ordinary
     cadence would just repeat the same round trip for no new data."""
     ordinary = databases_scope()
     pipes = pipe_activity_scope("MYDB", "PUBLIC")
@@ -437,7 +439,7 @@ def test_pipe_activitys_ttl_override_outlasts_the_ordinary_sweep_interval(repo) 
 def test_task_activitys_ttl_does_not_outlast_the_ordinary_sweep_interval(repo) -> None:
     """Deliberately not the same override as PIPE_ACTIVITY: a task can run
     every few minutes, so this stays on the ordinary cadence -- see
-    ScopeKind.TASK_ACTIVITY's comment."""
+    ScopeType.TASK_ACTIVITY's comment."""
     ordinary = databases_scope()
     tasks = task_activity_scope("MYDB", "PUBLIC")
     load(repo, ordinary, db_rows("ACME"))
@@ -450,7 +452,7 @@ def test_task_activity_historys_ttl_override_outlasts_the_ordinary_sweep_interva
     repo,
 ) -> None:
     """6-day floor (models.scope_ttl), same reasoning as PIPE_ACTIVITY_
-    HISTORY's own test above -- see ScopeKind.TASK_ACTIVITY_HISTORY's
+    HISTORY's own test above -- see ScopeType.TASK_ACTIVITY_HISTORY's
     comment."""
     ordinary = databases_scope()
     history = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
@@ -466,7 +468,7 @@ def test_task_activity_historys_ttl_override_outlasts_the_ordinary_sweep_interva
 def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
     """schema.sql and the TableSpecs are two hand-written lists of the same
     columns. A column in a spec but not the DDL fails only when that object
-    kind is first fetched, which could be days after the typo."""
+    type is first fetched, which could be days after the typo."""
     from snowcone.cache.repository import (
         _COLUMNS,
         _DATABASES,
@@ -515,15 +517,15 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
 
 def test_every_object_kind_has_a_mirror_table(repo) -> None:
     from snowcone.cache.repository import _OBJECT_TABLES
-    from snowcone.models import ObjectKind
+    from snowcone.models import ObjectType
 
-    assert set(_OBJECT_TABLES) == set(ObjectKind)
+    assert set(_OBJECT_TABLES) == set(ObjectType)
 
 
 def test_a_verified_snowflake_column_survives_a_round_trip(repo) -> None:
     """The columns below come from a real SHOW TABLES result, so this pins the
     mirror against the shape the account actually returns."""
-    scope = objects_scope(ObjectKind.TABLE, "MYDB", "PUBLIC")
+    scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
     load(
         repo,
         scope,

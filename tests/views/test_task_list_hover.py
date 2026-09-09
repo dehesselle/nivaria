@@ -1,37 +1,26 @@
-"""Hovering "Last Run" tooltips the full timestamp behind a truncated cell.
+"""Hovering "Last Scheduled" tooltips the full timestamp behind a truncated cell.
 
-Same DataTable-subclass tooltip pattern as test_pipe_list_hover.py/
-test_table_list_hover.py (see task_list_view.py's _TaskListDataTable) -- one
-tooltip-bearing column here too, and no tab to switch to first since
-TaskListView is not tabbed.
+Same shared-`HoverTooltipTable` pattern as test_pipe_list_hover.py/
+test_table_list_hover.py (see views/tables.py) -- one tooltip-bearing column
+here too, and no tab to switch to first since TaskListView is not tabbed.
 """
 
 from __future__ import annotations
 
-import pytest
-from test_detail_pane import Harness, put_task, put_task_activity
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable
 
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
 from snowcone.format import format_timestamp_full
-from snowcone.models import ObjectKind, objects_scope
+from snowcone.models import ObjectType, objects_scope
 from snowcone.ui.widgets.detail_pane import DetailPane
-
-
-@pytest.fixture
-def repo(tmp_path) -> Repository:
-    database = Database(tmp_path / "cache.db")
-    assert database.prepare()
-    return Repository(database)
+from tests.views.harness import Harness, put_task, put_task_activity
 
 
 async def _mounted_table(app: Harness, pilot) -> DataTable:
     pane = app.query_one(DetailPane)
-    pane.show_category(objects_scope(ObjectKind.TASK, "MYDB", "PUBLIC"))
+    pane.show_category(objects_scope(ObjectType.TASK, "MYDB", "PUBLIC"))
     await pilot.pause()
-    return pane.query_one("#detail-table-list", DataTable)
+    return pane.query_one("#detail-list", DataTable)
 
 
 async def _hover_cell(pilot, table: DataTable, row: int, column: int) -> None:
@@ -76,7 +65,7 @@ async def test_hovering_past_the_last_row_clears_the_tooltip(repo) -> None:
     """DataTable leaves hover_coordinate untouched over filler space with no
     row/column meta, so a tooltip set while over a real cell would otherwise
     never get the reactive change needed to clear it -- see
-    _TaskListDataTable._on_mouse_move."""
+    HoverTooltipTable._on_mouse_move."""
     put_task(repo, "REFRESH_ORDERS")
     put_task_activity(repo, "REFRESH_ORDERS", SCHEDULED_TIME="2026-01-02 13:45:07")
     app = Harness(repo)

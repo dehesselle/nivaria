@@ -59,7 +59,7 @@ from snowcone.fuzzy import Match, highlight, rank, rank_qualified
 from snowcone.models import ObjectRef, SchemaRef
 
 #: What the modal hands back: an object, a column's owning object, or a
-#: schema. A schema is never an ObjectRef with some placeholder kind -- see
+#: schema. A schema is never an ObjectRef with some placeholder type -- see
 #: SchemaRef -- so the two are kept as a plain union rather than forcing a
 #: schema to pretend to be a kind of object it is not.
 Hit = ObjectRef | SchemaRef
@@ -355,7 +355,7 @@ class SearchScreen(DialogScreen[Hit]):
         text.append(f"{ref.database}.", style="dim")
         for run, matched in highlight(f"{ref.schema}.{ref.name}", name_positions):
             text.append(run, style=style if matched else "")
-        text.append(f"  {ref.kind.value.lower()}", style="dim")
+        text.append(f"  {ref.type.value.lower()}", style="dim")
         if column is not None:
             text.append("  · ", style="dim")
             for run, matched in highlight(column, hit.positions):

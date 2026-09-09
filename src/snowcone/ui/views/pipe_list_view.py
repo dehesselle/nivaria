@@ -1,10 +1,22 @@
 """Category view for the "Pipes (n)" node: status and load activity.
 
-Tabbed -- Status (one row per pipe: name, running/stopped, and
+Tabbed -- Status (one row per pipe: name, execution state, and
 `invalid_reason` -- a stopped pipe is otherwise indistinguishable from a
 healthy one) opens by default, alongside Load history (last load activity
 per pipe). Status needs no new scope: `invalid_reason` is already mirrored
 onto the same `SHOW PIPES` rows this view already reads for the Name column.
+
+"Execution State" is the one **derived** column in this app: it is not read
+from anywhere, it is `RUNNING` when `invalid_reason` is empty and `STOPPED`
+when it is not. Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`'
+`executionState`, which snowcone never queries -- that is a per-pipe function
+call, so showing it for a whole schema would cost one round trip per pipe,
+against the round-trips-dominate rule (see DESIGN.md). The column is worth
+having anyway: an empty `invalid_reason` cell on its own reads as "nothing
+fetched", not "this pipe is fine". `RUNNING`/`STOPPED` borrow
+`executionState`'s vocabulary rather than inventing a third one, but only
+those two values are reachable -- Snowflake's `PAUSED` and its
+`STOPPED_*` variants are not distinguishable from `invalid_reason` alone.
 
 The base rows (every pipe that exists) come from `SHOW PIPES`, already
 mirrored for the tree's own category count -- no new fetch scope for those.
@@ -24,25 +36,22 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from rich.text import Text
-from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.coordinate import Coordinate
 from textual.widgets import DataTable, TabbedContent, TabPane
-from textual.widgets.data_table import CellDoesNotExist
 
 from snowcone.cache.repository import Repository
 from snowcone.format import (
     format_bytes,
-    format_timestamp_full,
     format_timestamp_minutes,
 )
-from snowcone.models import ObjectKind, ObjectRef, Scope, pipe_activity_scope
+from snowcone.models import ObjectRef, ObjectType, Scope, pipe_activity_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
+from snowcone.ui.views.tables import LIST_TABLE, HoverTooltipTable, TabbedView
 
-_STATUS_COLUMNS = ("Name", "Status", "Invalid Reason")
+_STATUS_COLUMNS = ("Name", "Execution State", "Invalid Reason")
 _HISTORY_COLUMNS = (
     "Name",
     "Rows",
@@ -50,51 +59,18 @@ _HISTORY_COLUMNS = (
     "Loaded",
     "Status",
     "Target Table",
-    "Filename",
+    "File Name",
 )
 
 
-#: Which merged-row field a tooltip-bearing column's full value comes from,
-#: by column index. Every other column has no tooltip.
-_TOOLTIP_FIELDS = {3: "LAST_LOAD_TIME"}
-
-
-class _PipeListDataTable(DataTable):
-    """Tooltips the full-precision "Loaded" timestamp on hover.
-
-    Same pattern as `table_list_view._TableListDataTable` -- duplicated
-    rather than shared, matching that class's own precedent (it cites
-    snakecam's near-identical widget rather than sharing code with it).
-    """
-
-    def __init__(self, view: PipeListView, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._view = view
-
-    def _on_mouse_move(self, event: events.MouseMove) -> None:
-        super()._on_mouse_move(event)
-        meta = event.style.meta
-        if not meta or meta.get("out_of_bounds", False):
-            self.tooltip = None
-
-    def watch_hover_coordinate(self, old: Coordinate, value: Coordinate) -> None:
-        super().watch_hover_coordinate(old, value)
-        field = _TOOLTIP_FIELDS.get(value.column)
-        if field is None:
-            self.tooltip = None
-            return
-        try:
-            row_key, _ = self.coordinate_to_cell_key(value)
-        except CellDoesNotExist:
-            self.tooltip = None
-            return
-        row = self._view.row_for(row_key.value) if row_key.value is not None else None
-        self.tooltip = (format_timestamp_full(row.get(field)) or None) if row else None
+#: Which merged-row field a tooltip-bearing column's full value comes
+#: from, keyed by that column's header. Every other column has no tooltip.
+_TOOLTIP_FIELDS = {"Loaded": "LAST_LOAD_TIME"}
 
 
 @register_category_view
-class PipeListView(CategoryView):
-    OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.PIPE
+class PipeListView(TabbedView, CategoryView):
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.PIPE
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("s", "show_tab('status')", "Status", show=False),
@@ -111,20 +87,17 @@ class PipeListView(CategoryView):
         with TabbedContent(initial="tab-status"):
             with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
                 status: DataTable[Text] = DataTable(
-                    id="pipe-list-status", cursor_type="row"
+                    id="detail-status", cursor_type="row"
                 )
                 status.zebra_stripes = True
                 status.add_columns(*_STATUS_COLUMNS)
                 yield status
             with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
-                history: DataTable[Text] = _PipeListDataTable(
-                    self, id="detail-table-list", cursor_type="row"
+                history: DataTable[Text] = HoverTooltipTable(
+                    self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
                 )
                 history.zebra_stripes = True
                 yield history
-
-    def action_show_tab(self, tab: str) -> None:
-        self.query_one(TabbedContent).active = f"tab-{tab}"
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Enter on a row opens that pipe's detail view, revealed in the tree.
@@ -136,7 +109,7 @@ class PipeListView(CategoryView):
         name = event.row_key.value
         if name is None:
             return
-        ref = ObjectRef(ObjectKind.PIPE, self.scope.database, self.scope.schema, name)
+        ref = ObjectRef(ObjectType.PIPE, self.scope.database, self.scope.schema, name)
         self.post_message(ObjectSelected(ref))
 
     def activity_scope(self) -> Scope:
@@ -163,9 +136,9 @@ class PipeListView(CategoryView):
             if (name := row.get("PIPE_NAME"))
         }
 
-        status_table = self.query_one("#pipe-list-status", DataTable)
+        status_table = self.query_one("#detail-status", DataTable)
         status_table.clear()
-        history_table = self.query_one("#detail-table-list", DataTable)
+        history_table = self.query_one(f"#{LIST_TABLE}", DataTable)
         history_table.clear(columns=True)
         history_table.add_columns(*_HISTORY_COLUMNS)
         self._rows = {}
@@ -185,7 +158,11 @@ class PipeListView(CategoryView):
                 key=name,
             )
             invalid_reason = row.get("invalid_reason") or ""
-            pipe_status = "stopped" if invalid_reason else "running"
+            # Derived from invalid_reason, not read from SYSTEM$PIPE_STATUS
+            # -- see the module docstring. Upper case because RUNNING/
+            # STOPPED are Snowflake's own executionState values, even though
+            # only those two of them can ever be reached this way.
+            execution_state = "STOPPED" if invalid_reason else "RUNNING"
             status_table.add_row(
-                Text(name), Text(pipe_status), Text(invalid_reason), key=name
+                Text(name), Text(execution_state), Text(invalid_reason), key=name
             )

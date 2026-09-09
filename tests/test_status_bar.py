@@ -11,7 +11,7 @@ from textual.widgets import Footer
 import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
-from snowcone.models import ObjectKind, databases_scope, objects_scope, schemas_scope
+from snowcone.models import ObjectType, databases_scope, objects_scope, schemas_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.screens.main import MainScreen
 from snowcone.ui.widgets.object_tree import ObjectTree
@@ -244,7 +244,7 @@ async def test_the_countdown_describes_the_focused_scope(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     load(
         repo,
-        objects_scope(ObjectKind.TABLE, "MYDB", "AAA"),
+        objects_scope(ObjectType.TABLE, "MYDB", "AAA"),
         [
             {
                 "database_name": "MYDB",
@@ -274,7 +274,7 @@ async def test_the_countdown_describes_the_focused_scope(repo) -> None:
         await pilot.pause()
         tree.move_cursor(schema.children[0])
         await pilot.pause()
-        assert screen.focused_scope() == objects_scope(ObjectKind.TABLE, "MYDB", "AAA")
+        assert screen.focused_scope() == objects_scope(ObjectType.TABLE, "MYDB", "AAA")
 
 
 async def test_an_object_leaf_reports_the_list_it_came_from(repo) -> None:
@@ -282,7 +282,7 @@ async def test_an_object_leaf_reports_the_list_it_came_from(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     load(
         repo,
-        objects_scope(ObjectKind.TABLE, "MYDB", "AAA"),
+        objects_scope(ObjectType.TABLE, "MYDB", "AAA"),
         [
             {
                 "database_name": "MYDB",
@@ -310,7 +310,7 @@ async def test_an_object_leaf_reports_the_list_it_came_from(repo) -> None:
         await pilot.pause()
         tree.move_cursor(tables.children[0])
         await pilot.pause()
-        assert screen.focused_scope() == objects_scope(ObjectKind.TABLE, "MYDB", "AAA")
+        assert screen.focused_scope() == objects_scope(ObjectType.TABLE, "MYDB", "AAA")
 
 
 async def test_the_countdown_counts_down_from_the_ttl(repo) -> None:

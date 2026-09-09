@@ -7,8 +7,9 @@ enough -- the same shape `table_list_view.py` already uses for the same
 reason.
 
 The base columns are sourced entirely from `SHOW TASKS`, already mirrored for
-the tree's own category count -- no new fetch scope for those. "Last Run" and
-"Last Run Status" are this app's columns sourced from an ordinary `SELECT`
+the tree's own category count -- no new fetch scope for those. "Last
+Scheduled" and "Last Run State" are this app's columns sourced from an
+ordinary `SELECT`
 against SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY instead of `SHOW` (see
 DESIGN.md's dual-source note): `SHOW TASKS` carries no run-history data at
 all. That SELECT needs a running warehouse and elevated privileges, unlike
@@ -17,11 +18,19 @@ everything else in this view, so it lives in its own scope
 just leaves those two columns blank (see `Repository.fail_pass`) while the
 SHOW-sourced columns keep rendering whatever was cached before.
 
-"State" (started/suspended, `show_tasks.state`) is shown verbatim, not
-relabelled -- DESIGN.md's "mirror Snowflake, don't reinterpret it" rule. It
-is Snowflake's own vocabulary for whether the task is enabled, unrelated to
-"Last Run Status" (SUCCEEDED/FAILED/...), which the adjacent column name
-already disambiguates.
+Three columns here are Snowflake's own words, kept rather than smoothed over
+-- DESIGN.md's "mirror Snowflake, don't reinterpret it" rule:
+
+* "State" is `show_tasks.state` (started/suspended): whether the task is
+  enabled at all.
+* "Last Run State" is `TASK_HISTORY.STATE` (SUCCEEDED/FAILED/SKIPPED/...):
+  how the most recent run ended. Snowflake genuinely names both columns
+  `state`; the "Last Run" prefix is the minimum needed to tell two columns in
+  one table apart, not a rename.
+* "Last Scheduled" is `TASK_HISTORY.SCHEDULED_TIME`, not a run's start time.
+  A task whose run was scheduled but never started still has one, so calling
+  it "Last Run" claimed something the column does not say. A run's actual
+  start and finish are in `TaskView`'s own Run history tab.
 """
 
 from __future__ import annotations
@@ -29,70 +38,35 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from rich.text import Text
-from textual import events
 from textual.app import ComposeResult
-from textual.coordinate import Coordinate
 from textual.widgets import DataTable
-from textual.widgets.data_table import CellDoesNotExist
 
 from snowcone.cache.repository import Repository
-from snowcone.format import format_timestamp_full, format_timestamp_minutes
-from snowcone.models import ObjectKind, ObjectRef, Scope, task_activity_scope
+from snowcone.format import format_timestamp_minutes
+from snowcone.models import ObjectRef, ObjectType, Scope, task_activity_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.messages import ObjectSelected
 from snowcone.ui.views.base import CategoryView, register_category_view
+from snowcone.ui.views.tables import LIST_TABLE, HoverTooltipTable
 
 _COLUMNS = (
     "Name",
     "Warehouse",
     "Schedule",
     "State",
-    "Last Run",
-    "Last Run Status",
+    "Last Scheduled",
+    "Last Run State",
     "Comment",
 )
 
-#: Which merged-row field a tooltip-bearing column's full value comes from,
-#: by column index. Every other column has no tooltip.
-_TOOLTIP_FIELDS = {4: "SCHEDULED_TIME"}
-
-
-class _TaskListDataTable(DataTable):
-    """Tooltips the full-precision "Last Run" timestamp on hover.
-
-    Same pattern as `pipe_list_view._PipeListDataTable`/`table_list_view.
-    _TableListDataTable` -- duplicated rather than shared, matching their own
-    precedent.
-    """
-
-    def __init__(self, view: TaskListView, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._view = view
-
-    def _on_mouse_move(self, event: events.MouseMove) -> None:
-        super()._on_mouse_move(event)
-        meta = event.style.meta
-        if not meta or meta.get("out_of_bounds", False):
-            self.tooltip = None
-
-    def watch_hover_coordinate(self, old: Coordinate, value: Coordinate) -> None:
-        super().watch_hover_coordinate(old, value)
-        field = _TOOLTIP_FIELDS.get(value.column)
-        if field is None:
-            self.tooltip = None
-            return
-        try:
-            row_key, _ = self.coordinate_to_cell_key(value)
-        except CellDoesNotExist:
-            self.tooltip = None
-            return
-        row = self._view.row_for(row_key.value) if row_key.value is not None else None
-        self.tooltip = (format_timestamp_full(row.get(field)) or None) if row else None
+#: Which merged-row field a tooltip-bearing column's full value comes
+#: from, keyed by that column's header. Every other column has no tooltip.
+_TOOLTIP_FIELDS = {"Last Scheduled": "SCHEDULED_TIME"}
 
 
 @register_category_view
 class TaskListView(CategoryView):
-    OBJECT_KIND: ClassVar[ObjectKind] = ObjectKind.TASK
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TASK
 
     def __init__(self, repo: Repository, scope: Scope) -> None:
         super().__init__(repo, scope)
@@ -101,8 +75,8 @@ class TaskListView(CategoryView):
         self._rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
-        table: DataTable[Text] = _TaskListDataTable(
-            self, id="detail-table-list", cursor_type="row"
+        table: DataTable[Text] = HoverTooltipTable(
+            self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
         )
         table.zebra_stripes = True
         yield table
@@ -113,7 +87,7 @@ class TaskListView(CategoryView):
         name = event.row_key.value
         if name is None:
             return
-        ref = ObjectRef(ObjectKind.TASK, self.scope.database, self.scope.schema, name)
+        ref = ObjectRef(ObjectType.TASK, self.scope.database, self.scope.schema, name)
         self.post_message(ObjectSelected(ref))
 
     def activity_scope(self) -> Scope:
@@ -140,7 +114,7 @@ class TaskListView(CategoryView):
             if (name := row.get("NAME"))
         }
 
-        table = self.query_one("#detail-table-list", DataTable)
+        table = self.query_one(f"#{LIST_TABLE}", DataTable)
         table.clear(columns=True)
         table.add_columns(*_COLUMNS)
         self._rows = {}

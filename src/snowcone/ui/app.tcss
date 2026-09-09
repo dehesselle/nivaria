@@ -231,18 +231,18 @@ StatusFooter #footer-pool {
     color: $text-muted;
 }
 
-#pipe-history {
+#detail-history {
     height: 1fr;
 }
 
-#pipe-history-detail {
+#detail-history-error {
     height: auto;
     max-height: 8;
     padding: 0 1;
     color: $error;
 }
 
-#pipe-definition {
+#detail-definition {
     height: 1fr;
 }
 

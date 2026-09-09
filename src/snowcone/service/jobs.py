@@ -21,7 +21,7 @@ from typing import Any
 
 from snowcone.gateway.gateway import SnowflakeGateway
 from snowcone.gateway.queries import MAX_PAGE_SIZE
-from snowcone.models import Scope, ScopeKind
+from snowcone.models import Scope, ScopeType
 from snowcone.settings import PIPE_HISTORY_FETCH_DAYS, TASK_HISTORY_FETCH_DAYS, config
 
 _sequence = itertools.count()
@@ -93,19 +93,19 @@ def fetch_page(
     opening a new, possibly-interactive session while nobody is watching --
     see `ConnectionPool.acquire`.
 
-    `pipe_target` is only meaningful for ScopeKind.PIPE_HISTORY, whose query
+    `pipe_target` is only meaningful for ScopeType.PIPE_HISTORY, whose query
     needs the pipe's target table (catalog, schema, table) -- a piece of
     context this function has no way to resolve itself (it only has a
     gateway, not the repository, so it cannot look up cached data). The
     caller (`FetchService._execute`) resolves it before calling here; every
-    other scope kind ignores this parameter.
+    other scope type ignores this parameter.
     """
-    match scope.kind:
-        case ScopeKind.DATABASES:
+    match scope.type:
+        case ScopeType.DATABASES:
             rows = gateway.show_databases(
                 after=cursor, limit=limit, allow_reconnect=allow_reconnect
             )
-        case ScopeKind.SCHEMAS:
+        case ScopeType.SCHEMAS:
             assert scope.database is not None
             rows = gateway.show_schemas(
                 scope.database,
@@ -113,19 +113,19 @@ def fetch_page(
                 limit=limit,
                 allow_reconnect=allow_reconnect,
             )
-        case ScopeKind.OBJECTS:
-            assert scope.object_kind is not None
+        case ScopeType.OBJECTS:
+            assert scope.object_type is not None
             assert scope.database is not None
             assert scope.schema is not None
             rows = gateway.show_objects(
-                scope.object_kind,
+                scope.object_type,
                 scope.database,
                 scope.schema,
                 after=cursor,
                 limit=limit,
                 allow_reconnect=allow_reconnect,
             )
-        case ScopeKind.COLUMNS:
+        case ScopeType.COLUMNS:
             assert scope.database is not None
             assert scope.schema is not None
             assert scope.table is not None
@@ -138,7 +138,7 @@ def fetch_page(
                 allow_reconnect=allow_reconnect,
             )
             return rows, None
-        case ScopeKind.TABLE_STATS:
+        case ScopeType.TABLE_STATS:
             assert scope.database is not None
             assert scope.schema is not None
             # A schema's table count is bounded, same reasoning as
@@ -149,7 +149,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.VIEW_STATS:
+        case ScopeType.VIEW_STATS:
             assert scope.database is not None
             assert scope.schema is not None
             # A schema's view count is bounded, same reasoning as
@@ -160,7 +160,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.MATERIALIZED_VIEW_STATS:
+        case ScopeType.MATERIALIZED_VIEW_STATS:
             assert scope.database is not None
             assert scope.schema is not None
             # A schema's materialized-view count is bounded, same reasoning
@@ -171,7 +171,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.PIPE_ACTIVITY:
+        case ScopeType.PIPE_ACTIVITY:
             assert scope.database is not None
             assert scope.schema is not None
             # Bounded by pipe count, not by history depth -- see
@@ -186,7 +186,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.PIPE_ACTIVITY_HISTORY:
+        case ScopeType.PIPE_ACTIVITY_HISTORY:
             assert scope.database is not None
             assert scope.schema is not None
             assert scope.table is not None  # the pipe's name
@@ -204,7 +204,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.PIPE_HISTORY:
+        case ScopeType.PIPE_HISTORY:
             assert scope.database is not None
             assert scope.schema is not None
             assert scope.table is not None  # the pipe's name
@@ -224,7 +224,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.TASK_ACTIVITY:
+        case ScopeType.TASK_ACTIVITY:
             assert scope.database is not None
             assert scope.schema is not None
             # Bounded by task count, not by history depth -- see
@@ -239,7 +239,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.TASK_ACTIVITY_HISTORY:
+        case ScopeType.TASK_ACTIVITY_HISTORY:
             assert scope.database is not None
             assert scope.schema is not None
             assert scope.table is not None  # the task's name
@@ -257,7 +257,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.TASK_HISTORY:
+        case ScopeType.TASK_HISTORY:
             assert scope.database is not None
             assert scope.schema is not None
             assert scope.table is not None  # the task's name
@@ -273,7 +273,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.GRANTS:
+        case ScopeType.GRANTS:
             assert scope.database is not None
             # A schema or database's grant list is bounded, same reasoning
             # as show_columns/table_stats being deliberately unpaged.
@@ -290,7 +290,7 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.TAG_REFERENCES:
+        case ScopeType.TAG_REFERENCES:
             assert scope.database is not None
             if scope.schema is not None:
                 return (
@@ -305,16 +305,16 @@ def fetch_page(
                 ),
                 None,
             )
-        case ScopeKind.WAREHOUSES:
+        case ScopeType.WAREHOUSES:
             # Small, flat, unpaged lists -- see queries.show_warehouses.
             return gateway.show_warehouses(allow_reconnect=allow_reconnect), None
-        case ScopeKind.ROLES:
+        case ScopeType.ROLES:
             return gateway.show_roles(allow_reconnect=allow_reconnect), None
-        case ScopeKind.DATABASE_PRIME:
+        case ScopeType.DATABASE_PRIME:
             raise ValueError(
                 "a prime scope is fetched by fetch_database, not fetch_page"
             )
-        case ScopeKind.COLUMNS_PRIME:
+        case ScopeType.COLUMNS_PRIME:
             raise ValueError(
                 "a columns-prime scope is fetched by fetch_columns_database/"
                 "fetch_columns_schema, not fetch_page"
@@ -338,7 +338,7 @@ def fetch_database(
     *,
     allow_reconnect: bool = True,
 ) -> tuple[list[dict[str, Any]], bool]:
-    """Every object of one kind in a database. Returns (rows, usable).
+    """Every object of one type in a database. Returns (rows, usable).
 
     Deliberately a single unpaged statement, unlike every other fetch here.
 
@@ -353,10 +353,10 @@ def fetch_database(
     result is truncated and there is no safe way to ask for the remainder.
     The caller falls back to fetching schema by schema.
     """
-    assert scope.object_kind is not None
+    assert scope.object_type is not None
     assert scope.database is not None
     rows = gateway.show_objects_in_database(
-        scope.object_kind,
+        scope.object_type,
         scope.database,
         after=None,
         limit=cap,

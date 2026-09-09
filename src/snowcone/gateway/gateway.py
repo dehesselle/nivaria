@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 from snowcone.gateway import queries, sql_log
 from snowcone.gateway.pool import ConnectionPool
-from snowcone.models import ObjectKind
+from snowcone.models import ObjectType
 
 Row = dict[str, Any]
 
@@ -41,7 +41,7 @@ class SnowflakeGateway(Protocol):
 
     def show_objects(
         self,
-        kind: ObjectKind,
+        object_type: ObjectType,
         database: str,
         schema: str,
         *,
@@ -52,7 +52,7 @@ class SnowflakeGateway(Protocol):
 
     def show_objects_in_database(
         self,
-        kind: ObjectKind,
+        object_type: ObjectType,
         database: str,
         *,
         after: str | None = None,
@@ -256,7 +256,7 @@ class PoolGateway:
 
     def show_objects(
         self,
-        kind: ObjectKind,
+        object_type: ObjectType,
         database: str,
         schema: str,
         *,
@@ -265,13 +265,15 @@ class PoolGateway:
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.show_objects(kind, database, schema, after=after, limit=limit),
+            queries.show_objects(
+                object_type, database, schema, after=after, limit=limit
+            ),
             allow_reconnect=allow_reconnect,
         )
 
     def show_objects_in_database(
         self,
-        kind: ObjectKind,
+        object_type: ObjectType,
         database: str,
         *,
         after: str | None = None,
@@ -279,7 +281,9 @@ class PoolGateway:
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.show_objects_in_database(kind, database, after=after, limit=limit),
+            queries.show_objects_in_database(
+                object_type, database, after=after, limit=limit
+            ),
             allow_reconnect=allow_reconnect,
         )
 

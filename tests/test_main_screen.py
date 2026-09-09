@@ -13,13 +13,16 @@ import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
-    ObjectKind,
+    ObjectType,
+    Scope,
+    ScopeType,
     columns_scope,
     databases_scope,
     objects_scope,
     schemas_scope,
 )
 from snowcone.profiles import ProfileStore
+from snowcone.ui.messages import ScopeNeeded
 from snowcone.ui.screens.main import CacheUpdated, MainScreen
 from snowcone.ui.screens.multipicker import MultiPickerScreen
 from snowcone.ui.screens.picker import PickerScreen
@@ -196,6 +199,28 @@ async def test_an_objects_request_is_upgraded_to_a_database_prime(repo) -> None:
         await settle(pilot)
     assert "tables@MYDB" in fetch.scopes
     assert "tables:MYDB.AAA" not in fetch.scopes
+
+
+async def test_only_an_objects_scope_is_upgraded_to_a_prime(repo) -> None:
+    """The upgrade keys off ScopeType.OBJECTS, not off "has an object type
+    and a database". A SELECT-backed scope that happened to carry both would
+    otherwise be silently redirected into fetching SHOW TABLES instead of
+    the statement it actually needs."""
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        misshapen = Scope(
+            ScopeType.TABLE_STATS,
+            database="MYDB",
+            schema="AAA",
+            object_type=ObjectType.TABLE,
+        )
+        screen.on_scope_needed(ScopeNeeded(misshapen, interactive=True))
+        await settle(pilot)
+    assert misshapen.key in fetch.scopes
+    assert "tables@MYDB" not in fetch.scopes
 
 
 async def test_an_interactive_need_outranks_a_visible_one(repo) -> None:
@@ -397,7 +422,11 @@ async def test_refresh_on_an_object_leaf_asks_for_nothing(repo) -> None:
         await pilot.pause()
         screen = app.screen
         screen.set_databases(["MYDB"])
-        await pilot.pause()
+        # settle(), not a single pause: adding the database node posts its own
+        # ScopeNeeded for schemas:MYDB, and one pump cycle is not guaranteed to
+        # deliver it. Clearing before it lands made this intermittently see
+        # that request as though action_refresh had made it.
+        await settle(pilot)
         fetch.requests.clear()
         screen.action_refresh()
         await pilot.pause()
@@ -532,7 +561,7 @@ async def test_escaping_the_picker_chooses_nothing(repo) -> None:
 def put_tables(repo: Repository, database: str, schema: str, *names: str) -> None:
     load(
         repo,
-        objects_scope(ObjectKind.TABLE, database, schema),
+        objects_scope(ObjectType.TABLE, database, schema),
         [
             {
                 "database_name": database,

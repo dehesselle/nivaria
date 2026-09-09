@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
-class ObjectKind(StrEnum):
-    """A kind of Snowflake object that snowcone can list and show.
+class ObjectType(StrEnum):
+    """A type of Snowflake object that snowcone can list and show.
 
     The value is the noun Snowflake itself uses (as in `SHOW TABLES`), so it
     can be dropped straight into a statement.
@@ -35,7 +35,7 @@ class ObjectKind(StrEnum):
         return self.plural.title()
 
 
-class ScopeKind(StrEnum):
+class ScopeType(StrEnum):
     """What a cache scope covers: one fetchable, separately-refreshable set."""
 
     DATABASES = "databases"
@@ -55,34 +55,27 @@ class ScopeKind(StrEnum):
     #: deliberate exception to SHOW-only (see DESIGN.md). Scoped to
     #: (database, schema) like OBJECTS, but backed by its own mirror table
     #: rather than a retrofit onto show_tables, since schema.sql has no
-    #: migration system. Deliberately carries no object_kind: a scope with
-    #: both object_kind and database set gets silently upgraded to a
-    #: whole-database SHOW-prime by MainScreen.on_scope_needed, which would
-    #: fetch SHOW TABLES, not this SELECT -- columns_scope avoids the same
-    #: trap the same way, for a table's own single-object fetch.
+    #: migration system.
     TABLE_STATS = "table_stats"
     #: A schema's views' LAST_DDL/LAST_ALTERED, the same INFORMATION_SCHEMA.
     #: TABLES statement TABLE_STATS uses, just bound to TABLE_TYPE = 'VIEW'
-    #: instead of 'BASE TABLE'. A separate ScopeKind rather than object_kind
-    #: on TABLE_STATS, for the same reason TABLE_STATS itself carries no
-    #: object_kind -- see that comment.
+    #: instead of 'BASE TABLE'. A separate ScopeType rather than an
+    #: object_type on TABLE_STATS: the two are separately refreshable, so
+    #: they are separate scopes.
     VIEW_STATS = "view_stats"
     #: A schema's materialized views' Rows/Bytes, sourced by SHOW MATERIALIZED
     #: VIEWS -- a distinct Snowflake command from SHOW VIEWS (see
     #: show_materialized_views in schema.sql), with its own column set that
     #: actually carries row/byte stats, which SHOW VIEWS never does even for
     #: materialized views. Metadata layer like SHOW VIEWS, so -- unlike
-    #: TABLE_STATS/VIEW_STATS -- this needs no warehouse. Deliberately
-    #: carries no object_kind, for the same reason TABLE_STATS does not.
+    #: TABLE_STATS/VIEW_STATS -- this needs no warehouse.
     MATERIALIZED_VIEW_STATS = "materialized_view_stats"
     #: A schema's pipes' *latest* load each (bounded by the "pipe history
     #: fetch window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
     #: instance of the dual-source pattern TABLE_STATS established (see
     #: DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
-    #: its own mirror table. Deliberately carries no object_kind, for exactly
-    #: the same reason TABLE_STATS does not -- see that comment. Its own data
-    #: barely changes on the ordinary CACHE_TTL cadence, so it carries a much
+    #: its own mirror table. Its own data barely changes on the ordinary CACHE_TTL cadence, so it carries a much
     #: longer effective TTL -- see `scope_ttl` below. Reduced to one row per
     #: pipe in SQL (see queries.pipe_activity) -- a single pipe's own full
     #: history is PIPE_ACTIVITY_HISTORY below, not this scope.
@@ -105,8 +98,7 @@ class ScopeKind(StrEnum):
     #: SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY rather than SHOW -- the same
     #: dual-source pattern PIPE_ACTIVITY established (see DESIGN.md), just
     #: against a different ACCOUNT_USAGE view. Scoped to (database, schema)
-    #: like PIPE_ACTIVITY, but backed by its own mirror table. Deliberately
-    #: carries no object_kind, for the same reason PIPE_ACTIVITY does not.
+    #: like PIPE_ACTIVITY, but backed by its own mirror table.
     #: Reduced to one row per task in SQL (see queries.task_activity) -- a
     #: single task's own full run history is TASK_ACTIVITY_HISTORY below.
     #: Unlike PIPE_ACTIVITY, this carries no TTL override (see scope_ttl
@@ -131,10 +123,7 @@ class ScopeKind(StrEnum):
     TASK_HISTORY = "task_history"
     #: Every grant on one schema or one database (schema is None), sourced by
     #: SHOW GRANTS ON SCHEMA/DATABASE -- metadata layer, needs no warehouse,
-    #: same as every plain SHOW scope. Deliberately carries no object_kind:
-    #: a scope with both object_kind and database set gets silently upgraded
-    #: to a whole-database SHOW-prime by MainScreen.on_scope_needed, which
-    #: would be wrong here -- same trap TABLE_STATS/PIPE_ACTIVITY avoid.
+    #: same as every plain SHOW scope.
     #: granted_to can be ROLE, DATABASE ROLE, USER, SHARE or APPLICATION
     #: ROLE -- deliberately not filtered down to roles only.
     GRANTS = "grants"
@@ -142,8 +131,7 @@ class ScopeKind(StrEnum):
     #: by a real SELECT against INFORMATION_SCHEMA.TAG_REFERENCES rather than
     #: SHOW -- the fourth instance of the dual-source pattern TABLE_STATS
     #: established (see DESIGN.md). Needs a running warehouse; degrades
-    #: blank without one, same as every SELECT-backed scope. Deliberately
-    #: carries no object_kind, for exactly the same reason GRANTS does not.
+    #: blank without one, same as every SELECT-backed scope.
     TAG_REFERENCES = "tag_references"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
@@ -166,10 +154,16 @@ class Scope:
     routing and staleness all be dictionary lookups.
     """
 
-    kind: ScopeKind
+    type: ScopeType
     database: str | None = None
     schema: str | None = None
-    object_kind: ObjectKind | None = None
+    #: Which object type an OBJECTS listing or a DATABASE_PRIME is for. Every
+    #: other scope type leaves it unset -- they narrow by database/schema/
+    #: table instead, and nothing keys off this field except those two.
+    object_type: ObjectType | None = None
+    #: The single object a scope narrows to, whatever it is called for that
+    #: scope type: a table for COLUMNS, a pipe for PIPE_HISTORY, a task for
+    #: TASK_HISTORY. Named for the first use rather than renamed per scope.
     table: str | None = None
 
     @property
@@ -180,56 +174,56 @@ class Scope:
         as opaque -- nothing parses it back into a Scope, so a database or
         schema name containing a dot cannot cause an ambiguity.
         """
-        match self.kind:
-            case ScopeKind.DATABASES:
+        match self.type:
+            case ScopeType.DATABASES:
                 return "databases"
-            case ScopeKind.SCHEMAS:
+            case ScopeType.SCHEMAS:
                 return f"schemas:{self.database}"
-            case ScopeKind.OBJECTS:
-                assert self.object_kind is not None
-                return f"{self.object_kind.plural}:{self.database}.{self.schema}"
-            case ScopeKind.COLUMNS:
+            case ScopeType.OBJECTS:
+                assert self.object_type is not None
+                return f"{self.object_type.plural}:{self.database}.{self.schema}"
+            case ScopeType.COLUMNS:
                 return f"columns:{self.database}.{self.schema}.{self.table}"
-            case ScopeKind.DATABASE_PRIME:
-                assert self.object_kind is not None
-                return f"{self.object_kind.plural}@{self.database}"
-            case ScopeKind.COLUMNS_PRIME:
+            case ScopeType.DATABASE_PRIME:
+                assert self.object_type is not None
+                return f"{self.object_type.plural}@{self.database}"
+            case ScopeType.COLUMNS_PRIME:
                 if self.schema is None:
                     return f"columns_prime:{self.database}"
                 return f"columns_prime:{self.database}.{self.schema}"
-            case ScopeKind.TABLE_STATS:
+            case ScopeType.TABLE_STATS:
                 return f"table_stats:{self.database}.{self.schema}"
-            case ScopeKind.VIEW_STATS:
+            case ScopeType.VIEW_STATS:
                 return f"view_stats:{self.database}.{self.schema}"
-            case ScopeKind.MATERIALIZED_VIEW_STATS:
+            case ScopeType.MATERIALIZED_VIEW_STATS:
                 return f"materialized_view_stats:{self.database}.{self.schema}"
-            case ScopeKind.PIPE_ACTIVITY:
+            case ScopeType.PIPE_ACTIVITY:
                 return f"pipe_activity:{self.database}.{self.schema}"
-            case ScopeKind.PIPE_ACTIVITY_HISTORY:
+            case ScopeType.PIPE_ACTIVITY_HISTORY:
                 return (
                     f"pipe_activity_history:{self.database}.{self.schema}.{self.table}"
                 )
-            case ScopeKind.PIPE_HISTORY:
+            case ScopeType.PIPE_HISTORY:
                 return f"pipe_history:{self.database}.{self.schema}.{self.table}"
-            case ScopeKind.TASK_ACTIVITY:
+            case ScopeType.TASK_ACTIVITY:
                 return f"task_activity:{self.database}.{self.schema}"
-            case ScopeKind.TASK_ACTIVITY_HISTORY:
+            case ScopeType.TASK_ACTIVITY_HISTORY:
                 return (
                     f"task_activity_history:{self.database}.{self.schema}.{self.table}"
                 )
-            case ScopeKind.TASK_HISTORY:
+            case ScopeType.TASK_HISTORY:
                 return f"task_history:{self.database}.{self.schema}.{self.table}"
-            case ScopeKind.GRANTS:
+            case ScopeType.GRANTS:
                 if self.schema is None:
                     return f"grants:{self.database}"
                 return f"grants:{self.database}.{self.schema}"
-            case ScopeKind.TAG_REFERENCES:
+            case ScopeType.TAG_REFERENCES:
                 if self.schema is None:
                     return f"tag_references:{self.database}"
                 return f"tag_references:{self.database}.{self.schema}"
-            case ScopeKind.WAREHOUSES:
+            case ScopeType.WAREHOUSES:
                 return "warehouses"
-            case ScopeKind.ROLES:
+            case ScopeType.ROLES:
                 return "roles"
 
     def __str__(self) -> str:
@@ -237,53 +231,51 @@ class Scope:
 
 
 def databases_scope() -> Scope:
-    return Scope(ScopeKind.DATABASES)
+    return Scope(ScopeType.DATABASES)
 
 
 def schemas_scope(database: str) -> Scope:
-    return Scope(ScopeKind.SCHEMAS, database=database)
+    return Scope(ScopeType.SCHEMAS, database=database)
 
 
-def objects_scope(kind: ObjectKind, database: str, schema: str) -> Scope:
-    return Scope(ScopeKind.OBJECTS, database=database, schema=schema, object_kind=kind)
+def objects_scope(object_type: ObjectType, database: str, schema: str) -> Scope:
+    return Scope(
+        ScopeType.OBJECTS, database=database, schema=schema, object_type=object_type
+    )
 
 
 def columns_scope(database: str, schema: str, table: str) -> Scope:
-    return Scope(ScopeKind.COLUMNS, database=database, schema=schema, table=table)
+    return Scope(ScopeType.COLUMNS, database=database, schema=schema, table=table)
 
 
-def prime_scope(kind: ObjectKind, database: str) -> Scope:
-    return Scope(ScopeKind.DATABASE_PRIME, database=database, object_kind=kind)
+def prime_scope(object_type: ObjectType, database: str) -> Scope:
+    return Scope(ScopeType.DATABASE_PRIME, database=database, object_type=object_type)
 
 
 def columns_prime_scope(database: str, schema: str | None = None) -> Scope:
-    return Scope(ScopeKind.COLUMNS_PRIME, database=database, schema=schema)
+    return Scope(ScopeType.COLUMNS_PRIME, database=database, schema=schema)
 
 
 def table_stats_scope(database: str, schema: str) -> Scope:
-    # No object_kind -- see ScopeKind.TABLE_STATS's comment.
-    return Scope(ScopeKind.TABLE_STATS, database=database, schema=schema)
+    return Scope(ScopeType.TABLE_STATS, database=database, schema=schema)
 
 
 def view_stats_scope(database: str, schema: str) -> Scope:
-    # No object_kind -- see ScopeKind.VIEW_STATS's comment.
-    return Scope(ScopeKind.VIEW_STATS, database=database, schema=schema)
+    return Scope(ScopeType.VIEW_STATS, database=database, schema=schema)
 
 
 def materialized_view_stats_scope(database: str, schema: str) -> Scope:
-    # No object_kind -- see ScopeKind.MATERIALIZED_VIEW_STATS's comment.
-    return Scope(ScopeKind.MATERIALIZED_VIEW_STATS, database=database, schema=schema)
+    return Scope(ScopeType.MATERIALIZED_VIEW_STATS, database=database, schema=schema)
 
 
 def pipe_activity_scope(database: str, schema: str) -> Scope:
-    # No object_kind -- see ScopeKind.PIPE_ACTIVITY's comment.
-    return Scope(ScopeKind.PIPE_ACTIVITY, database=database, schema=schema)
+    return Scope(ScopeType.PIPE_ACTIVITY, database=database, schema=schema)
 
 
 def pipe_activity_history_scope(database: str, schema: str, pipe: str) -> Scope:
     # `table` holds the pipe's name -- same reuse `pipe_history_scope` makes.
     return Scope(
-        ScopeKind.PIPE_ACTIVITY_HISTORY, database=database, schema=schema, table=pipe
+        ScopeType.PIPE_ACTIVITY_HISTORY, database=database, schema=schema, table=pipe
     )
 
 
@@ -291,64 +283,61 @@ def pipe_history_scope(database: str, schema: str, pipe: str) -> Scope:
     # `table` holds the pipe's name here -- the generic "one object this
     # scope narrows to" slot, the same reuse `columns_scope` makes for a
     # table's name.
-    return Scope(ScopeKind.PIPE_HISTORY, database=database, schema=schema, table=pipe)
+    return Scope(ScopeType.PIPE_HISTORY, database=database, schema=schema, table=pipe)
 
 
 def task_activity_scope(database: str, schema: str) -> Scope:
-    # No object_kind -- see ScopeKind.TASK_ACTIVITY's comment.
-    return Scope(ScopeKind.TASK_ACTIVITY, database=database, schema=schema)
+    return Scope(ScopeType.TASK_ACTIVITY, database=database, schema=schema)
 
 
 def task_activity_history_scope(database: str, schema: str, task: str) -> Scope:
     # `table` holds the task's name -- same reuse `pipe_activity_history_scope`
     # makes for the pipe's name.
     return Scope(
-        ScopeKind.TASK_ACTIVITY_HISTORY, database=database, schema=schema, table=task
+        ScopeType.TASK_ACTIVITY_HISTORY, database=database, schema=schema, table=task
     )
 
 
 def task_history_scope(database: str, schema: str, task: str) -> Scope:
     # `table` holds the task's name here -- same reuse `pipe_history_scope`
     # makes for the pipe's name.
-    return Scope(ScopeKind.TASK_HISTORY, database=database, schema=schema, table=task)
+    return Scope(ScopeType.TASK_HISTORY, database=database, schema=schema, table=task)
 
 
 def grants_scope(database: str, schema: str | None = None) -> Scope:
-    # No object_kind -- see ScopeKind.GRANTS's comment. schema=None means a
-    # database-level grants scope, schema set means schema-level -- same
-    # optional-schema convention COLUMNS_PRIME already uses.
-    return Scope(ScopeKind.GRANTS, database=database, schema=schema)
+    # schema=None means a database-level grants scope, schema set means
+    # schema-level -- the same optional-schema convention COLUMNS_PRIME uses.
+    return Scope(ScopeType.GRANTS, database=database, schema=schema)
 
 
 def tag_references_scope(database: str, schema: str | None = None) -> Scope:
-    # No object_kind -- see ScopeKind.TAG_REFERENCES's comment.
-    return Scope(ScopeKind.TAG_REFERENCES, database=database, schema=schema)
+    return Scope(ScopeType.TAG_REFERENCES, database=database, schema=schema)
 
 
 def warehouses_scope() -> Scope:
-    return Scope(ScopeKind.WAREHOUSES)
+    return Scope(ScopeType.WAREHOUSES)
 
 
 def roles_scope() -> Scope:
-    return Scope(ScopeKind.ROLES)
+    return Scope(ScopeType.ROLES)
 
 
 #: Refresh cadence, in seconds, for a scope whose own data does not change on
-#: the ordinary CACHE_TTL cadence -- see ScopeKind.PIPE_ACTIVITY's comment. A
+#: the ordinary CACHE_TTL cadence -- see ScopeType.PIPE_ACTIVITY's comment. A
 #: plain constant, not a Setting: it is a correctness bound, not a
 #: preference. 13 days, one short of INFORMATION_SCHEMA.COPY_HISTORY's 14-day
 #: retention limit (`gateway.queries.PIPE_HISTORY_RETENTION_DAYS`) -- the two
 #: sources must jointly cover every day with no gap between them, and
 #: ACCOUNT_USAGE's own ingestion lag (up to a few hours) eats into a boundary
 #: cut exactly at 14, so this stays one day inside it.
-_TTL_OVERRIDES: dict[ScopeKind, float] = {
-    ScopeKind.PIPE_ACTIVITY: 13 * 86400,
-    ScopeKind.PIPE_ACTIVITY_HISTORY: 13 * 86400,
+_TTL_OVERRIDES: dict[ScopeType, float] = {
+    ScopeType.PIPE_ACTIVITY: 13 * 86400,
+    ScopeType.PIPE_ACTIVITY_HISTORY: 13 * 86400,
     # 6 days, one short of INFORMATION_SCHEMA.TASK_HISTORY's 7-day retention
     # (`gateway.queries.TASK_HISTORY_RETENTION_DAYS`) -- same margin reasoning
     # as PIPE_ACTIVITY_HISTORY's 13/14 pair above. TASK_ACTIVITY deliberately
-    # carries no override -- see its own comment on ScopeKind.TASK_ACTIVITY.
-    ScopeKind.TASK_ACTIVITY_HISTORY: 6 * 86400,
+    # carries no override -- see its own comment on ScopeType.TASK_ACTIVITY.
+    ScopeType.TASK_ACTIVITY_HISTORY: 6 * 86400,
 }
 
 
@@ -356,20 +345,39 @@ def scope_ttl(scope: Scope, default: float) -> float:
     """The TTL that actually governs `scope`'s staleness.
 
     Almost every scope just uses the caller's TTL (the CACHE_TTL setting).
-    The rare exception is a scope kind in `_TTL_OVERRIDES`, whose own data
+    The rare exception is a scope type in `_TTL_OVERRIDES`, whose own data
     does not change on that cadence -- refreshing it that often would just
     repeat the same round trip for no new data. Never faster than the
     caller's own default, only ever slower -- an aggressive default TTL is
     still honoured for every scope that has no override.
 
-    Called from both `Repository.stale_scopes` (the background sweep) and
-    `_ScopedView.ensure` (a view's own paint-time check), so the override
-    applies uniformly regardless of which path is asking.
+    Reached only through `is_stale` below, which is the single decision
+    every staleness check in the app goes through, so the override applies
+    uniformly regardless of which path is asking.
     """
-    override = _TTL_OVERRIDES.get(scope.kind)
+    override = _TTL_OVERRIDES.get(scope.type)
     if override is None:
         return default
     return max(default, override)
+
+
+def is_stale(scope: Scope, age: float | None, ttl: float) -> bool:
+    """Whether cached rows `age` seconds old are due a refetch.
+
+    The one place this is decided, called from all three that ask:
+    `Repository.stale_scopes` (the background sweep), `_ScopedView.ensure`
+    (a detail view's paint-time check) and `ObjectTree._ensure` (the tree's).
+    They drifted apart once already -- the tree was checking a TTL
+    snapshotted at construction and skipping `scope_ttl` entirely -- which is
+    why the decision lives here rather than being written out three times.
+
+    Never fetched (`age is None`) is always stale: it is maximally so, and a
+    `ttl` of 0 only disables *re*-freshing, never the first fetch.
+    """
+    if age is None:
+        return True
+    effective = scope_ttl(scope, ttl) if ttl > 0 else ttl
+    return effective > 0 and age >= effective
 
 
 @dataclass(frozen=True)
@@ -406,10 +414,8 @@ class SFObject:
     database_name: str
     schema_name: str
     name: str
-    kind: ObjectKind
+    type: ObjectType
     comment: str = ""
-    rows: int | None = None
-    bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -433,7 +439,7 @@ class Column:
 class ObjectRef:
     """What the tree and the search modal hand to the detail pane."""
 
-    kind: ObjectKind
+    type: ObjectType
     database: str
     schema: str
     name: str
@@ -447,8 +453,8 @@ class ObjectRef:
 class SchemaRef:
     """What the search modal hands back for a schema hit.
 
-    Deliberately not an ObjectRef with some placeholder kind: a schema has no
-    ObjectKind and no mirror row of its own to show, unlike a real object. It
+    Deliberately not an ObjectRef with some placeholder type: a schema has no
+    ObjectType and no mirror row of its own to show, unlike a real object. It
     does have its own detail view (Grants/Tags, see SchemaSelected) -- but
     the tree gets there by revealing and expanding the node (see
     `ObjectTree.reveal_schema`) and letting the resulting highlight announce

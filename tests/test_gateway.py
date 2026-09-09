@@ -7,7 +7,7 @@ import pytest
 
 from snowcone.gateway.gateway import PoolGateway
 from snowcone.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
-from snowcone.models import ObjectKind
+from snowcone.models import ObjectType
 
 
 class RecordingCursor:
@@ -83,7 +83,7 @@ def test_rows_are_keyed_by_snowflakes_own_column_names() -> None:
 
 def test_show_objects_sends_the_statement_the_builder_produced() -> None:
     gateway, connection, _ = make_gateway()
-    gateway.show_objects(ObjectKind.TABLE, "MYDB", "PUBLIC", after="ORDERS", limit=10)
+    gateway.show_objects(ObjectType.TABLE, "MYDB", "PUBLIC", after="ORDERS", limit=10)
     statement, params = connection.executed[-1]
     assert statement == 'SHOW TABLES IN SCHEMA "MYDB"."PUBLIC" LIMIT 10 FROM \'ORDERS\''
     assert params is None

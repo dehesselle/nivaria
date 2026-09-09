@@ -4,7 +4,7 @@ import pytest
 
 from snowcone.gateway import queries
 from snowcone.gateway.queries import quote_identifier, quote_literal
-from snowcone.models import ObjectKind
+from snowcone.models import ObjectType
 
 
 def test_identifiers_are_double_quoted_to_preserve_case() -> None:
@@ -40,7 +40,7 @@ def test_show_schemas_scopes_to_a_quoted_database() -> None:
 
 
 def test_show_objects_uses_snowflakes_own_plural_noun() -> None:
-    assert queries.show_objects(ObjectKind.PIPE, "MYDB", "PUBLIC", limit=10) == (
+    assert queries.show_objects(ObjectType.PIPE, "MYDB", "PUBLIC", limit=10) == (
         'SHOW PIPES IN SCHEMA "MYDB"."PUBLIC" LIMIT 10'
     )
 
@@ -48,7 +48,7 @@ def test_show_objects_uses_snowflakes_own_plural_noun() -> None:
 def test_show_objects_pages_with_a_keyset_cursor() -> None:
     assert (
         queries.show_objects(
-            ObjectKind.TABLE, "MYDB", "PUBLIC", after="ORDERS", limit=1000
+            ObjectType.TABLE, "MYDB", "PUBLIC", after="ORDERS", limit=1000
         )
         == 'SHOW TABLES IN SCHEMA "MYDB"."PUBLIC" LIMIT 1000 FROM \'ORDERS\''
     )
