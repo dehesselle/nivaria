@@ -72,6 +72,16 @@ def show_objects(
     after: str | None = None,
     limit: int = 1000,
 ) -> str:
+    """One object type in one schema, keyset-paged by `after`/`limit`.
+
+    Verified correct for tables and views (see DESIGN.md, "Verified and
+    unverified paging"). Confirmed *not* honoured for `ObjectType.PIPE`: a
+    real `SHOW PIPES IN SCHEMA ... LIMIT n` returns every pipe in the schema
+    regardless of `n`, and a repeat with `FROM` returns the identical result
+    -- `jobs.fetch_page`'s continuation loop has no way to detect that and
+    would not terminate for a schema with more pipes than the caller's page
+    size. See DESIGN.md for the full finding; not worked around here.
+    """
     scope = f"{quote_identifier(database)}.{quote_identifier(schema)}"
     return f"SHOW {object_type.plural.upper()} IN SCHEMA {scope}{_paging(after, limit)}"
 
@@ -163,11 +173,15 @@ def show_columns_in_database(
     """Every column of every table/view in a database, in one statement.
 
     Mirrors `show_objects_in_database`'s rationale: SHOW is metadata-layer, so
-    this needs no warehouse either, and round trips dominate over payload, so
-    one call beats one per table whenever the result fits under Snowflake's
-    10k SHOW cap. Unlike `show_objects_in_database`, this is unverified against
-    a live account -- SHOW COLUMNS IN DATABASE was not available to check
-    against the reference account this codebase was otherwise verified on.
+    this needs no warehouse either. Verified live against a 614-table/
+    11511-column database (see DESIGN.md, "Column cache priming"): the
+    result shape matches `map_show_columns`, but unlike `show_objects_in_database`
+    the `limit`/`after` (LIMIT/FROM) arguments below are a confirmed no-op for
+    this statement -- it always returns the whole database's columns
+    regardless, which is also why the 10k-row assumption in `MAX_PAGE_SIZE`'s
+    docstring does not hold here (a real call returned 11511 rows). See
+    DESIGN.md, "Verified and unverified paging", for what this means for a
+    schema with more columns than the caller's page size.
     """
     scope = quote_identifier(database)
     return f"SHOW COLUMNS IN DATABASE {scope}{_paging(after, limit)}"
@@ -179,7 +193,8 @@ def show_columns_in_schema(
     """Every column of every table/view in one schema, in one statement.
 
     The fallback when `show_columns_in_database` is truncated -- see there.
-    Also unverified against a live account, same caveat.
+    Also verified live, same caveat: `limit`/`after` are a confirmed no-op
+    for this statement too (see DESIGN.md, "Verified and unverified paging").
     """
     target = f"{quote_identifier(database)}.{quote_identifier(schema)}"
     return f"SHOW COLUMNS IN SCHEMA {target}{_paging(after, limit)}"
