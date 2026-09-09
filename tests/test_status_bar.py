@@ -328,17 +328,47 @@ async def test_the_countdown_counts_down_from_the_ttl(repo) -> None:
         config.set(CACHE_TTL, CACHE_TTL.default)
 
 
-async def test_a_stale_scope_counts_zero_rather_than_negative(repo) -> None:
-    load(repo, databases_scope(), [{"name": "MYDB", "comment": ""}])
-    age_by(repo, databases_scope(), 120)
+async def test_the_countdown_resets_once_the_sweep_runs(repo) -> None:
+    """Elapsed time since the last sweep drives `remaining` now, not any
+    individual cache row's own age -- once CACHE_TTL has passed, `_tick()`
+    runs the sweep itself and the countdown restarts at the full TTL."""
     config.set(CACHE_TTL, 60)
     try:
         app = Harness(repo, RecordingFetch())
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            app.screen._last_sweep_at -= 120
             app.screen._tick()
             await pilot.pause()
-            assert app.screen.query_one(StatusFooter).remaining == 0
+            remaining = app.screen.query_one(StatusFooter).remaining
+        assert 55 <= remaining <= 60
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_navigating_restarts_the_countdown(repo) -> None:
+    """Moving to a different category/object/schema/database must not leave
+    the footer implying a longer wait than what's actually left -- the view
+    just shown already asked interactively for its own stale data on the way
+    in (see PipeView._update_history and friends)."""
+    put_schemas(repo, "MYDB", "AAA")
+    config.set(CACHE_TTL, 60)
+    try:
+        app = Harness(repo, RecordingFetch())
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            screen._last_sweep_at -= 50
+            screen._tick()
+            await pilot.pause()
+            before = app.screen.query_one(StatusFooter).remaining
+            assert before <= 15
+
+            screen._select_category(objects_scope(ObjectType.TABLE, "MYDB", "AAA"))
+            screen._tick()
+            await pilot.pause()
+            after = app.screen.query_one(StatusFooter).remaining
+        assert after > before
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
 

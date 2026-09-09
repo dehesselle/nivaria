@@ -908,10 +908,25 @@ schema's tables cannot cause a whole-tree rebuild.
 
 ### The staleness sweep
 
-A slow timer asks which of the scopes **currently on screen** have exceeded the
-cache TTL, and requests those at background priority. Scopes nobody is looking
-at are never refreshed; anything urgent was already requested interactively.
-A TTL of `0` disables the sweep entirely.
+One clock, not two: `CACHE_TTL` is both the sweep's interval and the footer
+countdown's length. There is no separate poll constant. When the countdown
+reaches zero, `MainScreen._sweep` asks which of the scopes **currently on
+screen** have exceeded `CACHE_TTL` and requests those at background priority,
+then the countdown restarts at `CACHE_TTL`. Scopes nobody is looking at are
+never refreshed this way; anything urgent was already requested
+interactively. A TTL of `0` disables the sweep entirely.
+
+Navigating to something that changes what's on screen — a different
+database, schema, category or object — restarts the countdown immediately
+too (`MainScreen._restart_countdown`), rather than leaving the footer
+implying a longer wait than what's actually left. This does not also trigger
+`_sweep()` on the spot: the view just shown already asked interactively for
+anything of its own that was stale, on the way in (`_ScopedView.ensure`,
+called from `update_content`) — restarting the countdown only stops it from
+*over-promising*, since the freshness of what's newly on screen is already
+handled. Nothing fetches in the background between those two triggers
+(countdown reaching zero, or a navigation that changes what's shown) except
+the initial requests `MainScreen.on_mount` issues at startup.
 
 ---
 
@@ -1237,12 +1252,13 @@ key bindings keep working without being re-implemented.
   database picker, which only ever changes what a query is built to ask for,
   picking a warehouse or role actually rewrites the session: see
   `ConnectionPool.set_role` / `set_warehouse` below.
-- **Countdown** — seconds until the data *currently on screen* goes stale: the
-  TTL minus the age of the scope behind the cursor. It is not a global timer;
-  it changes as you navigate, and for an object leaf it reports the list the
-  object came from, since a leaf owns no scope of its own. It becomes a spinner
-  while that scope is being refetched, and blanks when the TTL is `0`. Fixed
-  width, right-aligned, no leading zeroes, so the digits do not shift as it
+- **Countdown** — seconds until the next background staleness check (see "The
+  staleness sweep" above). A global timer, deliberately: `CACHE_TTL` is both
+  its length and the sweep's own interval, so this is one clock, not a
+  per-scope freshness readout. Navigating to something new restarts it. It
+  becomes a spinner while anything on screen is being refetched, and blanks
+  when the TTL is `0`. Fixed width, right-aligned, no leading zeroes, so the
+  digits do not shift as it
   counts down.
 - **Pool gauge** — `(in use / total)` connections, giving a live sense of
   background activity.

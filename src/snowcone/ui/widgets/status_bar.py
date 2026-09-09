@@ -26,10 +26,14 @@ MAX_SECONDS = 999
 
 
 class Countdown(Static):
-    """Seconds until the data currently on screen goes stale.
+    """Seconds until the next background staleness check.
 
-    Not a global timer: it describes the scope behind whatever the cursor is
-    on, so it answers "how old is what I am looking at" as you navigate.
+    A global timer, deliberately: CACHE_TTL is both its length and the
+    background sweep's own interval, so this is the one clock behind "when
+    will snowcone next check what's on screen for anything stale" -- not a
+    per-scope freshness readout. Navigating to something new (`MainScreen.
+    _restart_countdown`) restarts it early, since whatever was just shown
+    already asked interactively for its own stale data on the way in.
     """
 
     remaining: reactive[int] = reactive(0)

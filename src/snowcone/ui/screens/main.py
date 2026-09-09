@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Sequence
 from math import ceil
+from time import monotonic
 from typing import ClassVar
 
 from tcw.widgets import (
@@ -76,11 +77,6 @@ from snowcone.version import VERSION
 #: enough to run on the event loop: an int read plus one indexed sqlite lookup.
 TICK = 0.2
 
-#: The background staleness sweep. Far slower than the tick because it walks
-#: every scope currently on screen, and nothing it finds is urgent by
-#: definition -- anything urgent was requested interactively.
-SWEEP = 5.0
-
 
 class MainScreen(Screen):
     # No F9 here: `MenuBar` installs its own binding on whichever screen it
@@ -108,6 +104,12 @@ class MainScreen(Screen):
         self.profiles = profiles or ProfileStore()
         self.databases: list[str] = []
         self._frame = 0
+        #: Wall-clock time the staleness sweep last ran (or was deferred to,
+        #: by a navigation that just showed something new -- see
+        #: `_restart_countdown`). CACHE_TTL is both the sweep's interval and
+        #: the footer countdown's length: there is deliberately no second,
+        #: independent poll interval.
+        self._last_sweep_at = monotonic()
 
     def compose(self) -> ComposeResult:
         # The nesting is the DOM structure, not style: a Menu is a child of
@@ -147,7 +149,6 @@ class MainScreen(Screen):
         self._request(warehouses_scope(), Priority.INTERACTIVE)
         self._request(roles_scope(), Priority.INTERACTIVE)
         self.set_interval(TICK, self._tick)
-        self.set_interval(SWEEP, self._sweep)
         self._tick()
 
     @property
@@ -183,20 +184,48 @@ class MainScreen(Screen):
             footer.warehouse = self.pool.params.warehouse
             footer.role = self.pool.params.role
 
+        # focused_scope() is kept in the mix so the spinner still reflects
+        # activity before anything is materialised in the tree or detail pane
+        # yet (e.g. the initial database-list fetch at startup); the other
+        # two are what let it also catch a busy detail-pane-only scope (e.g.
+        # a pipe's own load history) that the tree cursor's own scope knows
+        # nothing about.
+        watched = [
+            self.focused_scope(),
+            *self.tree.visible_scopes(),
+            *self.detail.scopes(),
+        ]
+        footer.refreshing = self.fetch is not None and any(
+            self.fetch.is_busy(scope) for scope in watched
+        )
+
         # Read at the point of use, so changing it in settings takes effect
         # without a restart.
         ttl = config.get(CACHE_TTL)
         footer.countdown_enabled = ttl > 0
-
-        scope = self.focused_scope()
-        footer.refreshing = self.fetch is not None and self.fetch.is_busy(scope)
         if ttl <= 0:
             footer.remaining = 0
             return
-        age = self.repo.entry(scope).age()
-        # Never fetched reads as 0 rather than blank: it is maximally stale,
-        # and something is already on its way to fix that.
-        footer.remaining = 0 if age is None else max(0, ceil(ttl - age))
+
+        elapsed = monotonic() - self._last_sweep_at
+        if elapsed >= ttl:
+            self._sweep()
+            self._last_sweep_at = monotonic()
+            elapsed = 0.0
+        footer.remaining = max(0, ceil(ttl - elapsed))
+
+    def _restart_countdown(self) -> None:
+        """Treat "just showed the user something new" like a sweep already
+        happened.
+
+        Whatever view just got shown already asked interactively for
+        anything of its own that was stale (`_ScopedView.ensure`, called from
+        `update_content`), so there is nothing left for the countdown to warn
+        about until a fresh CACHE_TTL window elapses -- restarting it here is
+        what stops the footer implying a longer wait than what is actually
+        left.
+        """
+        self._last_sweep_at = monotonic()
 
     def _sweep(self) -> None:
         """Refresh what is on screen and has gone stale, nothing else."""
@@ -281,14 +310,17 @@ class MainScreen(Screen):
         # _select_category: the cursor is already on the schema node that
         # was just highlighted.
         self.detail.show_schema(event.ref)
+        self._restart_countdown()
 
     def on_database_selected(self, event: DatabaseSelected) -> None:
         self.detail.show_database(event.database)
+        self._restart_countdown()
 
     def _select_category(self, scope: Scope) -> None:
         # No tree.reveal(...) needed here, unlike _select: the cursor is
         # already on the category node that was just highlighted.
         self.detail.show_category(scope)
+        self._restart_countdown()
 
     def _select(self, ref: ObjectRef) -> None:
         # A search hit leaves the tree somewhere you can keep browsing from,
@@ -296,6 +328,7 @@ class MainScreen(Screen):
         # heard of.
         self.tree.reveal(ref)
         self.detail.show(ref)
+        self._restart_countdown()
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         """The tree found something missing or stale.
@@ -591,3 +624,4 @@ class MainScreen(Screen):
             scope = databases_scope() if not self.databases else None
         if scope is not None:
             self._request(scope, Priority.INTERACTIVE)
+            self._restart_countdown()
