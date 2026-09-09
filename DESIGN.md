@@ -589,19 +589,27 @@ work.
 `LIMIT n FROM 'name'` keyset paging was verified correct — same rows, same
 order as an unpaged fetch — for databases, schemas, tables and (added
 2026-09-09, against a schema with 63 views) views, at both `IN SCHEMA` and
-`IN DATABASE` scope. It is **unverified for stages and tasks**, because the
-probed account had only one of each — not enough to page through.
+`IN DATABASE` scope. It is **unverified for tasks** — no account probed so
+far has had enough of them to page through.
 
-> **`LIMIT`/`FROM` is a confirmed no-op for `SHOW PIPES` and `SHOW COLUMNS`,
-> at both `IN SCHEMA` and `IN DATABASE` scope.** Verified live on 2026-09-09
-> (Snowflake 10.32.102): `SHOW PIPES IN SCHEMA
-> <schema-with-27-pipes> LIMIT 5` returned all 27 rows; `SHOW PIPES IN
-> DATABASE <db-with-614-pipes> LIMIT 300` returned all 614; the identical
-> query repeated with `FROM '<last pipe name>'` returned the same 614 again,
-> not the next page. `SHOW COLUMNS IN SCHEMA`/`IN DATABASE` behave
-> identically. Tables and views, tested the same way in the same session,
-> honoured `LIMIT` correctly at both scopes — this is specific to pipes and
-> columns, not a general property of `IN SCHEMA`/`IN DATABASE`.
+> **`LIMIT`/`FROM` is a confirmed no-op for `SHOW PIPES`, `SHOW COLUMNS` and
+> `SHOW STAGES`, at both `IN SCHEMA` and `IN DATABASE` scope.** First
+> observed 2026-09-09 on the sandbox account (Snowflake 10.32.102): `SHOW PIPES IN SCHEMA <schema-with-27-pipes>
+> LIMIT 5` returned all 27 rows; `SHOW PIPES IN DATABASE
+> <db-with-614-pipes> LIMIT 300` returned all 614; the identical query
+> repeated with `FROM '<last pipe name>'` returned the same 614 again, not
+> the next page. `SHOW COLUMNS IN SCHEMA`/`IN DATABASE` behaved identically.
+> Tables and views, tested the same way in the same session, honoured
+> `LIMIT` correctly at both scopes — this is specific to a subset of object
+> types, not a general property of `IN SCHEMA`/`IN DATABASE`.
+>
+> Reconfirmed the same day on a second, independent (production) account,
+> against schemas at real scale: `SHOW PIPES IN SCHEMA ... LIMIT 10`
+> returned all 395 pipes in the schema; `SHOW COLUMNS IN SCHEMA ... LIMIT
+> 10` returned all 6655 columns; `SHOW STAGES IN SCHEMA ... LIMIT 10` also
+> returned every stage in its schema, unpaged — so stages carry the same
+> no-op, moved here from "unverified" above. This is now confirmed across
+> two unrelated accounts, not an artifact of the sandbox's data.
 >
 > This matters for pipes specifically: `ObjectType.PIPE`'s `ScopeType.OBJECTS`
 > scope is the one caller that reaches `show_objects` through
@@ -615,17 +623,20 @@ probed account had only one of each — not enough to page through.
 > in `FetchService._execute` detects a repeated cursor or caps the number of
 > continuations (see there), so this is an unbounded loop, not merely a slow
 > one: the scope's pass never reaches `finish_pass`, and the fetch keeps
-> re-querying at whatever priority it started at. No schema in the probed
-> account reached 1000 pipes (the largest had 27, out of 614 in the whole
-> database), so this was not observed to actually hang here — the no-op
+> re-querying at whatever priority it started at. Neither probed account had
+> a single schema over 1000 pipes yet (395 on production, 27 on the
+> sandbox), so this was not observed to actually hang on either — the no-op
 > paging itself is what was directly observed, and the hang is what the
-> existing continuation code, read against it, implies. Columns carry no
-> such risk despite the identical no-op finding: nothing in the fetch
-> scheduler ever calls `show_columns_in_schema`/`in_database` through a
-> continuation loop — both are one-shot calls from `COLUMNS_PRIME`'s tiers
-> (see "Column cache priming"), which read `usable` off the row count
-> directly rather than looping on it. Not investigated further or fixed
-> here — this document records what was verified, not a patch.
+> existing continuation code, read against it, implies. `ObjectType.STAGE`
+> has no per-object view and is not known to be fetched through this same
+> continuation path today, so its exposure is unclear rather than ruled out.
+> Columns carry no such risk despite the identical no-op finding: nothing in
+> the fetch scheduler ever calls `show_columns_in_schema`/`in_database`
+> through a continuation loop — both are one-shot calls from
+> `COLUMNS_PRIME`'s tiers (see "Column cache priming"), which read `usable`
+> off the row count directly rather than looping on it. Not investigated
+> further or fixed here — this document records what was verified, not a
+> patch.
 
 Snowflake's own "SHOW caps at 10k rows regardless of `LIMIT`"
 (`queries.MAX_PAGE_SIZE`'s docstring) does not hold universally either: a
@@ -1350,35 +1361,60 @@ and resolved without error:
 `information_schema_tag_references` and `show_grants` are all confirmed —
 none of these column sets is a documentation guess any more.
 
-What that pass could **not** confirm is *values*, for scopes where the
-account simply had no matching data:
+What that first pass could **not** confirm was *values*, for scopes where
+the sandbox account simply had no matching data. A second round on
+2026-09-09, partly against a real production account (queries handed to the
+user to run and relay counts back from, since neither of us wanted to put
+this session's hands directly on production) and partly by deliberately
+creating test data on the sandbox (a materialized view, and a real task —
+both left in place), closed all of it except the `ACCOUNT_USAGE` lag figure,
+which turned out not to be worth chasing — see the last bullet below:
 
 - `information_schema_tables`/`information_schema_views`: `table_stats`
   (`TABLE_TYPE = 'BASE TABLE'`) returned real `LAST_DDL`/`LAST_ALTERED`
-  timestamps for 27 real tables — genuinely verified, not just
-  column-resolved. `view_stats` is the identical statement bound to
-  `'VIEW'` instead; the probed databases held no user-created view (every
-  `SHOW VIEWS` hit was a system `INFORMATION_SCHEMA` view), so that bind
-  path ran the same proven SQL but produced no row to inspect.
-- `show_materialized_views`: column names confirmed, no materialized view
-  existed to read a row back from.
+  timestamps for 27 real tables on the sandbox — genuinely verified, not
+  just column-resolved. `view_stats` is the identical statement bound to
+  `'VIEW'` instead; the sandbox held no user-created view, but production
+  did — 37 real views, all 37 with non-null `LAST_DDL` and `LAST_ALTERED`.
+  **Fully confirmed.**
+- `show_materialized_views`: column names were already confirmed; values
+  were not, since neither probed account had a materialized view. Closed by
+  creating one on the sandbox (500 inserted rows into `RENETEST1.
+  ABIDING_NOUGAT.ADAMANT_RELISH`, then `CREATE MATERIALIZED VIEW ... AS
+  SELECT ... FROM` that table): the resulting `SHOW MATERIALIZED VIEWS` row
+  carries `rows = 500` and `bytes = 11264` — both real, non-null, and `rows`
+  matches the insert exactly — plus a correctly resolved
+  `source_database_name`/`source_schema_name`/`source_table_name` and
+  populated `refreshed_on`/`compacted_on`. **Fully confirmed.** Left in
+  place on the sandbox at the user's request, not cleaned up.
 - `account_usage_copy_history`(`_detail`)/`information_schema_copy_history`:
-  every pipe in the account (1898 of them, across three databases — see
-  below) has never had a file loaded through it, so these all ran clean and
-  returned zero rows. The `QUALIFY ROW_NUMBER()` reduction on `PIPE_ACTIVITY`
-  is still confirmed only by the hang it fixed originally (tested with the
-  *unreduced* query on a different account); this pass reran the *reduced*
-  query against a 614-pipe schema-scoped call with no error and no
-  meaningful latency (a schema of 20-27 pipes is far short of the ~400 the
-  original incident needed), so the reduction's SQL is proven valid but its
-  row-collapsing behaviour is still unexercised.
-- `account_usage_task_history`(`_detail`)/`information_schema_task_history`:
-  the account has exactly one task (`SNOWFLAKE.MODELS.
-  CORTEX_BASE_MODELS_REFRESH_TASK`, Snowflake-managed, not in a user
-  database and not queryable by this role), so both ran clean against a
-  nonexistent task name and returned zero rows, same caveat as pipes above.
-- `information_schema_tag_references`: ran clean, zero rows — no tag is
-  applied anywhere in the account.
+  **confirmed**, including the `QUALIFY` reduction's actual row-collapsing
+  behaviour, not just its SQL validity. A raw, unreduced
+  `ACCOUNT_USAGE.COPY_HISTORY` count against one production schema's pipes
+  (13-day window) came back at **433 892 rows** — real evidence the scale
+  this reduction guards against is live and current on that account, not
+  just a historical incident. The same window run through the actual
+  `PIPE_ACTIVITY` reduction came back at **190 rows, 190 distinct pipe
+  names** — a 1:1 match, and a ~2284x collapse from the raw count. The
+  `QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY
+  LAST_LOAD_TIME DESC) = 1` reduction is no longer confirmed only by the
+  hang it originally fixed on a different, unreduced query — it now has a
+  direct, real-data confirmation of its own.
+- `account_usage_task_history`(`_detail`): **confirmed** on production — 7
+  real task runs, all from 1 distinct task, over a 7-day window.
+  `information_schema_task_history` is **confirmed** too, by creating a real
+  task on the sandbox (`RENETEST1.ABIDING_NOUGAT.CLAUDE_VERIFY_TASK`, `AS
+  SELECT 1`, three manually triggered runs): `SCHEDULED_TIME`,
+  `COMPLETED_TIME`, `STATE` and, on the runs that failed (the sandbox's
+  `SYSADMIN` role turned out to lack `USAGE` on warehouse `WH` — an account
+  setup gap, not a snowcone one), `ERROR_CODE`/`ERROR_MESSAGE` all came back
+  real and non-null. `QUERY_ID`/`QUERY_START_TIME` stayed `NULL` on every
+  run, but that's consistent with the task failing before a query was ever
+  submitted, not a sign the columns don't populate on success — not chased
+  further, since a `USAGE` grant on that warehouse would need `ACCOUNTADMIN`
+  to fix, which is out of scope for a verification pass.
+- `information_schema_tag_references`: **confirmed** on production — 3
+  real tag references, covering 3 distinct tag names.
 - `granted_by_role_type` on `SHOW GRANTS` is **no longer speculative**: it
   exists and reads `'ROLE'` on real `SHOW GRANTS ON SCHEMA`/`ON DATABASE`
   output.
@@ -1393,15 +1429,24 @@ account simply had no matching data:
   `COPY_HISTORY`/`TAG_REFERENCES`, which were tested the same way and also
   confirmed to need one, along with `table_stats`/`view_stats`.
 - `ACCOUNT_USAGE` lag figures (~2 h for copy history, ~45 min for task
-  history) are still Snowflake's published numbers, not measured here — the
-  account's total absence of load/task activity means there is nothing to
-  time the lag of.
+  history) are Snowflake's published numbers and **not something this
+  project tracks further by design decision**: the lag is neither
+  guaranteed nor reproducible, so no measurement taken at any one moment
+  would be more trustworthy than Snowflake's own "up to ~X" figure, and
+  chasing a tighter number would just be a snapshot masquerading as a
+  guarantee. (A production comparison during this verification pass did
+  show `INFORMATION_SCHEMA.COPY_HISTORY` seeing one load 2 minutes 28
+  seconds before `ACCOUNT_USAGE.COPY_HISTORY` did — consistent with the
+  published figures, not a tighter bound on them, and not chased further
+  for the reason above.)
 
 Paging carries a related but different caveat now — see "Verified and
 unverified paging" for what was confirmed (and what was found actively
-broken: `LIMIT`/`FROM` is a no-op for `SHOW PIPES` and `SHOW COLUMNS`).
-`SHOW COLUMNS IN DATABASE`/`IN SCHEMA` were exercised at real scale (614
-tables, 11 511 columns) — see "Column cache priming".
+broken, on two independent accounts: `LIMIT`/`FROM` is a no-op for `SHOW
+PIPES`, `SHOW COLUMNS` and `SHOW STAGES`). `SHOW COLUMNS IN DATABASE`/`IN
+SCHEMA` were exercised at real scale (614 tables, 11 511 columns on the
+sandbox; 6655 columns in one schema alone on production) — see "Column
+cache priming".
 
 ### Accepted design gaps
 
