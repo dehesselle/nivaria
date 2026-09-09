@@ -447,8 +447,27 @@ class ConnectionPool:
         self.params = replace(self.params, warehouse=warehouse)
 
     def close(self) -> None:
+        """Close every idle connection; leave one a worker still has
+        checked out alone.
+
+        Closing a connection out from under an in-flight `cursor.execute()`
+        races the driver's own session teardown (they share one underlying
+        HTTP session) and was observed to hang the whole app on quit --
+        and, via the identical `stop(); close()` sequence, on a fast
+        reconnect too -- while a background fetch was still running a
+        query. Workers cannot be interrupted (see DESIGN.md), so a
+        still-checked-out connection is simply abandoned here rather than
+        raced: the process exiting (or, on reconnect, garbage collection)
+        reclaims it for free, and nothing here waits on a straggling query.
+        """
         self._closed = True
-        for connection in self._all:
+        idle: list[Any] = []
+        while True:
+            try:
+                idle.append(self._free.get_nowait())
+            except queue.Empty:
+                break
+        for connection in idle:
             with contextlib.suppress(Exception):
                 connection.close()
         self._all.clear()

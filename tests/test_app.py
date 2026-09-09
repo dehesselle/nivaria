@@ -6,6 +6,7 @@ from textual.widgets import Footer, Input
 
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
+from snowcone.models import databases_scope
 from snowcone.ui.app import SnowconeApp
 from snowcone.ui.screens.connect import ConnectScreen
 from snowcone.ui.screens.main import MainScreen
@@ -77,6 +78,19 @@ async def test_quitting_the_connect_screen_exits() -> None:
         await pilot.press("escape")
         await settle(pilot)
     assert app.pool is None
+
+
+def test_a_cache_update_after_shutdown_does_not_crash_the_app() -> None:
+    """Regression: a fetch worker still mid-query when quit is pressed can
+    finish (successfully or not) after Textual's own shutdown has already
+    popped every screen -- that happens before this app's on_unmount even
+    runs. Routing the update by touching self.screen unconditionally then
+    raised ScreenStackError from a background thread's call_from_thread,
+    surfacing as an unhandled backtrace on the way out instead of a quiet
+    exit."""
+    app = SnowconeApp(connector=FakeConnector())
+    assert app.screen_stack == []
+    app._post_cache_updated(databases_scope(), True)  # must not raise
 
 
 async def test_the_cache_is_not_opened_until_an_identity_is_known() -> None:

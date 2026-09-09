@@ -161,6 +161,13 @@ class SnowconeApp(App[None]):
         self.call_from_thread(self._post_cache_updated, scope, complete)
 
     def _post_cache_updated(self, scope, complete: bool) -> None:
+        # A worker started before quit can still be mid-query when shutdown
+        # pops every screen (Textual's own _close_all runs before this app's
+        # on_unmount), so `self.screen` is not safe to touch unconditionally
+        # here -- it raises ScreenStackError once nothing is left on the
+        # stack, crashing the app on the way out instead of exiting quietly.
+        if not self.screen_stack:
+            return
         screen = self.screen
         if isinstance(screen, MainScreen):
             screen.post_message(CacheUpdated(scope, complete))

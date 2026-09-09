@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from typing import Any
 
 import pytest
 
@@ -339,6 +340,39 @@ def test_acquiring_from_a_closed_pool_is_an_error() -> None:
     pool.close()
     with pytest.raises(ConnectionError_), pool.acquire():
         pass
+
+
+def test_close_leaves_a_still_checked_out_connection_alone() -> None:
+    """Regression: closing a connection out from under a worker thread's
+    in-flight cursor.execute() races the driver's own session teardown on
+    the same underlying HTTP session and was observed to hang the whole app
+    on quit (and on a fast reconnect, which follows the identical
+    stop-then-close sequence). Workers cannot be interrupted, so a
+    still-checked-out connection is abandoned instead of raced; only idle
+    ones are actually closed."""
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    held_ready = threading.Event()
+    release = threading.Event()
+    held: list[Any] = []
+
+    def hold() -> None:
+        with pool.acquire() as connection:
+            held.append(connection)
+            held_ready.set()
+            release.wait(timeout=2)
+
+    thread = threading.Thread(target=hold, daemon=True)
+    thread.start()
+    assert held_ready.wait(timeout=2)
+    idle_connection = next(c for c in pool._all if c is not held[0])
+
+    pool.close()
+
+    assert not held[0].is_closed()
+    assert idle_connection.is_closed()
+    release.set()
+    thread.join(timeout=2)
 
 
 # --------------------------------------------------------- session-wide changes

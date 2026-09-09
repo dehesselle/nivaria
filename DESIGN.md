@@ -568,6 +568,17 @@ prompt**. The pool exists to make that a one-time event.
   an interactive/visible caller, retried once against the fresh connection;
   dropped and shrunk, with no retry, for a background one.
 
+`ConnectionPool.close()` -- called on quit and at the start of a reconnect,
+right after `FetchService.stop()` -- only closes connections that are
+currently idle. One a worker thread still has checked out is left alone: a
+worker's `cursor.execute()` call cannot be interrupted (see "The fetch
+scheduler"), so closing that connection from another thread races the
+driver's own session teardown against whatever request is still in flight on
+it, and was observed to hang the whole app on quit until the query finally
+gave up. The straggling connection is simply abandoned instead -- the process
+exiting (or, on reconnect, garbage collection once nothing references it any
+more) reclaims it for free, and nothing here waits on it.
+
 Three authenticators are supported and chosen in the connect dialog: OAuth
 (`oauth_authorization_code`, the default), browser SSO (`externalbrowser`),
 and password + MFA (`username_password_mfa`). The password field is disabled
