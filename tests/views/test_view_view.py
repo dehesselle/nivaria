@@ -36,8 +36,8 @@ async def test_the_view_columns_tab_lists_cached_columns(repo) -> None:
         await pilot.pause()
         table = pane.query_one("#detail-columns", DataTable)
         assert table.row_count == 2
-        assert table.get_cell_at((0, 0)).plain == "ID"
-        assert table.get_cell_at((1, 1)).plain == "FLOAT"
+        assert table.get_cell_at((0, 1)).plain == "ID"
+        assert table.get_cell_at((1, 2)).plain == "FLOAT"
 
 
 async def test_the_view_definition_tab_shows_the_views_sql_text(repo) -> None:
