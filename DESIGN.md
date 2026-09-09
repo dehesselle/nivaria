@@ -44,7 +44,7 @@ Use these names when discussing changes.
 │ │                 ││                                                     │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ F1 Log  ^d Databases  / Search  F5 Refresh  F10 Quit  Role  Warehouse  (2/5)│
+│ F1 Log  / Search  F5 Refresh                       Role  Warehouse  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
@@ -599,11 +599,20 @@ prompt**. The pool exists to make that a one-time event.
   reachable on demand, handy under test and for a quick look that would
   rather not field extra MFA prompts.
 - Confirmed growth, like the first connection, is opened **eagerly**, with
-  progress reported as `Connecting (2/5) ...` / `(approve browser or MFA)` —
-  the same two lines whether it is the lone up-front connection or growth
-  confirmed afterwards, and always counted against the pool's eventual target
-  size rather than however many connections that particular step happens to
-  be opening.
+  progress reported as `Connecting (2/5) ...` / `(wait for browser / MFA: nn
+  seconds)` — the same two lines whether it is the lone up-front connection
+  or growth confirmed afterwards, and always counted against the pool's
+  eventual target size rather than however many connections that particular
+  step happens to be opening. The countdown starts at
+  `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`, 20s), the same value passed to
+  the driver as `login_timeout`/`external_browser_timeout` — so a denied or
+  abandoned OAuth or password+MFA approval resolves in a short, visible wait
+  instead of the driver's undocumented multi-minute default. There is
+  deliberately no Cancel button: `snowflake.connector.connect()` cannot be
+  interrupted from the outside once called, so a Cancel button could only
+  hide the dialog while the attempt kept running unseen underneath — see
+  "Accepted design gaps" for the one authenticator this timeout does not
+  actually bound.
 - Every connection — the first and any confirmed growth — is opened
   **sequentially**. Opening them in parallel would fan out N browser windows or
   push notifications simultaneously — exactly the disruption this design
@@ -1334,6 +1343,18 @@ never observed truncating at scale either.
 - There is no automatic trigger for column cache priming — no good signal was
   found for "the user wants this now" short of asking, so it is a manual menu
   action.
+- `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`) bounds a denied or abandoned
+  approval for OAuth and password+MFA, but not for browser SSO
+  (`externalbrowser`): the installed driver's `AuthByWebBrowser` waits on a
+  raw `select.select()` with no timeout argument anywhere in that code path,
+  confirmed by reading it rather than assumed — no kwarg reaches it, and
+  `socket.setdefaulttimeout()` would not either, since `select.select()`
+  ignores a socket's `.settimeout()`. An abandoned browser tab under that
+  authenticator can still leave the "Connecting ..." dialog counting down to
+  0 and sitting there indefinitely. A client-side watchdog was considered and
+  rejected for now: the driver gives no way to reclaim the blocked thread or
+  its open listening socket, so a watchdog could only abandon the dialog, not
+  the resource underneath it.
 
 ### The cost of adding a scope
 

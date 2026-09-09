@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from snowcone.gateway.pool import (
+    CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
     OAUTH,
     USERNAME_PASSWORD_MFA,
@@ -78,6 +79,14 @@ def test_sessions_are_kept_alive_and_tokens_cached() -> None:
     assert kwargs["client_session_keep_alive"] is True
     assert kwargs["client_store_temporary_credential"] is True
     assert kwargs["client_request_mfa_token"] is True
+
+
+def test_a_denied_or_abandoned_approval_is_bounded_by_the_connect_timeout() -> None:
+    """Otherwise a denied browser/MFA prompt leaves the connecting dialog
+    stuck until the driver's own undocumented default timeout gives up."""
+    kwargs = ConnectParams(account="a", user="u").to_connect_kwargs()
+    assert kwargs["login_timeout"] == CONNECT_TIMEOUT_SECONDS
+    assert kwargs["external_browser_timeout"] == CONNECT_TIMEOUT_SECONDS
 
 
 def test_empty_role_and_warehouse_are_omitted_rather_than_sent_blank() -> None:

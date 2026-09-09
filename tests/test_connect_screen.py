@@ -9,7 +9,12 @@ from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 
 import snowcone.ui.app as app_module
-from snowcone.gateway.pool import EXTERNAL_BROWSER, OAUTH, USERNAME_PASSWORD_MFA
+from snowcone.gateway.pool import (
+    CONNECT_TIMEOUT_SECONDS,
+    EXTERNAL_BROWSER,
+    OAUTH,
+    USERNAME_PASSWORD_MFA,
+)
 from snowcone.profiles import Profile, ProfileStore
 from snowcone.ui.screens.connect import ConnectScreen, RecentList
 from snowcone.ui.screens.connecting import ConnectingScreen
@@ -197,7 +202,50 @@ async def test_the_connecting_dialog_shows_the_approval_hint() -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         hint = str(app.screen.query_one("#connecting-hint", Static).render())
-        assert "approve browser or MFA" in hint
+        assert "wait for browser / MFA" in hint
+        assert str(CONNECT_TIMEOUT_SECONDS) in hint
+
+
+async def test_the_countdown_ticks_down_and_never_goes_negative() -> None:
+    """`_tick()` is called directly rather than waiting on the real 1-second
+    interval, the same way other tests in this file avoid relying on real
+    timing (see `settle()`)."""
+
+    class DialogHarness(App[None]):
+        def on_mount(self) -> None:
+            self.push_screen(ConnectingScreen(1, 1))
+
+    app = DialogHarness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ConnectingScreen)
+        screen._tick()
+        assert screen._remaining == CONNECT_TIMEOUT_SECONDS - 1
+        for _ in range(CONNECT_TIMEOUT_SECONDS + 5):
+            screen._tick()
+        assert screen._remaining == 0
+
+
+async def test_update_progress_resets_the_countdown_for_the_next_connection() -> None:
+    """Each connection in a connect_all/grow sequence gets its own fresh
+    approval window -- a later attempt must not inherit an already-drained
+    countdown from the one before it."""
+
+    class DialogHarness(App[None]):
+        def on_mount(self) -> None:
+            self.push_screen(ConnectingScreen(1, 3))
+
+    app = DialogHarness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ConnectingScreen)
+        screen._tick()
+        screen._tick()
+        assert screen._remaining == CONNECT_TIMEOUT_SECONDS - 2
+        screen.update_progress(2, 3)
+        assert screen._remaining == CONNECT_TIMEOUT_SECONDS
 
 
 async def test_a_successful_connect_opens_only_one_connection_up_front(

@@ -34,6 +34,16 @@ OAUTH = "oauth_authorization_code"
 
 AUTHENTICATORS = (OAUTH, EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA)
 
+#: How long a single connection attempt waits for browser/MFA approval before
+#: giving up. Deliberately short and fixed rather than a Setting -- a tuning
+#: knob for "how long should a denied prompt take to resolve," not a per-user
+#: preference. Bounds OAuth's and password+MFA's approval wait (see
+#: DESIGN.md, "The connection pool"); externalbrowser's local-socket wait is
+#: not governed by either kwarg in the installed driver (verified: no
+#: timeout exists anywhere in that code path) and stays unbounded -- an
+#: accepted gap, also called out there.
+CONNECT_TIMEOUT_SECONDS = 20
+
 
 class ConnectionError_(SnowconeError):
     """Raised when the pool cannot establish its connections."""
@@ -73,6 +83,12 @@ class ConnectParams:
             # the pool usually do not prompt at all.
             "client_store_temporary_credential": True,
             "client_request_mfa_token": True,
+            # Bounds how long a denied or abandoned browser/MFA approval
+            # leaves the "Connecting ..." dialog stuck -- see
+            # CONNECT_TIMEOUT_SECONDS above for which authenticators this
+            # actually governs.
+            "login_timeout": CONNECT_TIMEOUT_SECONDS,
+            "external_browser_timeout": CONNECT_TIMEOUT_SECONDS,
         }
         if self.role:
             kwargs["role"] = self.role
