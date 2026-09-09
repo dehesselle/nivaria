@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from textual import work
 from textual.app import App
 
@@ -12,6 +14,7 @@ from snowcone.profiles import Profile, ProfileStore
 from snowcone.service.fetch import FetchService
 from snowcone.settings import PAGE_SIZE, POOL_SIZE, config
 from snowcone.ui.messages import CacheUpdated
+from snowcone.ui.screens.closing import ClosingScreen
 from snowcone.ui.screens.connect import ConnectScreen
 from snowcone.ui.screens.main import MainScreen
 
@@ -74,9 +77,27 @@ class SnowconeApp(App[None]):
         """Reopen the connect dialog and swap in the resulting pool.
 
         Invoked from the "Connect > Open..." menu item once already browsing.
-        A cancelled dialog leaves the existing connection untouched. The old
-        pool and fetch service are only stopped after the new ones are live,
-        so a failed reconnect never leaves the screen without either.
+        A cancelled dialog leaves the existing connection untouched.
+
+        The old fetch service and pool are stopped *before* anything about
+        the new one becomes visible to `MainScreen` -- the same discipline
+        `MainScreen._switch_role` uses for a role switch, and for the same
+        reason: the old `FetchService` keeps completing jobs and posting
+        `ScopeNeeded` for the old identity for as long as this dialog is
+        open, and a message still in flight when the screen is repointed
+        would otherwise be resolved against the *new* fetch while still
+        naming the *old* identity's scope -- firing SQL for a database that
+        may not even exist in the new account. By the time this runs, `pool`
+        is already known good (`ConnectScreen` only ever returns one once
+        `connect_all`/growth succeeded), so there is no failure case left for
+        stopping the old state first to protect against.
+
+        `FetchService.stop()` joins worker threads that cannot be
+        interrupted mid-query (see DESIGN.md), so it can genuinely block for
+        a couple of seconds. Both it and `ConnectionPool.close()` run off the
+        event-loop thread so the UI can still repaint, behind a small
+        "please wait" dialog that makes the wait visible instead of the app
+        appearing to hang.
         """
         pool = await self.push_screen_wait(
             ConnectScreen(
@@ -88,6 +109,13 @@ class SnowconeApp(App[None]):
         if pool is None:
             return
         old_fetch, old_pool = self.fetch, self.pool
+        closing = ClosingScreen()
+        self.push_screen(closing)
+        if old_fetch is not None:
+            await asyncio.to_thread(old_fetch.stop)
+        if old_pool is not None:
+            await asyncio.to_thread(old_pool.close)
+        closing.dismiss()
         self.pool = pool
         self.switch_repo(pool)
         if isinstance(self.screen, MainScreen):
@@ -101,10 +129,6 @@ class SnowconeApp(App[None]):
             profile = self._matching_profile(pool)
             if profile is not None and profile.databases:
                 self.screen.set_databases(list(profile.databases))
-        if old_fetch is not None:
-            old_fetch.stop()
-        if old_pool is not None:
-            old_pool.close()
 
     def _matching_profile(self, pool: ConnectionPool) -> Profile | None:
         """The stored profile for `pool`'s identity, if any -- used to

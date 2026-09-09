@@ -185,6 +185,13 @@ ConnectingScreen > #dialog {
     color: $text-muted;
 }
 
+/* ---- closing modal ------------------------------------------------------ */
+
+ClosingScreen > #dialog {
+    width: 46;
+    max-width: 100%;
+}
+
 /* ---- status footer ---------------------------------------------------- */
 
 StatusFooter .footer-spacer {
