@@ -13,6 +13,14 @@ _TCW_IN_SDIST = "src/tcw"
 
 class CustomBuildHook(BuildHookInterface):
     def initialize(self, version, build_data):
+        # The "editable" version is what `uv sync` installs for local dev; it
+        # must resolve tcw via the sibling checkout's own editable install
+        # (see [tool.uv.sources] in pyproject.toml), not a vendored snapshot
+        # baked in here. Force-including source only makes sense for a real
+        # distributable wheel/sdist, so skip it for editable builds.
+        if version == "editable":
+            return
+
         sibling_tcw = Path(self.root).parent / "tcw"
         tcw_in_sdist = Path(self.root) / _TCW_IN_SDIST
 
