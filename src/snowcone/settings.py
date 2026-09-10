@@ -58,6 +58,7 @@ POOL_SIZE = Setting(
     ),
     group="Connection",
     default=3,
+    choices=(1, 2, 3, 4, 5),
 )
 
 PAGE_SIZE = Setting(

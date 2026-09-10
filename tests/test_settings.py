@@ -48,6 +48,12 @@ def test_their_defaults_are_the_documented_ones() -> None:
     assert PIPE_HISTORY_SHOW_DAYS.default == 90
 
 
+def test_pool_size_is_limited_to_a_fixed_set_of_choices() -> None:
+    """Rendered as a dropdown in the dialog rather than free text -- see
+    tcw's SettingsScreen._make_value_widget."""
+    assert POOL_SIZE.choices == (1, 2, 3, 4, 5)
+
+
 def test_a_ttl_of_zero_round_trips() -> None:
     """0 is the value that disables the staleness sweep, and it is not the
     default, so it must actually reach the file rather than being pruned."""
