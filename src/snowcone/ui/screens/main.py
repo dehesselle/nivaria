@@ -83,6 +83,7 @@ class MainScreen(Screen):
     # is mounted on, so the key and its footer entry come with the widget.
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+d", "pick_databases", "Databases", show=False),
+        Binding("ctrl+o", "open_connect", "Open", show=False),
         Binding("ctrl+r", "pick_role", "Role", show=False),
         Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
         Binding("slash", "search", "Search"),
@@ -119,7 +120,7 @@ class MainScreen(Screen):
             # "connect-menu", not "connect": a Menu id is a CSS id too,
             # and app.tcss already styles #connect (the connect dialog).
             with Menu("Connect", id="connect-menu"):
-                yield MenuItem("Open...", id="open", mnemonic="o")
+                yield MenuItem("Open...", id="open", mnemonic="o", shortcut="Ctrl+O")
                 yield MenuSeparator()
                 yield MenuItem(
                     "Databases ...", id="database", mnemonic="d", shortcut="Ctrl+D"
@@ -268,6 +269,9 @@ class MainScreen(Screen):
 
     @on(MenuItem.Pressed, "#open")
     def _menu_open_connect(self) -> None:
+        self._open_connect()
+
+    def action_open_connect(self) -> None:
         self._open_connect()
 
     @work

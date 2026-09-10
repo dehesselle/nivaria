@@ -79,7 +79,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "quit_app", "Quit", show=False),
+        Binding("escape", "cancel", "Cancel", show=False),
     ]
 
     def __init__(
@@ -161,7 +161,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
                 yield Static("", id="connect-status")
                 with Horizontal(id="connect-buttons"):
                     yield Button("Connect", variant="primary", id="connect-go")
-                    yield Button("Quit", id="connect-quit")
+                    yield Button("Cancel", id="connect-cancel")
             with Vertical(id="connect-recent"):
                 yield Label("Recent")
                 if self._recent:
@@ -197,7 +197,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         if event.button.id == "connect-go":
             self.submit()
         else:
-            self.action_quit_app()
+            self.action_cancel()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
@@ -213,7 +213,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         else:
             self.submit()
 
-    def action_quit_app(self) -> None:
+    def action_cancel(self) -> None:
         if not self._connecting:
             self.dismiss(None)
 

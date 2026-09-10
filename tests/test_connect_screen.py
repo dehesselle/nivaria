@@ -697,7 +697,7 @@ async def test_both_buttons_stay_on_screen(tmp_path, size) -> None:
         for _ in range(3):
             await pilot.pause()
         screen = pilot.app.screen
-        for button_id in ("#connect-go", "#connect-quit"):
+        for button_id in ("#connect-go", "#connect-cancel"):
             button = screen.query_one(button_id, Button)
             assert button.display
             assert fits(button, screen), f"{button_id} off screen at {size}"
