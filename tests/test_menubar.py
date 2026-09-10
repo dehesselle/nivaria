@@ -134,6 +134,11 @@ async def test_the_bar_lays_out_as_a_title_plus_the_snowcone_version(repo) -> No
         await pilot.pause()
         bar = app.screen.query_one(MenuBar)
         bar.auto_hide = False
+        # Reappearing changes layout (the rest of the screen gives back its
+        # row). One pause only requests the refresh; the compositor doesn't
+        # settle regions until the pump after that, so a single pause here
+        # sometimes still finds title's region at (0, 0) -- flaky.
+        await pilot.pause()
         await pilot.pause()
         title = app.screen.query_one(Menu)
         # "Connect" plus the 2-cell padding either side, on the bar's one row.
