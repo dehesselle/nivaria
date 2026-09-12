@@ -53,9 +53,9 @@ from snowcone.ui.messages import (
     SchemaSelected,
     ScopeNeeded,
 )
-from snowcone.ui.screens.multipicker import MultiPickerScreen
-from snowcone.ui.screens.picker import PickerScreen
-from snowcone.ui.screens.search import SearchScreen
+from snowcone.ui.screens.multipicker import MultiPickerDialog
+from snowcone.ui.screens.picker import PickerDialog
+from snowcone.ui.screens.search import SearchDialog
 from snowcone.ui.views import (  # noqa: F401 -- registers views
     pipe_list_view,
     pipe_view,
@@ -249,7 +249,7 @@ class MainScreen(Screen):
 
     @work
     async def action_search(self) -> None:
-        hit = await self.app.push_screen_wait(SearchScreen(self.repo, self.databases))
+        hit = await self.app.push_screen_wait(SearchDialog(self.repo, self.databases))
         if hit is None:
             return
         if isinstance(hit, SchemaRef):
@@ -414,7 +414,7 @@ class MainScreen(Screen):
             self.notify("Loading databases...", timeout=3)
             return
         chosen = await self.app.push_screen_wait(
-            MultiPickerScreen(
+            MultiPickerDialog(
                 [row.name for row in cached.rows],
                 title="Databases",
                 placeholder="type to filter databases",
@@ -471,7 +471,7 @@ class MainScreen(Screen):
             return
         current = self.pool.params.warehouse
         chosen = await self.app.push_screen_wait(
-            PickerScreen(
+            PickerDialog(
                 [row.name for row in cached.rows],
                 title="Warehouse",
                 placeholder="type to filter warehouses",
@@ -514,7 +514,7 @@ class MainScreen(Screen):
             return
         current = self.pool.params.role
         chosen = await self.app.push_screen_wait(
-            PickerScreen(
+            PickerDialog(
                 [row.name for row in cached.rows],
                 title="Role",
                 placeholder="type to filter roles",

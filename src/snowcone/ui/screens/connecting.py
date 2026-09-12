@@ -1,6 +1,6 @@
 """A small modal shown while a connection attempt is under way.
 
-Stacked over `ConnectScreen` the same way the pool-growth `ConfirmScreen` is,
+Stacked over `ConnectScreen` the same way the pool-growth `ConfirmDialog` is,
 rather than a status line woven into the form -- opening a connection is where
 every MFA prompt happens, and a dedicated dialog makes that state impossible
 to miss (and, unlike a status line, still obviously "waiting" if the terminal
@@ -34,13 +34,13 @@ for it -- so a Cancel button could only hide this dialog while the connection
 attempt kept running unseen underneath. That is worse than the wait it would
 appear to end, so `ConnectScreen` dismisses this dialog itself once the worker
 thread actually reports back, and escape is disabled here rather than merely
-unbound (see `DialogScreen`). The countdown above is what keeps that
+unbound (see `Dialog`). The countdown above is what keeps that
 still-uncancellable wait from being an unbounded, unexplained one instead.
 """
 
 from __future__ import annotations
 
-from tcw.screens import DialogScreen
+from tcw.dialogs import Dialog
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Label, Static
@@ -52,7 +52,7 @@ def _hint(remaining: int) -> str:
     return f"(wait for browser / MFA: {remaining} seconds)"
 
 
-class ConnectingScreen(DialogScreen[None]):
+class ConnectingDialog(Dialog[None]):
     """Shows connection progress. Dismissed by the caller, never by the user."""
 
     def __init__(self, index: int, total: int) -> None:

@@ -22,7 +22,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.ui.screens.search import SearchScreen
+from snowcone.ui.screens.search import SearchDialog
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ class Harness(App[None]):
 
     def on_mount(self) -> None:
         self.push_screen(
-            SearchScreen(self._repo, self._databases), self.selected.append
+            SearchDialog(self._repo, self._databases), self.selected.append
         )
 
 
@@ -361,7 +361,7 @@ async def test_a_schema_hit_shows_its_database_prefix_too(repo) -> None:
 async def test_column_search_is_disabled_for_now(repo) -> None:
     """Cross-database column search is not ready for prime time yet -- the
     call that would load the column corpus is commented out in
-    SearchScreen.on_mount (see DESIGN.md "Known gaps"), so a query that only
+    SearchDialog.on_mount (see DESIGN.md "Known gaps"), so a query that only
     matches via a column now surfaces nothing at all."""
     put(repo, ObjectType.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")

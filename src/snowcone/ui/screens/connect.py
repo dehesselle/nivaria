@@ -28,7 +28,7 @@ import asyncio
 import dataclasses
 from typing import ClassVar
 
-from tcw.screens import ConfirmScreen
+from tcw.dialogs import ConfirmDialog
 from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -47,7 +47,7 @@ from snowcone.gateway.pool import (
     ConnectParams,
 )
 from snowcone.profiles import Profile, ProfileStore
-from snowcone.ui.screens.connecting import ConnectingScreen
+from snowcone.ui.screens.connecting import ConnectingDialog
 
 # OAuth listed first: it is the dialog's default, ahead of the two
 # longer-standing methods.
@@ -75,7 +75,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     A modal, not a plain Screen: opened at startup it looks the same either
     way (nothing is behind it), but reopened from the "Connect > Open..."
     menu item it dims the browser behind it instead of fully replacing it --
-    the same treatment `ConfirmScreen` and `PickerScreen` already get.
+    the same treatment `ConfirmDialog` and `PickerDialog` already get.
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -97,7 +97,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         self._connector = connector
         self._prefill = prefill or (self._recent[0] if self._recent else None)
         self._connecting = False
-        self._connecting_screen: ConnectingScreen | None = None
+        self._connecting_screen: ConnectingDialog | None = None
 
     # -------------------------------------------------------------- compose
 
@@ -333,7 +333,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         # longer means N-1 more browser prompts -- nothing left to ask about.
         if params.authenticator != OAUTH:
             confirmed = await self.app.push_screen_wait(
-                ConfirmScreen(
+                ConfirmDialog(
                     f"Do you want to expand the connection pool to {self._pool_size}?",
                     title="Connection pool",
                 )
@@ -367,7 +367,7 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         self.app.call_from_thread(self._update_connecting, done)
 
     def _show_connecting(self, index: int) -> None:
-        self._connecting_screen = ConnectingScreen(index, self._pool_size)
+        self._connecting_screen = ConnectingDialog(index, self._pool_size)
         self.app.push_screen(self._connecting_screen)
 
     def _update_connecting(self, index: int) -> None:

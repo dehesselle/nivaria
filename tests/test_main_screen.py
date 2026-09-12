@@ -24,8 +24,8 @@ from snowcone.models import (
 from snowcone.profiles import ProfileStore
 from snowcone.ui.messages import ScopeNeeded
 from snowcone.ui.screens.main import CacheUpdated, MainScreen
-from snowcone.ui.screens.multipicker import MultiPickerScreen
-from snowcone.ui.screens.picker import PickerScreen
+from snowcone.ui.screens.multipicker import MultiPickerDialog
+from snowcone.ui.screens.picker import PickerDialog
 from snowcone.ui.views.schema_view import DatabaseView, SchemaView
 from snowcone.ui.widgets.object_tree import ObjectTree
 from tests.fakes import make_pool
@@ -313,7 +313,7 @@ async def test_ctrl_d_opens_the_multipicker(repo) -> None:
         await pilot.pause()
         await pilot.press("ctrl+d")
         await settle(pilot)
-        assert isinstance(app.screen, MultiPickerScreen)
+        assert isinstance(app.screen, MultiPickerDialog)
 
 
 async def test_picking_from_the_dialog_selects_the_database(repo) -> None:
@@ -445,7 +445,7 @@ async def test_the_picker_filters_as_you_type(repo) -> None:
 
         def on_mount(self) -> None:
             self.push_screen(
-                PickerScreen(["ORDERS", "CUSTOMERS", "ORDER_ITEMS"]),
+                PickerDialog(["ORDERS", "CUSTOMERS", "ORDER_ITEMS"]),
                 callback=lambda value: setattr(self, "chosen", value),
             )
 
@@ -470,7 +470,7 @@ async def test_a_candidate_with_a_hint_shows_it_dimmed_next_to_the_name(repo) ->
 
         def on_mount(self) -> None:
             self.push_screen(
-                PickerScreen(
+                PickerDialog(
                     ["COMPUTE_WH", "ETL_WH"],
                     hints={"COMPUTE_WH": ["X-Small"]},
                 )
@@ -495,7 +495,7 @@ async def test_multiple_hints_on_one_candidate_are_joined_by_a_middle_dot(repo) 
 
         def on_mount(self) -> None:
             self.push_screen(
-                PickerScreen(
+                PickerDialog(
                     ["COMPUTE_WH"],
                     hints={"COMPUTE_WH": ["X-Small", "default"]},
                 )
@@ -521,7 +521,7 @@ async def test_a_hinted_candidate_that_is_also_current_shows_both(repo) -> None:
 
         def on_mount(self) -> None:
             self.push_screen(
-                PickerScreen(
+                PickerDialog(
                     ["COMPUTE_WH", "ETL_WH"],
                     current="COMPUTE_WH",
                     hints={"COMPUTE_WH": ["X-Small"]},
@@ -543,7 +543,7 @@ async def test_escaping_the_picker_chooses_nothing(repo) -> None:
 
         def on_mount(self) -> None:
             self.push_screen(
-                PickerScreen(["A", "B"]),
+                PickerDialog(["A", "B"]),
                 callback=lambda value: setattr(self, "chosen", value),
             )
 
@@ -689,7 +689,7 @@ async def test_the_sweep_covers_the_detail_pane_too(repo) -> None:
 
 
 async def test_slash_opens_the_search_modal(repo) -> None:
-    from snowcone.ui.screens.search import SearchScreen
+    from snowcone.ui.screens.search import SearchDialog
 
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
@@ -698,7 +698,7 @@ async def test_slash_opens_the_search_modal(repo) -> None:
         await pilot.pause()
         await pilot.press("slash")
         await settle(pilot)
-        assert isinstance(app.screen, SearchScreen)
+        assert isinstance(app.screen, SearchDialog)
         assert app.screen.query_one("#search-query", Input).has_focus
 
 

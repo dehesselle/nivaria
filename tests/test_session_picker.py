@@ -17,7 +17,7 @@ from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import databases_scope, roles_scope, warehouses_scope
 from snowcone.ui.screens.main import MainScreen
-from snowcone.ui.screens.picker import PickerScreen
+from snowcone.ui.screens.picker import PickerDialog
 from snowcone.ui.widgets.status_bar import StatusFooter
 from tests.fakes import make_pool
 from tests.test_main_screen import RecordingFetch, load, settle
@@ -108,7 +108,7 @@ async def test_the_warehouse_item_opens_a_picker_over_cached_warehouses(repo) ->
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         await open_via_menu(pilot, "w")
-        assert isinstance(app.screen, PickerScreen)
+        assert isinstance(app.screen, PickerDialog)
 
 
 async def test_the_warehouse_picker_shows_size_as_a_hint(repo) -> None:
@@ -177,7 +177,7 @@ async def test_ctrl_w_opens_the_warehouse_picker(repo) -> None:
         await pilot.pause()
         await pilot.press("ctrl+w")
         await settle(pilot)
-        assert isinstance(app.screen, PickerScreen)
+        assert isinstance(app.screen, PickerDialog)
 
 
 async def test_ctrl_r_opens_the_role_picker(repo) -> None:
@@ -190,7 +190,7 @@ async def test_ctrl_r_opens_the_role_picker(repo) -> None:
         await pilot.pause()
         await pilot.press("ctrl+r")
         await settle(pilot)
-        assert isinstance(app.screen, PickerScreen)
+        assert isinstance(app.screen, PickerDialog)
 
 
 # ------------------------------------------------------------------ switching

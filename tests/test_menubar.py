@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from tcw.screens import SettingsScreen
+from tcw.dialogs import SettingsDialog
 from tcw.widgets import Menu, MenuBar, MenuItem
 from textual.app import App
 from textual.widgets import OptionList, Static
@@ -168,7 +168,7 @@ async def test_settings_opens_the_settings_dialog(repo) -> None:
         await open_menu(pilot)
         await pilot.press("s")
         await settle(pilot)
-        assert isinstance(app.screen, SettingsScreen)
+        assert isinstance(app.screen, SettingsDialog)
 
 
 async def test_prewarm_without_a_database_says_so_instead_of_priming(repo) -> None:

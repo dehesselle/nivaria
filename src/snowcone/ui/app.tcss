@@ -97,8 +97,8 @@ ConnectScreen {
 
 /* ---- picker modal ----------------------------------------------------- */
 
-PickerScreen > #dialog,
-MultiPickerScreen > #dialog {
+PickerDialog > #dialog,
+MultiPickerDialog > #dialog {
     width: 70;
     max-height: 80%;
 }
@@ -112,24 +112,24 @@ MultiPickerScreen > #dialog {
     max-height: 20;
 }
 
-/* MultiPickerScreen only: PickerScreen has no button row. */
-MultiPickerScreen #buttons {
+/* MultiPickerDialog only: PickerDialog has no button row. */
+MultiPickerDialog #buttons {
     margin-top: 1;
 }
 
 /* Textual's Button defaults to min-width: 16 even when compact, which is
    more than "All"/"None"/"Ok"/"Cancel" ever need -- four of them plus
    margins came within a few cells of the dialog's own width, leaving no
-   visible gap for align-horizontal: right (inherited from DialogScreen) to
+   visible gap for align-horizontal: right (inherited from Dialog) to
    show. Trimmed by 4 to 12, still comfortably wider than the longest label
    ("Cancel") needs. */
-MultiPickerScreen #buttons Button {
+MultiPickerDialog #buttons Button {
     min-width: 12;
 }
 
 /* ---- connecting modal --------------------------------------------------- */
 
-ConnectingScreen > #dialog {
+ConnectingDialog > #dialog {
     width: 46;
     max-width: 100%;
 }
@@ -142,7 +142,7 @@ ConnectingScreen > #dialog {
 
 /* ---- closing modal ------------------------------------------------------ */
 
-ClosingScreen > #dialog {
+ClosingDialog > #dialog {
     width: 46;
     max-width: 100%;
 }
@@ -243,12 +243,12 @@ StatusFooter #footer-pool {
 
 /* ---- search modal: 90% of the screen, room for a lot of matches -------- */
 
-SearchScreen > #dialog {
+SearchDialog > #dialog {
     width: 90%;
     height: 90%;
 }
 
-SearchScreen #search-query {
+SearchDialog #search-query {
     /* Input's default border needs three rows to show anything inside it;
        squeezing that to one row without dropping the border first left the
        text and cursor with nowhere to actually paint. */
@@ -259,6 +259,6 @@ SearchScreen #search-query {
     margin-bottom: 1;
 }
 
-SearchScreen #search-results {
+SearchDialog #search-results {
     height: 1fr;
 }

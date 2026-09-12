@@ -739,7 +739,7 @@ class Repository:
         TABLE/VIEW ever have columns, but the join excludes other types
         regardless of whether that ever actually matters.
 
-        Currently unused -- SearchScreen.on_mount's call into this is
+        Currently unused -- SearchDialog.on_mount's call into this is
         commented out, cross-database column search not being ready for
         prime time yet (see DESIGN.md "Known gaps"). Kept multi-database-
         ready anyway, so re-enabling it later is restoring one call, not

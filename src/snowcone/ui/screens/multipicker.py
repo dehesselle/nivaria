@@ -1,7 +1,7 @@
 """A find-as-you-type picker over a fixed list of candidates, for selecting
 any number of them rather than exactly one -- used for the database chooser.
 
-Deliberately not sharing code with `PickerScreen` beyond the trivial accent
+Deliberately not sharing code with `PickerDialog` beyond the trivial accent
 lookup: the two interaction models diverge everywhere that matters (select-
 one-and-dismiss vs. select-any-number-and-confirm-separately), and there
 just isn't enough literally-shared logic to justify a base class for it.
@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from rich.text import Text
-from tcw.screens import DialogScreen
+from tcw.dialogs import Dialog
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -44,8 +44,8 @@ _UNCHECKED = "☐ "
 class _MultiPickerResults(OptionList):
     """The results list. Its own activation (Enter, or a click -- OptionList
     routes both through `action_select`) toggles a row's checkbox instead of
-    picking it; confirming the whole dialog is `MultiPickerScreen.action_choose`,
-    reached via the Ok button or `MultiPickerScreen._on_key` intercepting
+    picking it; confirming the whole dialog is `MultiPickerDialog.action_choose`,
+    reached via the Ok button or `MultiPickerDialog._on_key` intercepting
     Enter before this widget's own binding ever sees it (see there for why a
     second `enter` binding here would not work)."""
 
@@ -55,11 +55,11 @@ class _MultiPickerResults(OptionList):
 
     def action_select(self) -> None:
         screen = self.screen
-        if isinstance(screen, MultiPickerScreen) and self.highlighted is not None:
+        if isinstance(screen, MultiPickerDialog) and self.highlighted is not None:
             screen.toggle(self.highlighted)
 
 
-class MultiPickerScreen(DialogScreen[list[str]]):
+class MultiPickerDialog(Dialog[list[str]]):
     """Pick any number of strings from `candidates`, or dismiss with None."""
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -181,7 +181,7 @@ class MultiPickerScreen(DialogScreen[list[str]]):
 
     @property
     def _match_style(self) -> str:
-        # Duplicated from PickerScreen._match_style rather than shared: it's
+        # Duplicated from PickerDialog._match_style rather than shared: it's
         # an 8-line theme-colour lookup, not domain logic, and not worth a
         # base class when everything else here diverges (see module docstring).
         accent = self.app.theme_variables.get("accent")

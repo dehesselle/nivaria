@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
 from rich.text import Text
-from tcw.screens import DialogScreen
+from tcw.dialogs import Dialog
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -23,15 +23,15 @@ from snowcone.fuzzy import highlight, rank
 #: More than a screenful is wasted ranking; the query narrows it anyway.
 MAX_RESULTS = 200
 
-#: Separates multiple hints on the same candidate. Same glyph SearchScreen
+#: Separates multiple hints on the same candidate. Same glyph SearchDialog
 #: uses between an object's type and a matched column name, but spaced evenly
-#: on both sides here: SearchScreen's "  · " is a connector appended after an
+#: on both sides here: SearchDialog's "  · " is a connector appended after an
 #: already-spaced "  {type}" segment, not a `str.join` separator sitting
 #: between two bare strings with nothing else contributing spacing.
 _HINT_SEPARATOR = " · "
 
 
-class PickerScreen(DialogScreen[str]):
+class PickerDialog(Dialog[str]):
     """Pick one string from `candidates`, or dismiss with None."""
 
     BINDINGS: ClassVar[list[Binding]] = [

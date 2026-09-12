@@ -50,7 +50,7 @@ def test_their_defaults_are_the_documented_ones() -> None:
 
 def test_pool_size_is_limited_to_a_fixed_set_of_choices() -> None:
     """Rendered as a dropdown in the dialog rather than free text -- see
-    tcw's SettingsScreen._make_value_widget."""
+    tcw's SettingsDialog._make_value_widget."""
     assert POOL_SIZE.choices == (1, 2, 3, 4, 5)
 
 

@@ -14,7 +14,7 @@ from snowcone.profiles import Profile, ProfileStore
 from snowcone.service.fetch import FetchService
 from snowcone.settings import PAGE_SIZE, POOL_SIZE, config
 from snowcone.ui.messages import CacheUpdated
-from snowcone.ui.screens.closing import ClosingScreen
+from snowcone.ui.screens.closing import ClosingDialog
 from snowcone.ui.screens.connect import ConnectScreen
 from snowcone.ui.screens.main import MainScreen
 
@@ -109,7 +109,7 @@ class SnowconeApp(App[None]):
         if pool is None:
             return
         old_fetch, old_pool = self.fetch, self.pool
-        closing = ClosingScreen()
+        closing = ClosingDialog()
         self.push_screen(closing)
         if old_fetch is not None:
             await asyncio.to_thread(old_fetch.stop)

@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from tcw.screens import ConfirmScreen
+from tcw.dialogs import ConfirmDialog
 from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 
@@ -17,7 +17,7 @@ from snowcone.gateway.pool import (
 )
 from snowcone.profiles import Profile, ProfileStore
 from snowcone.ui.screens.connect import ConnectScreen, RecentList
-from snowcone.ui.screens.connecting import ConnectingScreen
+from snowcone.ui.screens.connecting import ConnectingDialog
 from tests.fakes import FakeConnector
 
 
@@ -171,22 +171,22 @@ async def test_submitting_shows_a_small_connecting_dialog(tmp_path) -> None:
         pilot.app.screen.query_one("#account", Input).value = "ACME"
         pilot.app.screen.query_one("#user", Input).value = "me"
         pilot.app.screen.submit()
-        assert isinstance(pilot.app.screen, ConnectingScreen)
+        assert isinstance(pilot.app.screen, ConnectingDialog)
         await settle(pilot)
 
 
 def test_the_connecting_dialog_blocks_the_cancel_action() -> None:
     """There is nothing a cancel could actually stop -- the blocking connect
     call cannot be interrupted -- so escape must not dismiss it."""
-    assert ConnectingScreen(1, 1).check_action("cancel", ()) is False
+    assert ConnectingDialog(1, 1).check_action("cancel", ()) is False
 
 
 def test_the_connecting_message_counts_against_the_pool_target() -> None:
     """The first, up-front connection and any confirmed growth share the same
     "(i/N)" wording, counted against the pool's eventual target -- not
     whatever `connect_all`/`grow` call happens to be in flight."""
-    assert ConnectingScreen.message(1, 3) == "Connecting (1/3) ..."
-    assert ConnectingScreen.message(2, 3) == "Connecting (2/3) ..."
+    assert ConnectingDialog.message(1, 3) == "Connecting (1/3) ..."
+    assert ConnectingDialog.message(2, 3) == "Connecting (2/3) ..."
 
 
 async def test_the_connecting_dialog_shows_the_approval_hint() -> None:
@@ -196,7 +196,7 @@ async def test_the_connecting_dialog_shows_the_approval_hint() -> None:
 
     class DialogHarness(App[None]):
         def on_mount(self) -> None:
-            self.push_screen(ConnectingScreen(1, 3))
+            self.push_screen(ConnectingDialog(1, 3))
 
     app = DialogHarness()
     async with app.run_test() as pilot:
@@ -213,13 +213,13 @@ async def test_the_countdown_ticks_down_and_never_goes_negative() -> None:
 
     class DialogHarness(App[None]):
         def on_mount(self) -> None:
-            self.push_screen(ConnectingScreen(1, 1))
+            self.push_screen(ConnectingDialog(1, 1))
 
     app = DialogHarness()
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
-        assert isinstance(screen, ConnectingScreen)
+        assert isinstance(screen, ConnectingDialog)
         screen._tick()
         assert screen._remaining == CONNECT_TIMEOUT_SECONDS - 1
         for _ in range(CONNECT_TIMEOUT_SECONDS + 5):
@@ -234,13 +234,13 @@ async def test_update_progress_resets_the_countdown_for_the_next_connection() ->
 
     class DialogHarness(App[None]):
         def on_mount(self) -> None:
-            self.push_screen(ConnectingScreen(1, 3))
+            self.push_screen(ConnectingDialog(1, 3))
 
     app = DialogHarness()
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
-        assert isinstance(screen, ConnectingScreen)
+        assert isinstance(screen, ConnectingDialog)
         screen._tick()
         screen._tick()
         assert screen._remaining == CONNECT_TIMEOUT_SECONDS - 2
@@ -263,7 +263,7 @@ async def test_a_successful_connect_opens_only_one_connection_up_front(
         pilot.app.screen.submit()
         await settle(pilot)
         assert len(connector.calls) == 1
-        assert isinstance(pilot.app.screen, ConfirmScreen)
+        assert isinstance(pilot.app.screen, ConfirmDialog)
 
 
 async def test_the_growth_confirmation_offers_yes_and_no(tmp_path) -> None:
@@ -277,7 +277,7 @@ async def test_the_growth_confirmation_offers_yes_and_no(tmp_path) -> None:
         pilot.app.screen.submit()
         await settle(pilot)
         screen = pilot.app.screen
-        assert isinstance(screen, ConfirmScreen)
+        assert isinstance(screen, ConfirmDialog)
         yes_button = screen.query_one("#confirm-yes", Button)
         no_button = screen.query_one("#confirm-no", Button)
         assert str(yes_button.label) == "Yes"
@@ -301,7 +301,7 @@ async def test_the_growth_confirmation_names_the_pools_target_size(
         pilot.app.screen.submit()
         await settle(pilot)
         screen = pilot.app.screen
-        assert isinstance(screen, ConfirmScreen)
+        assert isinstance(screen, ConfirmDialog)
         message = str(screen.query_one("#confirm-message", Static).render())
         assert "3" in message
         await pilot.press("tab", "enter")

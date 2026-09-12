@@ -8,7 +8,7 @@ from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import databases_scope
 from snowcone.ui.app import SnowconeApp
-from snowcone.ui.screens.closing import ClosingScreen
+from snowcone.ui.screens.closing import ClosingDialog
 from snowcone.ui.screens.connect import ConnectScreen
 from snowcone.ui.screens.main import MainScreen
 from tests.fakes import FakeConnector
@@ -209,7 +209,7 @@ async def test_reconnecting_shows_a_please_wait_dialog_while_the_old_session_clo
         assert isinstance(pilot.app.screen, MainScreen)
         assert first_fetch.stopped
 
-    assert ClosingScreen in pushed
+    assert ClosingDialog in pushed
 
 
 async def test_quitting_the_connect_screen_exits() -> None:

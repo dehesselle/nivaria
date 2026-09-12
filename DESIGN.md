@@ -69,7 +69,7 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerScreen`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerScreen`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
 | **Detail pane** | Hosts exactly one detail view at a time, chosen by whatever node the cursor is on. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
@@ -1108,7 +1108,7 @@ are reachable this way.
 
 ## Search
 
-A modal (`SearchScreen`), opened by `/` at roughly 90 % of the screen and
+A modal (`SearchDialog`), opened by `/` at roughly 90 % of the screen and
 closed by `escape` (dismisses with nothing chosen) or `enter` (opens the
 highlighted hit and closes). It is a modal rather than an always-mounted
 widget in the top pane because search is the primary way to navigate a
@@ -1123,7 +1123,7 @@ Python over three in-memory corpora — object names, column names (paired with
 their owning object), and schema names. Column search is currently disabled
 — see "Known gaps" — but the corpus and its ranking logic below are otherwise
 described as still live, since the code is unchanged, only its one call site
-in `SearchScreen.on_mount` is commented out.
+in `SearchDialog.on_mount` is commented out.
 
 A trigram/substring index (SQLite's FTS5) was considered as a way to push
 matching into SQL instead. Rejected: it cannot express subsequence matching
@@ -1174,7 +1174,7 @@ poor alignment in the name. Without this, `stgord` ranks `STAGING.LOAD_ORDERS`
 
 The displayed text also carries a `DATABASE.` prefix ahead of `SCHEMA.NAME`,
 since several databases can be selected at once now — but that prefix is
-added purely at render time (`SearchScreen._option_text`) and deliberately
+added purely at render time (`SearchDialog._option_text`) and deliberately
 excluded from ranking itself. Extending the schema/name qualification to a
 third, database level would spend the query's leading characters on the
 database too, for no benefit: there is no database-repeats-inside-object-name
@@ -1241,8 +1241,8 @@ key bindings keep working without being re-implemented.
   (see "`SHOW`, because it needs no warehouse" above) — but role never
   legitimately does. Picked from **Connect > Role ...** / **Warehouse
   ...**, the same fuzzy-picker-over-cached-rows pattern as the database
-  picker (`PickerScreen`, single-select -- the database picker is the
-  multi-select sibling, `MultiPickerScreen`, see "The Object tree" above),
+  picker (`PickerDialog`, single-select -- the database picker is the
+  multi-select sibling, `MultiPickerDialog`, see "The Object tree" above),
   backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
   — small, flat, unpaged lists, unlike the object mirrors), requested
   eagerly on mount alongside the database list rather than on the picker's
@@ -1391,11 +1391,10 @@ dialog originally came from.
 ## Shared widgets
 
 The menu bar, the settings system, the log panel (`LogViewer`, see "The SQL
-log") and the dialog chrome underneath the dialogs (`DialogScreen`,
-`ConfirmScreen`) live in **`tcw`** ("Textual Common Widgets"), a sibling
-project shared with `snakecam` and `vc`. They were
-extracted because the same code had been copied into three apps and had
-already started to drift.
+log") and the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
+live in **`tcw`** ("Textual Common Widgets"), a sibling project shared with
+`snakecam` and `vc`. They were extracted because the same code had been
+copied into three apps and had already started to drift.
 
 It is consumed as an editable path dependency (`[tool.uv.sources]` in
 `pyproject.toml`), so an edit there is live here with no reinstall.
@@ -1598,7 +1597,7 @@ after a single repeat instead of looping — but verifying it would let
   selecting one is a picker action, not a search result.
 - Column search is implemented end to end at the repository layer
   (`Repository.search_column_corpus`) but its one call site in
-  `SearchScreen.on_mount` is commented out — cross-database column search was
+  `SearchDialog.on_mount` is commented out — cross-database column search was
   judged not ready. Re-enabling it is restoring one call, not writing code.
 - There is no automatic trigger for column cache priming — no good signal was
   found for "the user wants this now" short of asking, so it is a manual menu

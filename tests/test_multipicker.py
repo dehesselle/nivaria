@@ -1,5 +1,5 @@
 """The multi-select database picker: a checkbox-glyph fuzzy list plus an
-All/None/Ok/Cancel button row, sibling to the single-select PickerScreen."""
+All/None/Ok/Cancel button row, sibling to the single-select PickerDialog."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from textual.app import App
 from textual.widgets import Button, Input, OptionList
 
 import snowcone.ui.app as app_module
-from snowcone.ui.screens.multipicker import MultiPickerScreen
+from snowcone.ui.screens.multipicker import MultiPickerDialog
 
 
 class Harness(App[None]):
@@ -25,7 +25,7 @@ class Harness(App[None]):
 
     def on_mount(self) -> None:
         self.push_screen(
-            MultiPickerScreen(
+            MultiPickerDialog(
                 self._candidates,
                 title="Databases",
                 placeholder="type to filter",
@@ -96,7 +96,7 @@ async def test_clicking_a_row_toggles_it_without_closing_the_dialog() -> None:
         options.action_select()
         await pilot.pause()
         assert option_text(app, 0).startswith("☑ ")
-        assert isinstance(app.screen, MultiPickerScreen)
+        assert isinstance(app.screen, MultiPickerDialog)
         assert app.result == []
 
 
@@ -273,7 +273,7 @@ async def test_the_buttons_are_right_aligned_in_the_dialog() -> None:
         await pilot.pause()
         dialog = app.screen.query_one("#dialog")
         cancel = app.screen.query_one("#multipicker-cancel", Button)
-        # DialogScreen pads #dialog by 2 cells on each side (padding: 1 2) --
+        # Dialog pads #dialog by 2 cells on each side (padding: 1 2) --
         # the last button's right edge should sit close to the dialog's own
         # right edge, not stop well short of it the way a left- or centre-
         # aligned row would.

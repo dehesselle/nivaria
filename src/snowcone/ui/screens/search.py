@@ -47,7 +47,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from rich.text import Text
-from tcw.screens import DialogScreen
+from tcw.dialogs import Dialog
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -81,7 +81,7 @@ MAX_RESULTS = 200
 MIN_COLUMN_QUERY_LENGTH = 3
 
 
-class SearchScreen(DialogScreen[Hit]):
+class SearchDialog(Dialog[Hit]):
     """Pick one object or schema by fuzzy name, or dismiss with None."""
 
     BINDINGS: ClassVar[list[Binding]] = [
