@@ -1,5 +1,5 @@
 """The warehouse and role pickers: same fuzzy-picker pattern as the database
-picker (see test_main_screen.py), but wired through the Connect menu and,
+picker (see test_main_screen.py), but wired through the Connection menu and,
 unlike the database picker, actually rewriting the pool's session."""
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class Harness(App[None]):
         self.push_screen(MainScreen(self.repo, self.fetch, self._pool))
 
     async def open_connect(self) -> None:
-        """Never exercised here, but the Connect menu always declares the
+        """Never exercised here, but the Connection menu always declares the
         item that calls it."""
 
     def restart_fetch(self, pool) -> None:
@@ -73,11 +73,11 @@ def put_roles(repo: Repository, *names: str) -> None:
 
 
 async def open_via_menu(pilot, mnemonic: str) -> None:
-    """Drive the menu bar exactly the way a user would: F9, enter the armed
-    Connect menu, then the item's own mnemonic."""
+    """Drive the menu bar exactly the way a user would: F9, the Connection
+    menu's own mnemonic, then the item's own mnemonic."""
     await pilot.press("f9")
     await pilot.pause()
-    await pilot.press("enter")
+    await pilot.press("c")
     await pilot.pause()
     await pilot.press(mnemonic)
     await settle(pilot)
@@ -86,7 +86,7 @@ async def open_via_menu(pilot, mnemonic: str) -> None:
 # ------------------------------------------------------------------- listing
 
 
-async def test_the_connect_menu_lists_warehouse_and_role(repo) -> None:
+async def test_the_connection_menu_lists_warehouse_and_role(repo) -> None:
     pool, _ = make_pool(size=1)
     pool.connect_all()
     app = Harness(repo, RecordingFetch(), pool)
@@ -168,7 +168,7 @@ async def test_an_empty_warehouse_cache_requests_a_fetch_instead_of_a_dead_dialo
 
 async def test_ctrl_w_opens_the_warehouse_picker(repo) -> None:
     """The key binding is hidden from the footer, but stays live -- see the
-    Connect menu's `Ctrl+W` shortcut label."""
+    Connection menu's `Ctrl+W` shortcut label."""
     put_warehouses(repo, "COMPUTE_WH", "ETL_WH")
     pool, _ = make_pool(size=1)
     pool.connect_all()

@@ -50,8 +50,8 @@ async def test_connecting_hands_over_to_the_browser() -> None:
 
 
 async def test_connect_open_menu_item_reopens_the_connect_dialog() -> None:
-    """The menu bar's only item today: get back to the connect dialog without
-    restarting the app, e.g. to switch accounts mid-session."""
+    """Get back to the connect dialog without restarting the app, e.g. to
+    switch accounts mid-session."""
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -66,7 +66,7 @@ async def test_connect_open_menu_item_reopens_the_connect_dialog() -> None:
 
         await pilot.press("f9")
         await pilot.pause()
-        await pilot.press("c")  # "Connect" menu's mnemonic
+        await pilot.press("c")  # "Connection" menu's mnemonic
         await pilot.pause()
         await pilot.press("o")  # "Open..." item's mnemonic
         await settle(pilot)
@@ -138,7 +138,7 @@ async def _connect(pilot, account: str) -> None:
 async def _reopen_connect(pilot) -> None:
     await pilot.press("f9")
     await pilot.pause()
-    await pilot.press("c")  # "Connect" menu's mnemonic
+    await pilot.press("c")  # "Connection" menu's mnemonic
     await pilot.pause()
     await pilot.press("o")  # "Open..." item's mnemonic
     await settle(pilot)

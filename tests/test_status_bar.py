@@ -183,7 +183,7 @@ async def test_key_bindings_are_still_shown(repo) -> None:
 async def test_the_picker_and_quit_shortcuts_are_hidden_from_the_footer(
     repo,
 ) -> None:
-    """They live in the Connect menu instead, right-aligned as `shortcut`."""
+    """They live in the Connection menu instead, right-aligned as `shortcut`."""
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
         for _ in range(4):

@@ -1,8 +1,8 @@
-"""snowcone's Connect menu.
+"""snowcone's menu bar: the Snowcone and Connection menus.
 
 The bar itself -- auto-hide, the staged bar/dropdown flow, mnemonics,
 separators, the F9 binding -- belongs to `tcw` and is tested there. What is
-snowcone's is *what the menu offers* and what each entry actually does.
+snowcone's is *what the menus offer* and what each entry actually does.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from tcw.dialogs import SettingsDialog
+from tcw.dialogs import AboutDialog, SettingsDialog
 from tcw.widgets import Menu, MenuBar, MenuItem
 from textual.app import App
 from textual.widgets import OptionList, Static
@@ -58,38 +58,54 @@ async def settle(pilot, rounds: int = 3) -> None:
         await asyncio.sleep(0.02)
 
 
-async def open_menu(pilot) -> None:
-    """F9, then enter the armed Connect menu."""
+async def open_snowcone_menu(pilot) -> None:
+    """F9, then enter the armed menu -- Snowcone, since it's leftmost."""
     await pilot.press("f9")
     await settle(pilot)
     await pilot.press("enter")
     await settle(pilot)
 
 
+async def open_connection_menu(pilot) -> None:
+    """F9, then the Connection menu's own mnemonic."""
+    await pilot.press("f9")
+    await settle(pilot)
+    await pilot.press("c")
+    await settle(pilot)
+
+
 # ------------------------------------------------------------------ contents
 
 
-async def test_there_is_one_menu_called_connect(repo) -> None:
+async def test_there_are_two_menus_snowcone_and_connection(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         titles = [menu.title_text for menu in app.screen.query(Menu)]
-        assert titles == ["Connect"]
+        assert titles == ["Snowcone", "Connection"]
 
 
-async def test_the_connect_menu_offers_the_documented_entries(repo) -> None:
+async def test_the_snowcone_menu_offers_the_documented_entries(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        labels = [item.label for item in app.screen.query(MenuItem)]
+        menu = app.screen.query_one("#snowcone-menu", Menu)
+        labels = [item.label for item in menu.query(MenuItem)]
+        assert labels == ["About ...", "Settings ...", "Quit"]
+
+
+async def test_the_connection_menu_offers_the_documented_entries(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        menu = app.screen.query_one("#connection-menu", Menu)
+        labels = [item.label for item in menu.query(MenuItem)]
         assert labels == [
             "Open...",
             "Databases ...",
             "Warehouse ...",
             "Role ...",
             "Pre-warm cache",
-            "Settings ...",
-            "Quit",
         ]
 
 
@@ -106,12 +122,24 @@ async def test_the_hidden_key_bindings_are_advertised_as_shortcuts(repo) -> None
         assert shortcuts["quit"] == "F10"
 
 
-async def test_the_separators_group_the_entries(repo) -> None:
-    """Three dividers: connect, then session/cache actions, then settings,
-    then quit."""
+async def test_the_snowcone_menu_separators_group_the_entries(repo) -> None:
+    """Two dividers: about, then settings, then quit."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_menu(pilot)
+        await open_snowcone_menu(pilot)
+        option_list = app.screen.query_one(OptionList)
+        assert [option.id for option in option_list.options] == [
+            "about",
+            "settings",
+            "quit",
+        ]
+
+
+async def test_the_connection_menu_separators_group_the_entries(repo) -> None:
+    """One divider: connect, then the session/cache actions."""
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await open_connection_menu(pilot)
         option_list = app.screen.query_one(OptionList)
         assert [option.id for option in option_list.options] == [
             "open",
@@ -119,15 +147,16 @@ async def test_the_separators_group_the_entries(repo) -> None:
             "warehouse",
             "role",
             "prewarm",
-            "settings",
-            "quit",
         ]
 
 
-async def test_the_bar_lays_out_as_a_title_plus_the_snowcone_version(repo) -> None:
-    """Geometry, not just content: a menu id is a CSS id, so a clash with a
+async def test_the_bar_lays_out_as_a_title_plus_the_trailing_label(repo) -> None:
+    """Geometry, not content: a menu id is a CSS id, so a clash with a
     rule in app.tcss silently resizes the title and the bar turns into a row
     of scrollbar blocks. `#connect` was exactly that clash once.
+
+    The version itself moved into AboutDialog (see `test_about_opens_the_about_dialog`);
+    trailing is unused here now, so there's nothing left to assert about its content.
     """
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
@@ -140,14 +169,12 @@ async def test_the_bar_lays_out_as_a_title_plus_the_snowcone_version(repo) -> No
         # sometimes still finds title's region at (0, 0) -- flaky.
         await pilot.pause()
         await pilot.pause()
-        title = app.screen.query_one(Menu)
-        # "Connect" plus the 2-cell padding either side, on the bar's one row.
-        assert (title.region.width, title.region.height) == (11, 1)
+        title = app.screen.query_one("#snowcone-menu", Menu)
+        # "Snowcone" plus the 2-cell padding either side, on the bar's one row.
+        assert (title.region.width, title.region.height) == (12, 1)
         trailing = app.screen.query_one("#menubar-trailing", Static)
-        assert trailing.region.x == title.region.right
         assert trailing.region.right == 120
         assert trailing.region.height == 1
-        assert VERSION in str(trailing.render())
 
 
 # ------------------------------------------------------------------ behaviour
@@ -156,16 +183,29 @@ async def test_the_bar_lays_out_as_a_title_plus_the_snowcone_version(repo) -> No
 async def test_open_reopens_the_connect_dialog(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_menu(pilot)
+        await open_connection_menu(pilot)
         await pilot.press("o")
         await settle(pilot)
         assert app.open_connect_calls == 1
 
 
+async def test_about_opens_the_about_dialog(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await open_snowcone_menu(pilot)
+        await pilot.press("a")
+        await settle(pilot)
+        assert isinstance(app.screen, AboutDialog)
+        # The version moved here from the menu bar's trailing text (see
+        # `test_the_bar_lays_out_as_a_title_plus_the_trailing_label`).
+        header = app.screen.query_one("#about-header", Static)
+        assert VERSION in str(header.render())
+
+
 async def test_settings_opens_the_settings_dialog(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_menu(pilot)
+        await open_snowcone_menu(pilot)
         await pilot.press("s")
         await settle(pilot)
         assert isinstance(app.screen, SettingsDialog)
@@ -174,7 +214,7 @@ async def test_settings_opens_the_settings_dialog(repo) -> None:
 async def test_prewarm_without_a_database_says_so_instead_of_priming(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_menu(pilot)
+        await open_connection_menu(pilot)
         await pilot.press("p")
         await settle(pilot)
         assert isinstance(app.screen, MainScreen)
@@ -187,7 +227,7 @@ async def test_prewarm_without_a_database_says_so_instead_of_priming(repo) -> No
 async def test_quit_exits_the_app(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_menu(pilot)
+        await open_snowcone_menu(pilot)
         await pilot.press("q")
         await settle(pilot)
     assert app.is_running is False

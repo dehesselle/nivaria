@@ -69,7 +69,7 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Currently one menu, **Connect** (`c`), with **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming"; then another separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it; then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Two menus. **Snowcone** (`s`), the app-identity menu, leftmost: **About ...** (`a`) -- a `tcw.widgets.AboutMenuItem` reading `ui/about.txt` (see "Shared widgets" below for why that's a real filesystem path, not just an `importlib.resources` handle) -- then a separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it -- then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. **Connection** (`c`), the session menu: **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming". Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
 | **Detail pane** | Hosts exactly one detail view at a time, chosen by whatever node the cursor is on. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
@@ -545,7 +545,7 @@ opened — moot for the moment anyway, since column search itself is currently
 disabled entirely (see "Known gaps"); this priming mechanism stays useful for
 the detail pane and is ready to serve search again once that is re-enabled.
 
-**Pre-warm cache** (Connect menu) fixes that on demand — there is no
+**Pre-warm cache** (Connection menu) fixes that on demand — there is no
 automatic trigger, since there was no good signal found for "the user wants
 this now" short of asking. Selecting it fires three background requests at
 once for whatever database the cursor is currently under (multiple databases
@@ -1254,7 +1254,7 @@ key bindings keep working without being re-implemented.
   session state rather than an unfilled form field. Warehouse can genuinely
   read `none` even after this — a session can have no active warehouse at all
   (see "`SHOW`, because it needs no warehouse" above) — but role never
-  legitimately does. Picked from **Connect > Role ...** / **Warehouse
+  legitimately does. Picked from **Connection > Role ...** / **Warehouse
   ...**, the same fuzzy-picker-over-cached-rows pattern as the database
   picker (`PickerDialog`, single-select -- the database picker is the
   multi-select sibling, `MultiPickerDialog`, see "The Object tree" above),
@@ -1386,7 +1386,7 @@ on the next `restart_fetch` (a reconnect or a role switch). Not deliberate,
 just unfixed — and worth knowing when lowering it to reproduce a paging
 problem.
 
-**Settings ...** (Connect menu) opens a modal listing every registered
+**Settings ...** (Snowcone menu) opens a modal listing every registered
 `Setting`, grouped under a heading per `Setting.group`, each editable in
 place. **OK** validates and writes, then closes; **Apply** does the same but
 leaves the dialog open; **Cancel**/escape discard, confirming first if
@@ -1444,10 +1444,12 @@ Three things about it are worth knowing from inside snowcone:
   unique among one menu's own children, but any `app.tcss` rule of the same
   name styles it too -- and for a widget inside a one-row bar that does not
   show up as a wrong colour, it shows up as a garbled row of scrollbar
-  blocks. The Connect menu is `#connect-menu` rather than `#connect` for
-  exactly this reason: `#connect` is the connect dialog's container.
-  `test_menubar.py` asserts the title's *geometry*, not just its text, so a
-  future clash fails a test instead of only looking wrong.
+  blocks. The Connection menu is `#connection-menu` rather than `#connection`
+  for exactly this reason: `#connect` (note the different word) is the
+  connect dialog's container, and `#connection` sits close enough to invite
+  the same mistake later. `test_menubar.py` asserts the title's *geometry*,
+  not just its text, so a future clash fails a test instead of only looking
+  wrong.
 
 ---
 

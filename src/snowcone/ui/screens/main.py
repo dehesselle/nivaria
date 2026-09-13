@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
+from importlib.resources import files
 from math import ceil
 from time import monotonic
 from typing import ClassVar
 
 from tcw.widgets import (
     OPEN_ACTION,
+    AboutMenuItem,
     Countdown,
     Footer,
     LogViewer,
@@ -80,6 +82,11 @@ from snowcone.version import VERSION
 #: enough to run on the event loop: an int read plus one indexed sqlite lookup.
 TICK = 0.3
 
+#: The Snowcone menu's About text. A real filesystem Path even for an
+#: installed (non-zipped) wheel, which is what AboutDialog needs -- it reads
+#: this with Path.read_text() rather than importlib.resources' API.
+ABOUT_PATH = files("snowcone.ui").joinpath("about.txt")
+
 
 class MainScreen(Screen):
     # No F9 here: `MenuBar` installs its own binding on whichever screen it
@@ -116,12 +123,19 @@ class MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         # The nesting is the DOM structure, not style: a Menu is a child of
-        # the bar, and collapsing the two into one `with` would stop reading
-        # that way the moment a second menu is added.
-        with MenuBar(trailing=f"snowcone {VERSION}"):  # noqa: SIM117
-            # "connect-menu", not "connect": a Menu id is a CSS id too,
+        # the bar, not a sibling.
+        with MenuBar():
+            with Menu("Snowcone", id="snowcone-menu"):
+                yield AboutMenuItem(path=ABOUT_PATH, variables={"version": VERSION})
+                yield MenuSeparator()
+                yield SettingsMenuItem()
+                yield MenuSeparator()
+                yield MenuItem(
+                    "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
+                )
+            # "connection-menu", not "connection": a Menu id is a CSS id too,
             # and app.tcss already styles #connect (the connect dialog).
-            with Menu("Connect", id="connect-menu"):
+            with Menu("Connection", id="connection-menu"):
                 yield MenuItem("Open...", id="open", mnemonic="o", shortcut="Ctrl+O")
                 yield MenuSeparator()
                 yield MenuItem(
@@ -132,12 +146,6 @@ class MainScreen(Screen):
                 )
                 yield MenuItem("Role ...", id="role", mnemonic="r", shortcut="Ctrl+R")
                 yield MenuItem("Pre-warm cache", id="prewarm", mnemonic="p")
-                yield MenuSeparator()
-                yield SettingsMenuItem()
-                yield MenuSeparator()
-                yield MenuItem(
-                    "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
-                )
         yield LogViewer(show_key=False)
         yield ObjectTree(self.repo, id="tree")
         yield DetailPane(self.repo, id="detail")
@@ -539,7 +547,7 @@ class MainScreen(Screen):
 
     def prewarm_cache(self) -> None:
         """Warm columns for whatever database the cursor is under, from the
-        Connect menu.
+        Connection menu.
 
         Multiple databases can be selected now, so this acts on the one the
         cursor is currently within -- the same "whatever's under cursor"
