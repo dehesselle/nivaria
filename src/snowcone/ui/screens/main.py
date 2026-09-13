@@ -14,6 +14,10 @@ from time import monotonic
 from typing import ClassVar
 
 from tcw.widgets import (
+    OPEN_ACTION,
+    TOGGLE_ACTION,
+    Countdown,
+    Footer,
     LogViewer,
     Menu,
     MenuBar,
@@ -69,7 +73,7 @@ from snowcone.ui.views import (  # noqa: F401 -- registers views
 )
 from snowcone.ui.widgets.detail_pane import DetailPane
 from snowcone.ui.widgets.object_tree import ObjectTree
-from snowcone.ui.widgets.status_bar import StatusFooter
+from snowcone.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
 from snowcone.version import VERSION
 
 #: How often the status indicators are recomputed. Fast enough that a burst of
@@ -104,7 +108,6 @@ class MainScreen(Screen):
         self.pool = pool
         self.profiles = profiles or ProfileStore()
         self.databases: list[str] = []
-        self._frame = 0
         #: Wall-clock time the staleness sweep last ran (or was deferred to,
         #: by a navigation that just showed something new -- see
         #: `_restart_countdown`). CACHE_TTL is both the sweep's interval and
@@ -139,7 +142,15 @@ class MainScreen(Screen):
         yield LogViewer()
         yield ObjectTree(self.repo, id="tree")
         yield DetailPane(self.repo, id="detail")
-        yield StatusFooter(show_command_palette=False)
+        # The menu and log keys are pinned, so they hold the left corner
+        # whatever the focus chain is doing. Nothing reserves the right
+        # corner any more: this footer gives ctrl+p no special treatment,
+        # so the status area simply sits there.
+        with Footer(pinned=(OPEN_ACTION, TOGGLE_ACTION)):
+            yield RoleLabel(id="footer-role")
+            yield WarehouseLabel(id="footer-warehouse")
+            yield Countdown(id="footer-countdown")
+            yield PoolGauge(id="footer-pool")
 
     def on_mount(self) -> None:
         self._request(databases_scope(), Priority.INTERACTIVE)
@@ -153,8 +164,8 @@ class MainScreen(Screen):
         self._tick()
 
     @property
-    def footer(self) -> StatusFooter:
-        return self.query_one(StatusFooter)
+    def countdown(self) -> Countdown:
+        return self.query_one(Countdown)
 
     # -------------------------------------------------------------- status
 
@@ -175,15 +186,14 @@ class MainScreen(Screen):
         return databases_scope()
 
     def _tick(self) -> None:
-        footer = self.footer
-        self._frame += 1
-        footer.frame = self._frame
+        countdown = self.countdown
 
         if self.pool is not None:
-            footer.in_use = self.pool.in_use
-            footer.pool_size = self.pool.size
-            footer.warehouse = self.pool.params.warehouse
-            footer.role = self.pool.params.role
+            gauge = self.query_one(PoolGauge)
+            gauge.in_use = self.pool.in_use
+            gauge.pool_size = self.pool.size
+            self.query_one(WarehouseLabel).warehouse = self.pool.params.warehouse
+            self.query_one(RoleLabel).role = self.pool.params.role
 
         # focused_scope() is kept in the mix so the spinner still reflects
         # activity before anything is materialised in the tree or detail pane
@@ -196,16 +206,20 @@ class MainScreen(Screen):
             *self.tree.visible_scopes(),
             *self.detail.scopes(),
         ]
-        footer.refreshing = self.fetch is not None and any(
+        # The countdown runs its own spinner off this, so there is no frame
+        # counter to drive from here any more.
+        countdown.refreshing = self.fetch is not None and any(
             self.fetch.is_busy(scope) for scope in watched
         )
 
         # Read at the point of use, so changing it in settings takes effect
         # without a restart.
         ttl = config.get(CACHE_TTL)
-        footer.countdown_enabled = ttl > 0
+        # Hidden, not zeroed: a countdown that blanked itself at zero could
+        # not tell "no staleness sweep is scheduled" apart from "the next one
+        # is due right now".
+        countdown.display = ttl > 0
         if ttl <= 0:
-            footer.remaining = 0
             return
 
         elapsed = monotonic() - self._last_sweep_at
@@ -213,7 +227,7 @@ class MainScreen(Screen):
             self._sweep()
             self._last_sweep_at = monotonic()
             elapsed = 0.0
-        footer.remaining = max(0, ceil(ttl - elapsed))
+        countdown.remaining = max(0, ceil(ttl - elapsed))
 
     def _restart_countdown(self) -> None:
         """Treat "just showed the user something new" like a sweep already

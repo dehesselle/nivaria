@@ -40,7 +40,7 @@ CACHE_TTL = Setting(
     description=(
         "How many seconds cached metadata stays fresh before a background "
         "refresh is dispatched for it. 0 disables background refreshing "
-        "(and blanks the footer countdown); an explicit refresh still works."
+        "(and hides the footer countdown); an explicit refresh still works."
     ),
     group="Cache",
     default=900,

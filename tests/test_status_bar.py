@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tcw.widgets import Countdown, Footer, FooterBinding
 from textual.app import App
-from textual.widgets import Footer
 
 import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
@@ -15,13 +15,7 @@ from snowcone.models import ObjectType, databases_scope, objects_scope, schemas_
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.screens.main import MainScreen
 from snowcone.ui.widgets.object_tree import ObjectTree
-from snowcone.ui.widgets.status_bar import (
-    Countdown,
-    PoolGauge,
-    RoleLabel,
-    StatusFooter,
-    WarehouseLabel,
-)
+from snowcone.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
 from tests.fakes import make_pool
 from tests.test_main_screen import RecordingFetch, put_schemas
 
@@ -86,23 +80,11 @@ def test_the_countdown_is_capped_at_three_digits() -> None:
     assert countdown.render() == "999"
 
 
-def test_the_countdown_blanks_when_disabled() -> None:
-    """A TTL of 0 turns background refreshing off; the counter has nothing to
-    count down to and must not imply otherwise."""
-    countdown = Countdown()
-    countdown.enabled = False
-    countdown.remaining = 30
-    assert countdown.render() == ""
-
-
-def test_a_refreshing_scope_shows_a_spinner_instead_of_a_number() -> None:
-    countdown = Countdown()
-    countdown.remaining = 30
-    countdown.refreshing = True
-    first = countdown.render()
-    countdown.frame = 1
-    assert first != countdown.render()
-    assert first.strip() != ""
+# "Blanks when disabled" and the spinner's own frame-by-frame advance are
+# tcw's business now -- see its tests/test_countdown.py. Disabling is no
+# longer a blank render either: `test_a_ttl_of_zero_disables_the_countdown`
+# below asserts the widget is hidden, which is what keeps a real zero
+# distinguishable from a countdown that is switched off.
 
 
 def test_the_gauge_reads_in_use_over_size() -> None:
@@ -123,7 +105,7 @@ async def test_the_footer_carries_both_indicators(repo) -> None:
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        footer = app.screen.query_one(StatusFooter)
+        footer = app.screen.query_one(Footer)
         assert footer.query_one("#footer-countdown", Countdown)
         assert footer.query_one("#footer-pool", PoolGauge)
 
@@ -134,8 +116,8 @@ async def test_the_role_label_appears_before_the_warehouse_label(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         for _ in range(4):
             await pilot.pause()
-        footer = app.screen.query_one(StatusFooter)
-        ids = [child.id for child in footer.children if child.id]
+        status = app.screen.query_one(Footer).status
+        ids = [child.id for child in status.children if child.id]
     assert ids.index("footer-role") < ids.index("footer-warehouse")
 
 
@@ -145,19 +127,14 @@ async def test_the_warehouse_label_widens_for_a_longer_name(repo) -> None:
     first one happened to need until something unrelated forced a relayout."""
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
-        # The footer recomposes via call_after_refresh once its bindings are
-        # ready (see test_key_bindings_are_still_shown); a single pause can
-        # catch it still empty, so #footer-warehouse would not exist yet.
-        for _ in range(4):
-            await pilot.pause()
-        footer = app.screen.query_one(StatusFooter)
-        footer.warehouse = "WH"
+        label = app.screen.query_one(WarehouseLabel)
+        label.warehouse = "WH"
         await pilot.pause()
-        short_width = footer.query_one(WarehouseLabel).size.width
+        short_width = label.size.width
 
-        footer.warehouse = "A_MUCH_LONGER_WAREHOUSE_NAME"
+        label.warehouse = "A_MUCH_LONGER_WAREHOUSE_NAME"
         await pilot.pause()
-        long_width = footer.query_one(WarehouseLabel).size.width
+        long_width = label.size.width
     assert long_width > short_width
 
 
@@ -166,35 +143,38 @@ async def test_the_role_label_widens_for_a_longer_name(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         for _ in range(4):
             await pilot.pause()
-        footer = app.screen.query_one(StatusFooter)
-        footer.role = "PUBLIC"
+        label = app.screen.query_one(RoleLabel)
+        label.role = "PUBLIC"
         await pilot.pause()
-        short_width = footer.query_one(RoleLabel).size.width
+        short_width = label.size.width
 
-        footer.role = "A_MUCH_LONGER_ROLE_NAME"
+        label.role = "A_MUCH_LONGER_ROLE_NAME"
         await pilot.pause()
-        long_width = footer.query_one(RoleLabel).size.width
+        long_width = label.size.width
     assert long_width > short_width
 
 
 async def test_the_command_palette_key_does_not_claim_the_corner(repo) -> None:
+    """It gets no special treatment in tcw's footer -- it is an app binding
+    like any other, and it is declared `show=False`, so it simply is not
+    rendered. The right corner is the status area's."""
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        assert app.screen.query_one(Footer).show_command_palette is False
+        for _ in range(4):
+            await pilot.pause()
+        actions = {key.action for key in app.screen.query(FooterBinding)}
+    assert "command_palette" not in actions
 
 
 async def test_key_bindings_are_still_shown(repo) -> None:
-    """Subclassing Footer rather than replacing it is what keeps these."""
-    from textual.widgets._footer import FooterKey
-
+    """Replacing the footer must not cost the ordinary binding rendering."""
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
-        # The footer recomposes via call_after_refresh once its bindings are
-        # ready, so a single pause can catch it still empty.
+        # Only the *keys* are rebuilt when bindings land, and that costs a
+        # turn for the signal plus one for the mounts.
         for _ in range(4):
             await pilot.pause()
-        keys = {key.key for key in app.screen.query(FooterKey)}
+        keys = {key.key for key in app.screen.query(FooterBinding)}
     assert "f9" in keys
     assert "slash" in keys
     assert "f5" in keys
@@ -204,13 +184,11 @@ async def test_the_picker_and_quit_shortcuts_are_hidden_from_the_footer(
     repo,
 ) -> None:
     """They live in the Connect menu instead, right-aligned as `shortcut`."""
-    from textual.widgets._footer import FooterKey
-
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
         for _ in range(4):
             await pilot.pause()
-        keys = {key.key for key in app.screen.query(FooterKey)}
+        keys = {key.key for key in app.screen.query(FooterBinding)}
     assert "ctrl+d" not in keys
     assert "ctrl+r" not in keys
     assert "ctrl+w" not in keys
@@ -223,17 +201,17 @@ async def test_the_gauge_follows_the_pool(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        footer = app.screen.query_one(StatusFooter)
-        assert (footer.in_use, footer.pool_size) == (0, 3)
+        gauge = app.screen.query_one(PoolGauge)
+        assert (gauge.in_use, gauge.pool_size) == (0, 3)
 
         with pool.acquire():
             app.screen._tick()
             await pilot.pause()
-            assert app.screen.query_one(StatusFooter).in_use == 1
+            assert app.screen.query_one(PoolGauge).in_use == 1
 
         app.screen._tick()
         await pilot.pause()
-        assert app.screen.query_one(StatusFooter).in_use == 0
+        assert app.screen.query_one(PoolGauge).in_use == 0
 
 
 # ------------------------------------------------------------- the countdown
@@ -322,7 +300,7 @@ async def test_the_countdown_counts_down_from_the_ttl(repo) -> None:
             await pilot.pause()
             app.screen._tick()
             await pilot.pause()
-            remaining = app.screen.query_one(StatusFooter).remaining
+            remaining = app.screen.query_one(Countdown).remaining
         assert 55 <= remaining <= 60
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
@@ -340,7 +318,7 @@ async def test_the_countdown_resets_once_the_sweep_runs(repo) -> None:
             app.screen._last_sweep_at -= 120
             app.screen._tick()
             await pilot.pause()
-            remaining = app.screen.query_one(StatusFooter).remaining
+            remaining = app.screen.query_one(Countdown).remaining
         assert 55 <= remaining <= 60
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
@@ -361,13 +339,13 @@ async def test_navigating_restarts_the_countdown(repo) -> None:
             screen._last_sweep_at -= 50
             screen._tick()
             await pilot.pause()
-            before = app.screen.query_one(StatusFooter).remaining
+            before = app.screen.query_one(Countdown).remaining
             assert before <= 15
 
             screen._select_category(objects_scope(ObjectType.TABLE, "MYDB", "AAA"))
             screen._tick()
             await pilot.pause()
-            after = app.screen.query_one(StatusFooter).remaining
+            after = app.screen.query_one(Countdown).remaining
         assert after > before
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
@@ -381,9 +359,10 @@ async def test_a_ttl_of_zero_disables_the_countdown(repo) -> None:
             await pilot.pause()
             app.screen._tick()
             await pilot.pause()
-            footer = app.screen.query_one(StatusFooter)
-            assert footer.countdown_enabled is False
-            assert footer.query_one(Countdown).render() == ""
+            countdown = app.screen.query_one(Countdown)
+            # Hidden, not blanked: the widget still holds a number, so "off"
+            # and "zero seconds left" stay distinguishable.
+            assert countdown.display is False
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
 
@@ -396,7 +375,7 @@ async def test_the_spinner_shows_while_the_focused_scope_is_busy(repo) -> None:
         await pilot.pause()
         app.screen._tick()
         await pilot.pause()
-        assert app.screen.query_one(StatusFooter).refreshing is True
+        assert app.screen.query_one(Countdown).refreshing is True
 
 
 # ------------------------------------------------------------------ sweep

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from textual.widgets import Footer, Input
+from tcw.widgets import FooterBinding
+from textual.widgets import Input
 
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
@@ -280,11 +281,17 @@ async def test_the_main_screen_has_its_two_panes(tmp_path) -> None:
 
 
 async def test_the_command_palette_binding_is_hidden_from_the_footer(tmp_path) -> None:
-    """The footer's right corner is reserved for snowcone's own status
-    indicators, so Textual's ctrl+p key must not claim it."""
+    """The footer's right corner is snowcone's own status indicators, so
+    Textual's ctrl+p key must not claim it.
+
+    tcw's footer needs no setting for that: ctrl+p is an app binding like any
+    other and is declared `show=False`, so it is only ever rendered if the app
+    asks for it by name in `pinned=`.
+    """
     app = SnowconeApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.app.push_screen(MainScreen(_repo(tmp_path)))
-        await pilot.pause()
-        footer = pilot.app.screen.query_one(Footer)
-        assert footer.show_command_palette is False
+        for _ in range(4):
+            await pilot.pause()
+        actions = {key.action for key in pilot.app.screen.query(FooterBinding)}
+    assert "command_palette" not in actions

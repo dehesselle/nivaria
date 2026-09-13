@@ -18,7 +18,7 @@ from snowcone.cache.repository import Repository
 from snowcone.models import databases_scope, roles_scope, warehouses_scope
 from snowcone.ui.screens.main import MainScreen
 from snowcone.ui.screens.picker import PickerDialog
-from snowcone.ui.widgets.status_bar import StatusFooter
+from snowcone.ui.widgets.status_bar import RoleLabel, WarehouseLabel
 from tests.fakes import make_pool
 from tests.test_main_screen import RecordingFetch, load, settle
 
@@ -348,9 +348,8 @@ async def test_the_footer_shows_none_before_anything_is_picked(repo) -> None:
         await pilot.pause()
         app.screen._tick()
         await pilot.pause()
-        footer = app.screen.query_one(StatusFooter)
-        assert footer.warehouse is None
-        assert footer.role is None
+        assert app.screen.query_one(WarehouseLabel).warehouse is None
+        assert app.screen.query_one(RoleLabel).role is None
 
 
 async def test_the_footer_reflects_a_completed_switch(repo) -> None:
@@ -368,5 +367,5 @@ async def test_the_footer_reflects_a_completed_switch(repo) -> None:
             await pilot.pause()
             if pool.params.warehouse == "COMPUTE_WH":
                 break
-        footer = app.screen.query_one(StatusFooter)
-    assert footer.warehouse == "COMPUTE_WH"
+        warehouse = app.screen.query_one(WarehouseLabel).warehouse
+    assert warehouse == "COMPUTE_WH"
