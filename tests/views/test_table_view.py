@@ -20,8 +20,11 @@ from tests.views.harness import (
 
 def _click_header(table: DataTable, label: str) -> DataTable.HeaderSelected:
     """Build the message a real click on the `label` header posts -- the
-    same event `ColumnsView.on_data_table_header_selected` bubbles up."""
-    column = next(c for c in table.ordered_columns if c.label.plain == label)
+    same event `ColumnsView.on_data_table_header_selected` bubbles up.
+    Matches by prefix, not equality: the active sort column's label carries
+    a trailing direction arrow ("Name ▲") that a bare click target never
+    names, and no header word is a prefix of another."""
+    column = next(c for c in table.ordered_columns if c.label.plain.startswith(label))
     index = next(i for i, c in enumerate(table.ordered_columns) if c is column)
     return DataTable.HeaderSelected(table, column.key, index, column.label)
 
@@ -237,6 +240,86 @@ async def test_the_tags_column_counts_a_columns_tags(repo) -> None:
         table = app.query_one("#detail-columns", DataTable)
         assert table.get_cell_at((0, 5)).plain == "0"
         assert table.get_cell_at((1, 5)).plain == "2"
+
+
+async def test_clicking_the_type_header_sorts_by_formatted_type_then_reverses(
+    repo,
+) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(
+        repo,
+        "ORDERS",
+        ("ID", "TEXT"),
+        ("TOTAL", "FIXED", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+
+        table.post_message(_click_header(table, "Type"))
+        await pilot.pause()
+        # "NUMBER(38,0)" < "VARCHAR" -- ascending flips declaration order.
+        assert [table.get_cell_at((r, 1)).plain for r in range(2)] == ["TOTAL", "ID"]
+
+        table.post_message(_click_header(table, "Type"))
+        await pilot.pause()
+        assert [table.get_cell_at((r, 1)).plain for r in range(2)] == ["ID", "TOTAL"]
+
+
+async def test_clicking_the_tags_header_sorts_by_tag_count_then_reverses(
+    repo,
+) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("EMAIL", "TEXT"), ("ID", "NUMBER"))
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+
+        table.post_message(_click_header(table, "Tags"))
+        await pilot.pause()
+        assert [table.get_cell_at((r, 1)).plain for r in range(2)] == ["ID", "EMAIL"]
+
+        table.post_message(_click_header(table, "Tags"))
+        await pilot.pause()
+        assert [table.get_cell_at((r, 1)).plain for r in range(2)] == ["EMAIL", "ID"]
+
+
+async def test_the_active_sort_columns_header_shows_a_direction_arrow(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("TOTAL", "FLOAT"), ("ID", "NUMBER"))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+
+        def label(prefix: str) -> str:
+            return next(
+                c.label.plain
+                for c in table.ordered_columns
+                if c.label.plain.startswith(prefix)
+            )
+
+        # Default sort is Ordinal, ascending; every other sortable column
+        # shows a plain dot, not nothing, so it reads as clickable.
+        assert label("Ordinal") == "Ordinal ▲"
+        assert label("Name") == "Name ·"
+        assert label("Type") == "Type ·"
+        assert label("Tags") == "Tags ·"
+
+        table.post_message(_click_header(table, "Name"))
+        await pilot.pause()
+        assert label("Name") == "Name ▲"
+        assert label("Ordinal") == "Ordinal ·"  # reverted, no longer active
+
+        table.post_message(_click_header(table, "Name"))
+        await pilot.pause()
+        assert label("Name") == "Name ▼"
 
 
 async def test_a_tagged_columns_tags_show_in_the_detail_panel(repo) -> None:

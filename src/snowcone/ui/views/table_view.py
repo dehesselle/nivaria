@@ -28,23 +28,28 @@ from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import ITEM_DETAIL, ItemDetailView
 
-#: Header label paired with a stable key for the two sortable columns;
-#: Type/Nullable/Default/Tags/Comment get auto-generated keys and stay
-#: unsortable -- nobody asked to sort by those.
+#: Header label paired with a stable key for the four sortable columns;
+#: Nullable/Default/Comment get auto-generated keys and stay unsortable --
+#: nobody asked to sort by those.
 _COLUMNS: tuple[tuple[str, str] | str, ...] = (
     ("Ordinal", "ordinal"),
     ("Name", "name"),
-    "Type",
+    ("Type", "type"),
     "Nullable",
     "Default",
-    "Tags",
+    ("Tags", "tags"),
     "Comment",
 )
 
-_SORT_KEYS: dict[str, Callable[[Column], Any]] = {
-    "ordinal": lambda c: c.ordinal_position,
-    "name": lambda c: c.column_name.lower(),
-}
+_SORTABLE_FIELDS: frozenset[str] = frozenset({"ordinal", "name", "type", "tags"})
+
+#: Direction shown on the active sort column's header -- value direction,
+#: not click direction (the common spreadsheet/grid convention).
+_SORT_ASCENDING = "▲"
+_SORT_DESCENDING = "▼"
+#: Shown instead, on every other sortable header, so a column being
+#: clickable doesn't have to be discovered by trial and error.
+_SORT_INACTIVE = "·"
 
 
 class ColumnsView(ItemDetailView, ObjectView):
@@ -94,7 +99,7 @@ class ColumnsView(ItemDetailView, ObjectView):
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         field = event.column_key.value
-        if field not in _SORT_KEYS:
+        if field not in _SORTABLE_FIELDS:
             return
         if field == self._sort_field:
             self._sort_reverse = not self._sort_reverse
@@ -103,20 +108,34 @@ class ColumnsView(ItemDetailView, ObjectView):
             self._sort_reverse = False
         self.update_content()
 
+    def _columns(self) -> tuple[str | tuple[str, str], ...]:
+        """`_COLUMNS`, with a direction arrow appended to the current sort
+        column's header and a plain dot on every other sortable one (every
+        `(label, key)` spec is sortable -- see `_COLUMNS`), so a column
+        being clickable is visible before it's ever clicked. Decoration
+        only -- the key stays untouched, so
+        `on_data_table_header_selected`'s lookup is unaffected, and it's
+        rebuilt fresh every call so switching columns reverts the previous
+        one to the dot for free."""
+        arrow = _SORT_DESCENDING if self._sort_reverse else _SORT_ASCENDING
+        columns: list[str | tuple[str, str]] = []
+        for spec in _COLUMNS:
+            if isinstance(spec, tuple):
+                label, key = spec
+                indicator = arrow if key == self._sort_field else _SORT_INACTIVE
+                columns.append((f"{label} {indicator}", key))
+            else:
+                columns.append(spec)
+        return tuple(columns)
+
     def update_content(self) -> None:
         scope = self.columns_scope()
         self.ensure(scope, config.get(CACHE_TTL))
         tags_scope = self.column_tags_scope()
         self.ensure(tags_scope, config.get(CACHE_TTL))
 
-        table = self.query_one("#detail-columns", DataTable)
-        table.clear(columns=True)
-        table.add_columns(*_COLUMNS)
-        cached = self.repo.columns(scope)
-        rows = sorted(
-            cached.rows, key=_SORT_KEYS[self._sort_field], reverse=self._sort_reverse
-        )
-
+        # Built before sorting -- a "tags" sort needs the count, and this
+        # scan of the tags scope is its only source.
         tags_by_column: dict[str, list[tuple[str, str]]] = {}
         for r in self.repo.raw_rows(tags_scope):
             tags_by_column.setdefault(r.get("COLUMN_NAME"), []).append(
@@ -127,7 +146,36 @@ class ColumnsView(ItemDetailView, ObjectView):
         # pass), it would be a confident-looking guess, so the cell stays
         # blank instead. Same COMPLETE-gated distinction sync_list_note
         # draws between "positively fetched empty" and "not yet known".
+        # Sorting still has to put an unconfirmed column somewhere, though,
+        # so it sorts as a plain 0 even while its cell reads blank -- a
+        # transient state that resolves the moment the scope completes.
         tags_confirmed = self.repo.entry(tags_scope).state is CacheState.COMPLETE
+
+        def _type_of(column: Column) -> str:
+            return format_data_type(
+                column.data_type,
+                character_maximum_length=column.character_maximum_length,
+                numeric_precision=column.numeric_precision,
+                numeric_scale=column.numeric_scale,
+                datetime_precision=column.datetime_precision,
+            )
+
+        # Local, not module-level: "tags" closes over tags_by_column, which
+        # only exists once this scope's rows are in hand.
+        sort_keys: dict[str, Callable[[Column], Any]] = {
+            "ordinal": lambda c: c.ordinal_position,
+            "name": lambda c: c.column_name.lower(),
+            "type": lambda c: _type_of(c).lower(),
+            "tags": lambda c: len(tags_by_column.get(c.column_name, [])),
+        }
+
+        table = self.query_one("#detail-columns", DataTable)
+        table.clear(columns=True)
+        table.add_columns(*self._columns())
+        cached = self.repo.columns(scope)
+        rows = sorted(
+            cached.rows, key=sort_keys[self._sort_field], reverse=self._sort_reverse
+        )
 
         self.detail_rows = {}
         for column in rows:
@@ -137,15 +185,7 @@ class ColumnsView(ItemDetailView, ObjectView):
             table.add_row(
                 Text(str(column.ordinal_position)),
                 Text(column.column_name),
-                Text(
-                    format_data_type(
-                        column.data_type,
-                        character_maximum_length=column.character_maximum_length,
-                        numeric_precision=column.numeric_precision,
-                        numeric_scale=column.numeric_scale,
-                        datetime_precision=column.datetime_precision,
-                    )
-                ),
+                Text(_type_of(column)),
                 # YES/NO verbatim, as INFORMATION_SCHEMA.IS_NULLABLE
                 # reports it -- a column headed "Nullable" showing
                 # "NOT NULL" read backwards.
