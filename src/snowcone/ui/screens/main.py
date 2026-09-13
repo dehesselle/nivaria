@@ -78,7 +78,7 @@ from snowcone.version import VERSION
 #: How often the status indicators are recomputed. Fast enough that a burst of
 #: pool activity is visible rather than blinking past between ticks, and cheap
 #: enough to run on the event loop: an int read plus one indexed sqlite lookup.
-TICK = 0.2
+TICK = 0.3
 
 
 class MainScreen(Screen):
