@@ -149,6 +149,14 @@ class ScopeType(StrEnum):
     #: established (see DESIGN.md). Needs a running warehouse; degrades
     #: blank without one, same as every SELECT-backed scope.
     TAG_REFERENCES = "tag_references"
+    #: One table's (or view's) columns' tags, sourced by a real SELECT
+    #: against INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS -- a different
+    #: function from TAG_REFERENCES above, purpose-built to return every tag
+    #: on every column of one table in a single call rather than needing one
+    #: TAG_REFERENCES call per column. Scoped to (database, schema, table)
+    #: like COLUMNS. Needs a running warehouse; degrades blank without one,
+    #: same as TAG_REFERENCES.
+    COLUMN_TAG_REFERENCES = "column_tag_references"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
 
@@ -237,6 +245,10 @@ class Scope:
                 if self.schema is None:
                     return f"tag_references:{self.database}"
                 return f"tag_references:{self.database}.{self.schema}"
+            case ScopeType.COLUMN_TAG_REFERENCES:
+                return (
+                    f"column_tag_references:{self.database}.{self.schema}.{self.table}"
+                )
             case ScopeType.WAREHOUSES:
                 return "warehouses"
             case ScopeType.ROLES:
@@ -328,6 +340,12 @@ def grants_scope(database: str, schema: str | None = None) -> Scope:
 
 def tag_references_scope(database: str, schema: str | None = None) -> Scope:
     return Scope(ScopeType.TAG_REFERENCES, database=database, schema=schema)
+
+
+def column_tag_references_scope(database: str, schema: str, table: str) -> Scope:
+    return Scope(
+        ScopeType.COLUMN_TAG_REFERENCES, database=database, schema=schema, table=table
+    )
 
 
 def warehouses_scope() -> Scope:

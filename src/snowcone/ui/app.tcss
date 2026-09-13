@@ -169,10 +169,16 @@ ClosingDialog > #dialog {
     height: 1fr;
 }
 
-#detail-history-error {
+#detail-item {
     height: auto;
     max-height: 8;
     padding: 0 1;
+}
+
+/* Only PipeView/TaskView's panel carries this -- it only ever shows a load/
+   run error. ColumnsView's own instance (tags, not errors) stays the
+   default text color. */
+#detail-item.-error {
     color: $error;
 }
 

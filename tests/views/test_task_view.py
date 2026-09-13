@@ -179,7 +179,7 @@ async def test_the_highlighted_rows_error_shows_in_the_task_history_detail_panel
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        panel = pane.query_one("#detail-history-error", Static)
+        panel = pane.query_one("#detail-item", Static)
         assert panel.display
         assert "100132" in str(panel.render())
         assert "Numeric value 'x' is not recognized" in str(panel.render())
@@ -195,7 +195,7 @@ async def test_a_task_row_with_no_error_leaves_the_history_detail_panel_hidden(
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        panel = pane.query_one("#detail-history-error", Static)
+        panel = pane.query_one("#detail-item", Static)
         assert not panel.display
 
 
@@ -223,7 +223,7 @@ async def test_highlighting_a_different_task_history_row_updates_the_detail_pane
         pane.show(ref)
         await pilot.pause()
         table = pane.query_one("#detail-history", DataTable)
-        panel = pane.query_one("#detail-history-error", Static)
+        panel = pane.query_one("#detail-item", Static)
         # Newest first: row 0 is "q-bad", the errored one.
         assert panel.display
         table.move_cursor(row=1)

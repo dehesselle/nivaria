@@ -346,6 +346,18 @@ def fetch_page(
                     scope.database, allow_reconnect=allow_reconnect
                 ),
             )
+        case ScopeType.COLUMN_TAG_REFERENCES:
+            assert scope.database is not None
+            assert scope.schema is not None
+            assert scope.table is not None
+            return Page(
+                gateway.tag_references_all_columns(
+                    scope.database,
+                    scope.schema,
+                    scope.table,
+                    allow_reconnect=allow_reconnect,
+                ),
+            )
         case ScopeType.WAREHOUSES:
             # Small, flat, unpaged lists -- see queries.show_warehouses.
             return Page(gateway.show_warehouses(allow_reconnect=allow_reconnect))

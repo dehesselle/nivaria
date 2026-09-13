@@ -11,16 +11,25 @@ already drifted:
   no ordering to keep in step.
 * **`TabbedView`** -- the two-line `action_show_tab`, once repeated in five
   views.
-* **`HistoryView`** -- a two-source history table plus the panel underneath
-  that describes the highlighted row. `PipeView` and `TaskView` had ~40
-  identical lines each; only the message a row wants to show actually
-  differs, which is the one method a subclass supplies.
+* **`ItemDetailView`** -- a panel below a table that describes whichever row
+  is highlighted, hidden when that row has nothing to say. `HistoryView`
+  (below) is its first consumer, for `PipeView`/`TaskView`'s load/run
+  errors; `ColumnsView` (`table_view.py`) is its second, for a column's
+  tags. Only `detail_text` and which table to watch differ per view --
+  this used to be baked into `HistoryView` alone, under names
+  (`HISTORY_DETAIL`, `history_rows`) that made it look error-specific when
+  it never actually was.
+* **`HistoryView`** -- adds a two-source history table on top of
+  `ItemDetailView`, plus the "capped/empty/errored" note above it.
+  `PipeView` and `TaskView` had ~40 identical lines each; only the message
+  a row wants to show actually differs, which is the one method a
+  subclass supplies.
 
 The widget ids are shared too, and deliberately: exactly one detail view is
 mounted at a time (see `DetailPane`), so `#detail-history` means "whichever
 history table is on screen". The per-view ids these replaced had already
 cost something real: `app.tcss` styled the pipe view's own history table,
-error panel and definition pane, and the task view -- a later copy of all
+detail panel and definition pane, and the task view -- a later copy of all
 three, under its own ids -- silently picked up none of it.
 """
 
@@ -49,7 +58,12 @@ LIST_TABLE = "detail-list"
 LIST_NOTE = "detail-list-note"
 #: A single object's history table, and the panel describing its cursor row.
 HISTORY_TABLE = "detail-history"
-HISTORY_DETAIL = "detail-history-error"
+#: The panel describing whichever row is highlighted in whichever table an
+#: `ItemDetailView` is watching -- a history table's load/run error, or (see
+#: `ColumnsView`) a column's tags. Shared across mutually-exclusive views the
+#: same way HISTORY_TABLE/LIST_TABLE/DEFINITION are -- see the module
+#: docstring.
+ITEM_DETAIL = "detail-item"
 #: The line above a history table admitting that it is not the whole
 #: history -- see `HistoryView.sync_history_note`.
 HISTORY_NOTE = "detail-history-note"
@@ -154,23 +168,75 @@ class TabbedView:
         self.query_one(TabbedContent).active = f"tab-{tab}"  # type: ignore[attr-defined]
 
 
-class HistoryView(TabbedView):
-    """A history table plus a panel describing whichever row is highlighted.
+class ItemDetailView:
+    """A panel below a table, describing whichever row is highlighted.
 
-    `PipeView` and `TaskView` both merge two sources into one table and then
-    want to say something about the cursor row that does not fit in a cell --
-    a load error, a run error. Everything about that is the same; only
-    `detail_text` differs.
+    `HistoryView` (for `PipeView`/`TaskView`'s load/run errors) and
+    `ColumnsView` (for a column's tags) both merge/list rows into one table
+    and then want to say something about the cursor row that does not fit in
+    a cell. Everything about *that* is the same across both; only
+    `detail_text` and which table to watch (`detail_table_id`) differ.
+    """
+
+    #: The id of the DataTable this panel watches -- set by the subclass,
+    #: since each view's own table has its own id (HISTORY_TABLE,
+    #: "detail-columns", ...).
+    detail_table_id: ClassVar[str]
+
+    #: This paint's rows, keyed by the row key stamped into the table --
+    #: looked back up when a row is highlighted. Set by the subclass on
+    #: every repaint.
+    detail_rows: dict[str, dict[str, Any]]
+
+    @abstractmethod
+    def detail_text(self, row: dict[str, Any]) -> str | None:
+        """What the panel should say about `row`, or None to hide it."""
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._sync_item_detail_from_key(
+            event.row_key.value if event.row_key is not None else None
+        )
+
+    def sync_item_detail(self, cursor_row: int) -> None:
+        """Resync against whatever the cursor is actually on after a repaint
+        -- not left to RowHighlighted alone, since it's not guaranteed to
+        re-fire on a table.clear()-and-repopulate while a row is already
+        highlighted."""
+        table = self.query_one(f"#{self.detail_table_id}", DataTable)  # type: ignore[attr-defined]
+        try:
+            row_key, _ = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
+        except CellDoesNotExist:
+            self._show_item_detail(None)
+            return
+        self._sync_item_detail_from_key(row_key.value)
+
+    def _sync_item_detail_from_key(self, key: str | None) -> None:
+        row = self.detail_rows.get(key) if key is not None else None
+        self._show_item_detail(self.detail_text(row) if row else None)
+
+    def _show_item_detail(self, text: str | None) -> None:
+        panel = self.query_one(f"#{ITEM_DETAIL}", Static)  # type: ignore[attr-defined]
+        if text:
+            panel.update(Text(text))
+            panel.display = True
+        else:
+            panel.display = False
+
+
+class HistoryView(TabbedView, ItemDetailView):
+    """A history table plus its `ItemDetailView` panel, and the note above
+    the table admitting when it was capped, empty, or errored.
+
+    `PipeView` and `TaskView` both merge two sources into one table --
+    everything about that (and about the panel below it) is the same; only
+    `detail_text` differs, per `ItemDetailView`.
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("d", "show_tab('definition')", "Definition", show=False),
     ]
 
-    #: This paint's history rows, keyed by the row key stamped into the table
-    #: -- looked back up when a row is highlighted. Set by the subclass on
-    #: every repaint.
-    history_rows: dict[str, dict[str, Any]]
+    detail_table_id = HISTORY_TABLE
 
     def sync_history_note(
         self,
@@ -230,37 +296,3 @@ class HistoryView(TabbedView):
         note.set_class(capped, "-capped")
         note.set_class(error, "-error")
         note.display = capped or empty
-
-    @abstractmethod
-    def detail_text(self, row: dict[str, Any]) -> str | None:
-        """What the panel should say about `row`, or None to hide it."""
-
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._sync_history_detail_from_key(
-            event.row_key.value if event.row_key is not None else None
-        )
-
-    def sync_history_detail(self, cursor_row: int) -> None:
-        """Resync against whatever the cursor is actually on after a repaint
-        -- not left to RowHighlighted alone, since it's not guaranteed to
-        re-fire on a table.clear()-and-repopulate while a row is already
-        highlighted."""
-        table = self.query_one(f"#{HISTORY_TABLE}", DataTable)  # type: ignore[attr-defined]
-        try:
-            row_key, _ = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
-        except CellDoesNotExist:
-            self._show_history_detail(None)
-            return
-        self._sync_history_detail_from_key(row_key.value)
-
-    def _sync_history_detail_from_key(self, key: str | None) -> None:
-        row = self.history_rows.get(key) if key is not None else None
-        self._show_history_detail(self.detail_text(row) if row else None)
-
-    def _show_history_detail(self, text: str | None) -> None:
-        panel = self.query_one(f"#{HISTORY_DETAIL}", Static)  # type: ignore[attr-defined]
-        if text:
-            panel.update(Text(text))
-            panel.display = True
-        else:
-            panel.display = False

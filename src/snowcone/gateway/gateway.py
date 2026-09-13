@@ -126,6 +126,15 @@ class SnowflakeGateway(Protocol):
         self, database: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
 
+    def tag_references_all_columns(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
+
     def pipe_activity(
         self,
         database: str,
@@ -432,6 +441,20 @@ class PoolGateway:
         return self._fetch(
             queries.tag_references(database),
             (database, "DATABASE"),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def tag_references_all_columns(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        return self._fetch(
+            queries.tag_references_all_columns(database),
+            (f"{database}.{schema}.{table}",),
             allow_reconnect=allow_reconnect,
         )
 

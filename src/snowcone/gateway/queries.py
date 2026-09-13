@@ -270,6 +270,29 @@ def tag_references(database: str) -> str:
     )
 
 
+def tag_references_all_columns(database: str) -> str:
+    """Tags applied to every column of one table (or view).
+
+    `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS`, not `TAG_REFERENCES`
+    above called once per column: this function returns every tag on every
+    column of one table in a single call, so a table with a hundred columns
+    still costs one round trip, not a hundred -- the same "no query whose
+    cost scales with row count" discipline every other second-source scope
+    here already follows. The object name binds as a single `%s`, the fully
+    qualified `database.schema.table`; the domain argument is always the
+    literal 'table' -- Snowflake's own function requires that even when the
+    object is a view, so unlike `tag_references` there is no second bind
+    parameter for it.
+    """
+    target = (
+        f"{quote_identifier(database)}.INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS"
+    )
+    return (
+        "SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE, COLUMN_NAME "
+        f"FROM TABLE({target}(%s, 'table'))"
+    )
+
+
 def pipe_activity(fetch_days: int) -> str:
     """Every pipe's *latest* load in a schema, back to `fetch_days` ago.
 

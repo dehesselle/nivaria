@@ -422,6 +422,13 @@ _TAG_REFERENCES = TableSpec(
     order_by=("TAG_NAME",),
 )
 
+_COLUMN_TAG_REFERENCES = TableSpec(
+    name="information_schema_tag_references_all_columns",
+    columns=("TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME", "TAG_VALUE", "COLUMN_NAME"),
+    key=("_scope", "COLUMN_NAME", "TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME"),
+    order_by=("COLUMN_NAME", "TAG_NAME"),
+)
+
 
 def spec_for(scope: Scope) -> TableSpec:
     match scope.type:
@@ -456,6 +463,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _GRANTS
         case ScopeType.TAG_REFERENCES:
             return _TAG_REFERENCES
+        case ScopeType.COLUMN_TAG_REFERENCES:
+            return _COLUMN_TAG_REFERENCES
         case ScopeType.WAREHOUSES:
             return _WAREHOUSES
         case ScopeType.ROLES:

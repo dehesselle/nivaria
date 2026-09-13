@@ -53,9 +53,9 @@ from snowcone.settings import CACHE_TTL, TASK_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import (
     DEFINITION,
-    HISTORY_DETAIL,
     HISTORY_NOTE,
     HISTORY_TABLE,
+    ITEM_DETAIL,
     HistoryView,
 )
 
@@ -75,7 +75,7 @@ class TaskView(HistoryView, ObjectView):
         super().__init__(repo, ref)
         #: Keyed by QUERY_ID here, unlike PipeView's positional key: a task
         #: run has Snowflake's own identifier, a pipe's file load does not.
-        self.history_rows: dict[str, dict[str, Any]] = {}
+        self.detail_rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
@@ -86,7 +86,7 @@ class TaskView(HistoryView, ObjectView):
                 )
                 history.zebra_stripes = True
                 yield history
-                yield Static("", id=HISTORY_DETAIL)
+                yield Static("", id=ITEM_DETAIL, classes="-error")
             with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
                 yield TextArea(
                     "",
@@ -154,10 +154,10 @@ class TaskView(HistoryView, ObjectView):
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
         table.clear(columns=True)
         table.add_columns(*_HISTORY_COLUMNS)
-        self.history_rows = {}
+        self.detail_rows = {}
         for _, r in dated:
             key = str(r.get("QUERY_ID"))
-            self.history_rows[key] = r
+            self.detail_rows[key] = r
             table.add_row(
                 Text(format_timestamp_minutes(r.get("SCHEDULED_TIME"))),
                 Text(format_timestamp_minutes(r.get("QUERY_START_TIME"))),
@@ -165,7 +165,7 @@ class TaskView(HistoryView, ObjectView):
                 Text(r.get("STATE") or ""),
                 key=key,
             )
-        self.sync_history_detail(table.cursor_row)
+        self.sync_item_detail(table.cursor_row)
 
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)

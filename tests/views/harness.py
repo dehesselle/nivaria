@@ -11,6 +11,7 @@ from snowcone.cache.repository import Repository
 from snowcone.models import (
     ObjectRef,
     ObjectType,
+    column_tag_references_scope,
     columns_scope,
     grants_scope,
     materialized_view_stats_scope,
@@ -419,6 +420,30 @@ def put_tag(repo: Repository, database: str, schema: str | None, **extra) -> Non
     }
     row.update(extra)
     scope = tag_references_scope(database, schema)
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+
+
+def put_column_tag(repo: Repository, table: str, column: str, **extra) -> None:
+    """Seeds one tag on one column of `table` -- what ColumnsView's Tags
+    column and detail panel read, analogous to put_tag above but scoped to a
+    single table's TAG_REFERENCES_ALL_COLUMNS pass."""
+    row = {
+        "TAG_DATABASE": "MYDB",
+        "TAG_SCHEMA": "TAGS",
+        "TAG_NAME": "PII",
+        "TAG_VALUE": "true",
+        "COLUMN_NAME": column,
+    }
+    row.update(extra)
+    scope = column_tag_references_scope("MYDB", "PUBLIC", table)
     existing = repo.raw_rows(scope)
     load(
         repo,

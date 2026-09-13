@@ -533,6 +533,28 @@ CREATE TABLE IF NOT EXISTS information_schema_tag_references (
 CREATE INDEX IF NOT EXISTS information_schema_tag_references_scope
     ON information_schema_tag_references(_scope);
 
+-- Tags applied to every column of one table or view (one row per column per
+-- tag), scoped per table like information_schema_columns. Sourced via
+-- INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS rather than TAG_REFERENCES
+-- called once per column -- that function returns every column's tags for
+-- one table in a single call, so this scales with tables, not with columns.
+-- Same warehouse/degrade-blank story as information_schema_tag_references
+-- above. Column set is documentation-only, unverified against a live
+-- account -- same caveat as information_schema_tag_references.
+CREATE TABLE IF NOT EXISTS information_schema_tag_references_all_columns (
+    TAG_DATABASE TEXT,
+    TAG_SCHEMA   TEXT,
+    TAG_NAME     TEXT,
+    TAG_VALUE    TEXT,
+    COLUMN_NAME  TEXT,
+    _scope       TEXT    NOT NULL,
+    _generation  INTEGER NOT NULL,
+    _fetched_at  REAL    NOT NULL,
+    PRIMARY KEY (_scope, COLUMN_NAME, TAG_DATABASE, TAG_SCHEMA, TAG_NAME)
+);
+CREATE INDEX IF NOT EXISTS information_schema_tag_references_all_columns_scope
+    ON information_schema_tag_references_all_columns(_scope);
+
 -- Warehouses and roles. Unlike the object mirrors above these are small,
 -- flat, unpaged lists (see gateway/queries.py), so there is nothing to key
 -- beyond the name -- but they are ordinary SHOW mirrors with the same

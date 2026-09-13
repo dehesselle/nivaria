@@ -324,6 +324,7 @@ cache" is not an acceptable answer.
 | `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view Run history (recent half) | warehouse |
 | `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE` | Schema/Database view Grants | — |
 | `TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES` | Schema/Database view Tags | warehouse |
+| `COLUMN_TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` | Columns view Tags column + detail panel | warehouse |
 
 Two of these are second sources without being `SELECT`s:
 `MATERIALIZED_VIEW_STATS` and `GRANTS` are additional `SHOW` commands, so
@@ -339,6 +340,13 @@ the blank.
 not tags *applied to* it. `ACCOUNT_USAGE.TAG_REFERENCES` was rejected too —
 it needs `IMPORTED PRIVILEGES` and lags hours, for no gain over the
 `INFORMATION_SCHEMA` view on a single object.
+
+`COLUMN_TAG_REFERENCES` reads a different function,
+`INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS`, not `TAG_REFERENCES` called
+once per column: it returns every tag on every column of one table in a
+single call, so the Columns view's Tags column costs one query per table
+regardless of how many columns it has — the same "no query whose cost scales
+with row count" rule the rest of this app already holds `SHOW` to.
 
 Snowflake's own visibility rules still apply on top: `SHOW GRANTS ON <object>`
 only returns what the active role owns, has `MANAGE GRANTS` on, or reaches
@@ -1033,7 +1041,8 @@ actually returns rather than a style choice:
   (history + definition), `ViewView` (columns + definition), `PipeListView`
   (status + history), `SchemaView`/`DatabaseView` (grants + tags).
 - **A detail panel under a table**, for what does not fit in a cell: the
-  history views' error message for the highlighted row.
+  history views' error message for the highlighted row, or (`ColumnsView`)
+  a column's tags.
 
 Two of those decisions are worth their reasoning:
 
@@ -1071,17 +1080,23 @@ piece is there because the duplicated version had already drifted:
   five copies it replaced each mapped a *column index*, so reordering a
   view's columns would have silently aimed its tooltips at the wrong one.
 - **`TabbedView`** — the mnemonic tab switch, in one place instead of five.
-- **`HistoryView`** — the two-source history table plus its detail panel,
-  shared by `PipeView` and `TaskView`. Only the message a row wants to show
-  actually differs, which is the one method a subclass supplies.
+- **`ItemDetailView`** — the panel below a table describing whichever row is
+  highlighted, hidden when that row has nothing to say. Two consumers:
+  `HistoryView` (below), for `PipeView`/`TaskView`'s load/run errors, and
+  `ColumnsView` (`table_view.py`), for a column's tags. Only `detail_text`
+  and which table to watch differ per view.
+- **`HistoryView`** — adds the two-source history table and its
+  capped/empty/errored note on top of `ItemDetailView`, shared by `PipeView`
+  and `TaskView`.
 
-The widget ids are shared too (`detail-list`, `detail-history`,
+The widget ids are shared too (`detail-list`, `detail-history`, `detail-item`,
 `detail-definition`, ...), and deliberately: exactly one view is mounted at a
-time, so `#detail-history` means "whichever history table is on screen". The
-per-view ids these replaced had already cost something real — `app.tcss`
-styled the pipe view's history table, error panel and definition pane, and
-the task view, a later copy of all three under its own ids, silently picked
-up none of it.
+time, so `#detail-history` means "whichever history table is on screen", and
+`#detail-item` means "whichever row's detail is on screen" whether that's an
+error or a column's tags. The per-view ids these replaced had already cost
+something real — `app.tcss` styled the pipe view's history table, detail
+panel and definition pane, and the task view, a later copy of all three under
+its own ids, silently picked up none of it.
 
 ### Column headers mirror Snowflake
 

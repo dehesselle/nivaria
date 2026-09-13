@@ -64,9 +64,9 @@ from snowcone.settings import CACHE_TTL, PIPE_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import (
     DEFINITION,
-    HISTORY_DETAIL,
     HISTORY_NOTE,
     HISTORY_TABLE,
+    ITEM_DETAIL,
     HistoryView,
 )
 
@@ -84,7 +84,7 @@ class PipeView(HistoryView, ObjectView):
 
     def __init__(self, repo: Repository, ref: ObjectRef) -> None:
         super().__init__(repo, ref)
-        self.history_rows: dict[str, dict[str, Any]] = {}
+        self.detail_rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
@@ -95,7 +95,7 @@ class PipeView(HistoryView, ObjectView):
                 )
                 history.zebra_stripes = True
                 yield history
-                yield Static("", id=HISTORY_DETAIL)
+                yield Static("", id=ITEM_DETAIL, classes="-error")
             with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
                 yield TextArea(
                     "",
@@ -186,10 +186,10 @@ class PipeView(HistoryView, ObjectView):
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
         table.clear(columns=True)
         table.add_columns(*_HISTORY_COLUMNS)
-        self.history_rows = {}
+        self.detail_rows = {}
         for index, (_, r) in enumerate(dated):
             key = str(index)
-            self.history_rows[key] = r
+            self.detail_rows[key] = r
             row_count = r.get("ROW_COUNT")
             table.add_row(
                 Text(f"{row_count:,}" if row_count is not None else ""),
@@ -199,7 +199,7 @@ class PipeView(HistoryView, ObjectView):
                 Text(r.get("FILE_NAME") or ""),
                 key=key,
             )
-        self.sync_history_detail(table.cursor_row)
+        self.sync_item_detail(table.cursor_row)
 
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)

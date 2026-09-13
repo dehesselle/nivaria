@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
 from snowcone.models import (
+    column_tag_references_scope,
     columns_scope,
 )
 from snowcone.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
+    load,
+    put_column_tag,
     put_columns,
     put_table,
 )
@@ -68,6 +71,7 @@ async def test_missing_columns_are_requested(repo) -> None:
 async def test_cached_columns_are_not_re_requested(repo) -> None:
     ref = put_table(repo, "ORDERS")
     put_columns(repo, "ORDERS", ("ID", "NUMBER"))
+    put_column_tag(repo, "ORDERS", "ID")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)
@@ -111,7 +115,10 @@ async def test_the_pane_reports_the_scopes_it_reads(repo) -> None:
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        assert [s.key for s in pane.scopes()] == ["columns:MYDB.PUBLIC.ORDERS"]
+        assert [s.key for s in pane.scopes()] == [
+            "columns:MYDB.PUBLIC.ORDERS",
+            "column_tag_references:MYDB.PUBLIC.ORDERS",
+        ]
 
 
 async def test_columns_default_to_declaration_order(repo) -> None:
@@ -186,3 +193,72 @@ async def test_moving_to_another_table_resets_the_sort(repo) -> None:
             "NAME",
             "EMAIL",
         ]
+
+
+async def test_the_tags_column_reads_blank_before_the_tags_scope_has_fetched(
+    repo,
+) -> None:
+    """A "0" would claim more than is actually known -- see ColumnsView."""
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("ID", "NUMBER"))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+        assert table.get_cell_at((0, 5)).plain == ""
+
+
+async def test_the_tags_column_reads_zero_once_confirmed_untagged(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("ID", "NUMBER"))
+    # A completed pass with a tag on some *other* table confirms ORDERS'
+    # own scope as fetched-and-empty, the same COMPLETE/zero-rows shape
+    # sync_list_note relies on elsewhere.
+    put_column_tag(repo, "OTHER_TABLE", "SOME_COLUMN")
+    load(repo, column_tag_references_scope("MYDB", "PUBLIC", "ORDERS"), [])
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+        assert table.get_cell_at((0, 5)).plain == "0"
+
+
+async def test_the_tags_column_counts_a_columns_tags(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("ID", "NUMBER"), ("EMAIL", "TEXT"))
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII")
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="OWNER", TAG_VALUE="analytics")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+        assert table.get_cell_at((0, 5)).plain == "0"
+        assert table.get_cell_at((1, 5)).plain == "2"
+
+
+async def test_a_tagged_columns_tags_show_in_the_detail_panel(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("ID", "NUMBER"), ("EMAIL", "TEXT"))
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII", TAG_VALUE="true")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-columns", DataTable)
+        panel = pane.query_one("#detail-item", Static)
+
+        # Row 0 is ID, untagged.
+        assert not panel.display
+
+        table.move_cursor(row=1)
+        await pilot.pause()
+        assert panel.display
+        assert "PII = true" in str(panel.render())
+
+        table.move_cursor(row=0)
+        await pilot.pause()
+        assert not panel.display
