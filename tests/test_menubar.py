@@ -20,7 +20,7 @@ import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.ui.screens.main import MainScreen
-from snowcone.version import VERSION
+from snowcone.version import __version__
 
 
 class Harness(App[None]):
@@ -199,7 +199,7 @@ async def test_about_opens_the_about_dialog(repo) -> None:
         # The version moved here from the menu bar's trailing text (see
         # `test_the_bar_lays_out_as_a_title_plus_the_trailing_label`).
         header = app.screen.query_one("#about-header", Static)
-        assert VERSION in str(header.render())
+        assert __version__ in str(header.render())
 
 
 async def test_settings_opens_the_settings_dialog(repo) -> None:

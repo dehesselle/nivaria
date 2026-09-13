@@ -75,7 +75,7 @@ from snowcone.ui.views import (  # noqa: F401 -- registers views
 from snowcone.ui.widgets.detail_pane import DetailPane
 from snowcone.ui.widgets.object_tree import ObjectTree
 from snowcone.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
-from snowcone.version import VERSION
+from snowcone.version import __version__
 
 #: How often the status indicators are recomputed. Fast enough that a burst of
 #: pool activity is visible rather than blinking past between ticks, and cheap
@@ -126,7 +126,7 @@ class MainScreen(Screen):
         # the bar, not a sibling.
         with MenuBar():
             with Menu("Snowcone", id="snowcone-menu"):
-                yield AboutMenuItem(path=ABOUT_PATH, variables={"version": VERSION})
+                yield AboutMenuItem(path=ABOUT_PATH, variables={"version": __version__})
                 yield MenuSeparator()
                 yield SettingsMenuItem()
                 yield MenuSeparator()
