@@ -15,7 +15,6 @@ from typing import ClassVar
 
 from tcw.widgets import (
     OPEN_ACTION,
-    TOGGLE_ACTION,
     Countdown,
     Footer,
     LogViewer,
@@ -139,14 +138,14 @@ class MainScreen(Screen):
                 yield MenuItem(
                     "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
                 )
-        yield LogViewer()
+        yield LogViewer(show_key=False)
         yield ObjectTree(self.repo, id="tree")
         yield DetailPane(self.repo, id="detail")
-        # The menu and log keys are pinned, so they hold the left corner
+        # The menu key is pinned, so it holds the left corner
         # whatever the focus chain is doing. Nothing reserves the right
         # corner any more: this footer gives ctrl+p no special treatment,
         # so the status area simply sits there.
-        with Footer(pinned=(OPEN_ACTION, TOGGLE_ACTION)):
+        with Footer(pinned=(OPEN_ACTION)):
             yield RoleLabel(id="footer-role")
             yield WarehouseLabel(id="footer-warehouse")
             yield Countdown(id="footer-countdown")
