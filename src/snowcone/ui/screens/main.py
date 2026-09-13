@@ -147,7 +147,9 @@ class MainScreen(Screen):
                 yield MenuItem("Role ...", id="role", mnemonic="r", shortcut="Ctrl+R")
                 yield MenuItem("Pre-warm cache", id="prewarm", mnemonic="p")
         yield LogViewer(show_key=False)
-        yield ObjectTree(self.repo, id="tree")
+        tree = ObjectTree(self.repo, id="tree")
+        tree.border_title = "Databases"
+        yield tree
         yield DetailPane(self.repo, id="detail")
         # The menu key is pinned, so it holds the left corner
         # whatever the focus chain is doing. Nothing reserves the right
