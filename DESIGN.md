@@ -1552,6 +1552,14 @@ which turned out not to be worth chasing — see the last bullet below:
   to fix, which is out of scope for a verification pass.
 - `information_schema_tag_references`: **confirmed** on production — 3
   real tag references, covering 3 distinct tag names.
+- `information_schema_tag_references_all_columns` (`COLUMN_TAG_REFERENCES`,
+  added after this pass) was checked against a real account on 2026-09-14
+  and found wrong: `TAG_REFERENCES_ALL_COLUMNS` reports a schema- or
+  database-level tag against every column of every table underneath it too
+  (`APPLY_METHOD = 'INHERITED'`), so every column showed its schema's tags
+  as if they were its own. Fixed by adding `WHERE APPLY_METHOD IS DISTINCT
+  FROM 'INHERITED'` to the query (`queries.tag_references_all_columns`).
+  **Now confirmed**, including the fix.
 - `granted_by_role_type` on `SHOW GRANTS` is **no longer speculative**: it
   exists and reads `'ROLE'` on real `SHOW GRANTS ON SCHEMA`/`ON DATABASE`
   output.

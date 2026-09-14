@@ -283,13 +283,23 @@ def tag_references_all_columns(database: str) -> str:
     literal 'table' -- Snowflake's own function requires that even when the
     object is a view, so unlike `tag_references` there is no second bind
     parameter for it.
+
+    The `WHERE` clause is load-bearing, confirmed against a real account:
+    this function reports a tag set on the *schema or database* against
+    every column underneath it too (`APPLY_METHOD = 'INHERITED'`),
+    indistinguishable from a tag actually set on that column without this
+    filter -- without it, every column of every table in a tagged schema
+    shows that schema's tags as if they were its own. `IS DISTINCT FROM`
+    rather than `!=` so legacy rows, where `APPLY_METHOD` is `NULL`, aren't
+    silently dropped along with the inherited ones.
     """
     target = (
         f"{quote_identifier(database)}.INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS"
     )
     return (
         "SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE, COLUMN_NAME "
-        f"FROM TABLE({target}(%s, 'table'))"
+        f"FROM TABLE({target}(%s, 'table')) "
+        "WHERE APPLY_METHOD IS DISTINCT FROM 'INHERITED'"
     )
 
 

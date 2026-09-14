@@ -124,6 +124,17 @@ def test_view_stats_is_the_exact_same_statement_as_table_stats() -> None:
     assert queries.view_stats("MYDB") == queries.table_stats("MYDB")
 
 
+def test_column_tag_references_excludes_tags_inherited_from_the_schema() -> None:
+    """Without this WHERE clause, TAG_REFERENCES_ALL_COLUMNS reports a
+    schema- or database-level tag against every column underneath it too --
+    indistinguishable from a tag actually set on that column."""
+    assert queries.tag_references_all_columns("MYDB") == (
+        "SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE, COLUMN_NAME "
+        "FROM TABLE(\"MYDB\".INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS(%s, 'table')) "
+        "WHERE APPLY_METHOD IS DISTINCT FROM 'INHERITED'"
+    )
+
+
 def test_show_materialized_views_scopes_to_a_quoted_schema() -> None:
     assert queries.show_materialized_views("MYDB", "PUBLIC", limit=10) == (
         'SHOW MATERIALIZED VIEWS IN SCHEMA "MYDB"."PUBLIC" LIMIT 10'
