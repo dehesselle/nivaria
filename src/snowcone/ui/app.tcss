@@ -173,6 +173,11 @@ ClosingDialog > #dialog {
     height: auto;
     max-height: 8;
     padding: 0 1;
+    /* Textual's default overflow-y is hidden, which would clip a column
+       with more tags than fit -- silently, with no scrollbar and no hint
+       anything was cut off. auto scrolls instead, the same way any
+       taller-than-its-box widget here does. */
+    overflow-y: auto;
 }
 
 /* Only PipeView/TaskView's panel carries this -- it only ever shows a load/
