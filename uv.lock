@@ -1352,7 +1352,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
-    { name = "textual", specifier = ">=8.2.8" },
+    { name = "textual", specifier = ">=8.2.8,<9" },
 ]
 
 [package.metadata.requires-dev]

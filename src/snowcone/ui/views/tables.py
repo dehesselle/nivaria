@@ -40,11 +40,12 @@ from collections.abc import Sequence
 from typing import Any, ClassVar, Protocol
 
 from rich.text import Text
-from textual import events
+from tcw.widgets import DataTable
 from textual.binding import Binding
 from textual.coordinate import Coordinate
-from textual.widgets import DataTable, Static, TabbedContent
-from textual.widgets.data_table import CellDoesNotExist
+from textual.widgets import DataTable as TextualDataTable
+from textual.widgets import Static, TabbedContent
+from textual.widgets.data_table import CellDoesNotExist, ColumnKey, RowKey
 
 from snowcone.cache.repository import Entry, Repository
 from snowcone.format import format_timestamp_full
@@ -109,10 +110,10 @@ class HoverTooltipTable(DataTable):
     -- so the row data it needs on hover comes from the same rows the view
     just painted, without querying the cache again.
 
-    `tooltips` maps a column *header* to the merged-row field holding its
-    untruncated value. Keying on the header rather than the column index is
-    what lets a view reorder its columns without silently mis-aiming its own
-    tooltips.
+    `tooltips` maps a column *key* to the merged-row field holding its
+    untruncated value, and `add_column` below keys a column by its header --
+    so a view can reorder its columns without mis-aiming its own tooltips,
+    and the mapping still holds once a sortable header grows an indicator.
     """
 
     def __init__(
@@ -122,38 +123,20 @@ class HoverTooltipTable(DataTable):
         self._view = view
         self._tooltips = tooltips
 
-    def _on_mouse_move(self, event: events.MouseMove) -> None:
-        # Textual dispatches either the underscored or the bare form per
-        # class, not both, and DataTable's own tooltip handling needs this
-        # one -- see watch_hover_coordinate below.
-        super()._on_mouse_move(event)
-        # DataTable leaves hover_coordinate untouched when the mouse moves
-        # over filler space that carries no row/column meta, so a tooltip set
-        # while over a real cell would otherwise never get the reactive
-        # change needed to clear it here.
-        meta = event.style.meta
-        if not meta or meta.get("out_of_bounds", False):
-            self.tooltip = None
+    def add_column(self, label, *, key: str | None = None, **kwargs: Any):
+        # Key defaults to the header text. A tooltip names its column by key,
+        # and a key survives the label growing a sort indicator -- which the
+        # header text this used to match on would not.
+        if key is None and isinstance(label, str):
+            key = label
+        return super().add_column(label, key=key, **kwargs)
 
-    def _field_at(self, column: int) -> str | None:
-        columns = self.ordered_columns
-        if not 0 <= column < len(columns):
-            return None
-        return self._tooltips.get(columns[column].label.plain)
-
-    def watch_hover_coordinate(self, old: Coordinate, value: Coordinate) -> None:
-        super().watch_hover_coordinate(old, value)
-        field = self._field_at(value.column)
+    def get_cell_tooltip(self, row_key: RowKey, column_key: ColumnKey) -> str | None:
+        field = self._tooltips.get(column_key.value)
         if field is None:
-            self.tooltip = None
-            return
-        try:
-            row_key, _ = self.coordinate_to_cell_key(value)
-        except CellDoesNotExist:
-            self.tooltip = None
-            return
+            return None
         row = self._view.row_for(row_key.value) if row_key.value is not None else None
-        self.tooltip = (format_timestamp_full(row.get(field)) or None) if row else None
+        return (format_timestamp_full(row.get(field)) or None) if row else None
 
 
 class TabbedView:
@@ -192,7 +175,9 @@ class ItemDetailView:
     def detail_text(self, row: dict[str, Any]) -> str | None:
         """What the panel should say about `row`, or None to hide it."""
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+    def on_data_table_row_highlighted(
+        self, event: TextualDataTable.RowHighlighted
+    ) -> None:
         self._sync_item_detail_from_key(
             event.row_key.value if event.row_key is not None else None
         )
@@ -202,7 +187,10 @@ class ItemDetailView:
         -- not left to RowHighlighted alone, since it's not guaranteed to
         re-fire on a table.clear()-and-repopulate while a row is already
         highlighted."""
-        table = self.query_one(f"#{self.detail_table_id}", DataTable)  # type: ignore[attr-defined]
+        # Textual's type, not tcw's: this panel watches whichever table a
+        # view points it at, and a plain history table has no reason to be
+        # sortable or to carry tooltips.
+        table = self.query_one(f"#{self.detail_table_id}", TextualDataTable)  # type: ignore[attr-defined]
         try:
             row_key, _ = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
         except CellDoesNotExist:
