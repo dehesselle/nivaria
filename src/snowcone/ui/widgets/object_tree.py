@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from rich.text import Text
-from textual import events
+from tcw.widgets import Resizable
 from textual.geometry import Region
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
@@ -93,15 +93,15 @@ class NodeData:
     database: str | None = None
 
 
-class ObjectTree(Tree[NodeData]):
+class ObjectTree(Resizable, Tree[NodeData]):
     """A lazy tree over the cached metadata of every selected database."""
 
-    #: Guard rails for the drag-resize below -- just enough that neither this
-    #: pane nor its DetailPane sibling can be dragged into uselessness.
-    #: Ported unchanged from snakecam's ResizableTree (same mechanism, same
-    #: numbers -- see ../snakecam/src/snakecam/screens/widgets.py).
-    _MIN_WIDTH = 15
-    _MIN_SIBLING_WIDTH = 20
+    #: Guard rails for `Resizable` -- just enough that neither this pane nor
+    #: its DetailPane sibling can be dragged into uselessness. The drag
+    #: itself lives in tcw now, which is where snakecam's identical copy of
+    #: it went too.
+    RESIZE_MIN = 15
+    RESIZE_MIN_SIBLING = 20
 
     def __init__(self, repo: Repository, **kwargs) -> None:
         super().__init__("root", data=NodeData(NodeType.ROOT, "root"), **kwargs)
@@ -114,37 +114,6 @@ class ObjectTree(Tree[NodeData]):
         #: Set while this widget is restructuring, so the NodeHighlighted that
         #: a cursor restore emits is not mistaken for a user selection.
         self.rebuilding = False
-        #: Whether the right border is currently being dragged to resize.
-        self._dragging = False
-
-    # ------------------------------------------------------------- resize
-
-    def on_mouse_down(self, event: events.MouseDown) -> None:
-        # The tree's own `border: round` right edge is the drag target --
-        # there is no separate handle widget, same as snakecam's ResizableTree.
-        if event.x != self.outer_size.width - 1:
-            return
-        self._dragging = True
-        self.capture_mouse()
-        self.styles.pointer = "ew-resize"
-        event.stop()
-
-    def on_mouse_move(self, event: events.MouseMove) -> None:
-        if not self._dragging:
-            return
-        # Captured, so event.x stays relative to this widget's own,
-        # unmoving left edge -- no delta tracking needed.
-        max_width = self.screen.size.width - self._MIN_SIBLING_WIDTH
-        self.styles.width = max(self._MIN_WIDTH, min(event.x + 1, max_width))
-        event.stop()
-
-    def on_mouse_up(self, event: events.MouseUp) -> None:
-        if not self._dragging:
-            return
-        self._dragging = False
-        self.release_mouse()
-        self.styles.pointer = "default"
-        event.stop()
 
     # ----------------------------------------------------------------- repo
 
