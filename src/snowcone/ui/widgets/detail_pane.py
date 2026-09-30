@@ -167,4 +167,6 @@ class DetailPane(Vertical):
     def _show_placeholder(self, message: str) -> None:
         self._view = None
         self.remove_children()
-        self.mount(Static(message, id="detail-placeholder"))
+        # A class, not an id: removal is deferred, so the outgoing placeholder
+        # is still attached when this one mounts and a fixed id would collide.
+        self.mount(Static(message, classes="detail-placeholder"))

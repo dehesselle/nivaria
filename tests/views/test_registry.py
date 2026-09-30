@@ -8,6 +8,8 @@ from textual.widgets import Static
 from snowcone.models import (
     ObjectRef,
     ObjectType,
+    Scope,
+    ScopeType,
 )
 from snowcone.ui.views.base import registered_types, view_for
 from snowcone.ui.views.pipe_view import PipeView
@@ -111,7 +113,23 @@ async def test_an_unregistered_kind_shows_a_placeholder(repo) -> None:
         result = pane.show(ObjectRef(ObjectType.STAGE, "MYDB", "PUBLIC", "S1"))
         await pilot.pause()
         assert result is None
-        assert pane.query_one("#detail-placeholder", Static)
+        assert pane.query_one(".detail-placeholder", Static)
+
+
+async def test_a_second_object_without_a_view_replaces_the_placeholder(repo) -> None:
+    """The outgoing placeholder is still attached when the next one mounts, so
+    two view-less selections in a row must not collide."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ObjectRef(ObjectType.STAGE, "MYDB", "PUBLIC", "S1"))
+        await pilot.pause()
+        pane.show(ObjectRef(ObjectType.STAGE, "MYDB", "PUBLIC", "S2"))
+        await pilot.pause()
+        pane.show_category(Scope(ScopeType.OBJECTS, "MYDB", "PUBLIC"))
+        await pilot.pause()
+        placeholders = pane.query(".detail-placeholder").results(Static)
+        assert [str(p.content) for p in placeholders] == ["No list view for this yet."]
 
 
 async def test_clearing_empties_the_pane(repo) -> None:

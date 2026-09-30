@@ -160,7 +160,7 @@ ClosingDialog > #dialog {
     height: 1fr;
 }
 
-#detail-placeholder {
+.detail-placeholder {
     padding: 1 2;
     color: $text-muted;
 }
@@ -196,7 +196,7 @@ ClosingDialog > #dialog {
 
 /* Only the error case departs from the neutral default: a category that
    was fetched and came back empty is a settled, unremarkable fact, not a
-   warning -- same $text-muted reasoning #detail-placeholder and
+   warning -- same $text-muted reasoning .detail-placeholder and
    #connect-status already use. */
 #detail-list-note.-error,
 #detail-status-note.-error {
