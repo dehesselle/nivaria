@@ -21,7 +21,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.profiles import ProfileStore
+from snowcone.profiles import Profile, ProfileStore
 from snowcone.ui.messages import ScopeNeeded
 from snowcone.ui.screens.main import CacheUpdated, MainScreen
 from snowcone.ui.screens.multipicker import MultiPickerDialog
@@ -368,6 +368,29 @@ async def test_picking_databases_persists_them_to_the_profile(repo, tmp_path) ->
         await pilot.click("#multipicker-ok")
         await settle(pilot)
     assert store.load()[0].databases == ("ALPHA", "BETA")
+
+
+async def test_picking_databases_keeps_the_profiles_name(repo, tmp_path) -> None:
+    """The picker owns the database selection, not the name: confirming one
+    must not wipe the label the user typed on the connect screen."""
+    put_databases(repo, "ALPHA", "BETA")
+    fetch = RecordingFetch()
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    store = ProfileStore(tmp_path / "recent.json")
+    store.add(Profile(account="acct", user="user", name="Prod"))
+    app = Harness(repo, fetch, pool=pool, profiles=store)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+d")
+        await settle(pilot)
+        await pilot.click("#multipicker-all")
+        await settle(pilot)
+        await pilot.click("#multipicker-ok")
+        await settle(pilot)
+    stored = store.load()[0]
+    assert stored.name == "Prod"
+    assert stored.databases == ("ALPHA", "BETA")
 
 
 async def test_the_picker_is_not_opened_with_nothing_to_show(repo) -> None:

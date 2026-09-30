@@ -14,25 +14,39 @@ profile falls back to the account/user/role label it always used.
 
 Also carries the databases last selected for that identity's Object tree --
 UI state, not a connection parameter, riding on the same record because it is
-naturally scoped to the same identity (account/user/authenticator/role/
-warehouse). This is why the type is `Profile`, not a narrower "recent
-connection": it already describes more than what it takes to open a
-connection.
+naturally scoped to the same identity (account/user/authenticator). This is
+why the type is `Profile`, not a narrower "recent connection": it already
+describes more than what it takes to open a connection.
 
-Reads and writes degrade silently: a missing or corrupt file, or one written
-before the `databases` field existed, means "no recents"/"no remembered
-databases", never a crash before the UI is even up.
+Different screens own different fields of the same record -- the connect
+screen the connection fields and the name, the database picker the database
+selection -- so both write through `ProfileStore.remember`, which merges into
+the stored record rather than replacing it. Rebuilding the record from
+`ConnectParams` alone and handing it to `add` is what once silently wiped a
+profile's name every time its databases were picked.
+
+Reads degrade silently: a missing or corrupt file, or one written before the
+`databases` field existed, means "no recents"/"no remembered databases",
+never a crash before the UI is even up. Writes do not follow suit for a file
+that exists but cannot be read: every write is a read-modify-write, and
+degrading that read to "no recents" would replace the whole file with one
+entry. The write is skipped instead, leaving the file for the user to fix or
+delete.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from snowcone.gateway.pool import EXTERNAL_BROWSER, ConnectParams
 from snowcone.paths import read_json, recent_file, write_json_atomic
 
 MAX_ENTRIES = 10
+
+#: read_json's default for an unreadable file, distinguishable from any value
+#: a valid file could hold.
+_UNREADABLE = object()
 
 
 @dataclass(frozen=True)
@@ -56,8 +70,14 @@ class Profile:
 
     @property
     def identity(self) -> tuple[str, str, str]:
-        """What makes two entries the same connection, for de-duplication."""
-        return (self.account, self.user, self.authenticator)
+        """What makes two entries the same connection, for de-duplication.
+
+        Account and user are casefolded: Snowflake resolves both
+        case-insensitively, so comparing them exactly would turn a reconnect
+        typed as `myorg-acct` into a second, unnamed entry beside the stored
+        `MyOrg-Acct` one.
+        """
+        return (self.account.casefold(), self.user.casefold(), self.authenticator)
 
     @property
     def label(self) -> str:
@@ -102,9 +122,23 @@ class ProfileStore:
         return self._path if self._path is not None else recent_file()
 
     def load(self) -> list[Profile]:
-        data = read_json(self.path, [])
-        if not isinstance(data, list):
+        entries = self._read()
+        return entries if entries is not None else []
+
+    def find(self, params: ConnectParams) -> Profile | None:
+        """The stored profile with `params`' identity, if any."""
+        identity = Profile.from_params(params).identity
+        return next((p for p in self.load() if p.identity == identity), None)
+
+    def _read(self) -> list[Profile] | None:
+        """The stored entries, or None when the file exists but cannot be
+        read -- which load() degrades to "no recents" but a write must not
+        (see the module docstring)."""
+        if not self.path.exists():
             return []
+        data = read_json(self.path, _UNREADABLE)
+        if not isinstance(data, list):
+            return None
         entries: list[Profile] = []
         for item in data:
             if not isinstance(item, dict):
@@ -131,16 +165,51 @@ class ProfileStore:
                 continue
         return entries
 
+    def remember(self, params: ConnectParams, **fields: object) -> None:
+        """Merge `params` and `fields` into the stored profile for `params`'
+        identity and promote it to the front.
+
+        Starts from the stored record, so every field the caller does not
+        pass -- the name when the picker writes, the databases when a connect
+        does -- survives. The connection fields always come from `params`:
+        they describe the session as it actually is now. Call only once the
+        connection behind `params` is known to work.
+        """
+        entries = self._read()
+        if entries is None:
+            return
+        fresh = Profile.from_params(params)
+        existing = next((p for p in entries if p.identity == fresh.identity), None)
+        base = (
+            fresh
+            if existing is None
+            else replace(
+                existing,
+                account=fresh.account,
+                user=fresh.user,
+                authenticator=fresh.authenticator,
+                role=fresh.role,
+                warehouse=fresh.warehouse,
+            )
+        )
+        self._promote(entries, replace(base, **fields))
+
     def add(self, profile: Profile) -> None:
-        """Promote an entry to the front. Call only after a verified connect
-        (or, for a database-selection-only update, once the pool it applies
-        to is already known-good -- see MainScreen._remember_databases)."""
-        entries = [p for p in self.load() if p.identity != profile.identity]
-        entries.insert(0, profile)
-        self._write(entries)
+        """Store `profile` as given, replacing any entry with its identity
+        wholesale, and promote it to the front. Screens use `remember`
+        instead, which keeps the fields they do not own."""
+        entries = self._read()
+        if entries is not None:
+            self._promote(entries, profile)
 
     def remove(self, profile: Profile) -> None:
-        self._write([p for p in self.load() if p.identity != profile.identity])
+        entries = self._read()
+        if entries is not None:
+            self._write([p for p in entries if p.identity != profile.identity])
+
+    def _promote(self, entries: list[Profile], profile: Profile) -> None:
+        rest = [p for p in entries if p.identity != profile.identity]
+        self._write([profile, *rest])
 
     def _write(self, entries: list[Profile]) -> None:
         try:

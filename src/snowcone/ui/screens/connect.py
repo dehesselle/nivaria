@@ -25,7 +25,6 @@ browser prompts -- there is nothing left for the user to weigh in on, and
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from typing import ClassVar
 
 from tcw.dialogs import ConfirmDialog
@@ -387,28 +386,12 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
 
     def _finish(self, params: ConnectParams, pool: ConnectionPool) -> None:
         # Recorded only now: a connection that never worked is not one worth
-        # offering again next time. The previously-remembered database
-        # selection for this identity (if any) is carried forward explicitly:
-        # Profile.from_params has no way to know it -- a bare ConnectParams
-        # carries no database-selection information -- and without this an
-        # ordinary reconnect would silently wipe out
-        # MainScreen._remember_databases's earlier write for the same
-        # identity, since ProfileStore.add replaces the whole record for a
-        # matching identity rather than merging into it. The name, unlike
-        # databases, comes straight from the form just submitted -- it is
-        # an editable field right here, not state owned elsewhere, so
-        # whatever is currently typed (including blank, if cleared) is what
-        # should stick.
-        fresh = Profile.from_params(params)
-        existing = next(
-            (p for p in self._profile_store.load() if p.identity == fresh.identity),
-            None,
-        )
-        databases = existing.databases if existing is not None else ()
-        name = self._value("name")
-        self._profile_store.add(
-            dataclasses.replace(fresh, name=name, databases=databases)
-        )
+        # offering again next time. The name comes straight from the form
+        # just submitted -- it is an editable field right here, not state
+        # owned elsewhere, so whatever is currently typed (including blank,
+        # if cleared) is what should stick. The database selection is not
+        # this screen's to set, and `remember` keeps it.
+        self._profile_store.remember(params, name=self._value("name"))
         self.dismiss(pool)
 
     def _on_key(self, event: events.Key) -> None:

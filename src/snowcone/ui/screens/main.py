@@ -7,7 +7,6 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Sequence
 from importlib.resources import files
 from math import ceil
@@ -46,7 +45,7 @@ from snowcone.models import (
     roles_scope,
     warehouses_scope,
 )
-from snowcone.profiles import Profile, ProfileStore
+from snowcone.profiles import ProfileStore
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import Priority
 from snowcone.settings import CACHE_TTL, config
@@ -460,18 +459,15 @@ class MainScreen(Screen):
         Profile is (see ConnectScreen._finish): the pool here is already a
         working connection, so there is no "does this even work" gate left
         to wait on -- this is a live UI preference riding on the same
-        record. ProfileStore.add's identity-based promotion also refreshes
-        role/warehouse to whatever is currently live, which is a deliberate,
-        desirable side effect of reusing that method rather than an
-        accident: the record should describe this session as it actually is
-        now.
+        record. ProfileStore.remember also refreshes role/warehouse to
+        whatever is currently live, which is a deliberate, desirable side
+        effect rather than an accident: the record should describe this
+        session as it actually is now. The name is not this screen's to set,
+        and `remember` keeps it.
         """
         if self.pool is None:
             return
-        profile = dataclasses.replace(
-            Profile.from_params(self.pool.params), databases=tuple(databases)
-        )
-        self.profiles.add(profile)
+        self.profiles.remember(self.pool.params, databases=tuple(databases))
 
     # ------------------------------------------------------ warehouse / role
 

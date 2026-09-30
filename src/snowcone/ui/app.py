@@ -133,10 +133,7 @@ class SnowconeApp(App[None]):
     def _matching_profile(self, pool: ConnectionPool) -> Profile | None:
         """The stored profile for `pool`'s identity, if any -- used to
         restore a previously remembered database selection."""
-        fresh = Profile.from_params(pool.params)
-        return next(
-            (p for p in self.profiles.load() if p.identity == fresh.identity), None
-        )
+        return self.profiles.find(pool.params)
 
     def _open_repo(self, pool: ConnectionPool) -> Repository:
         """The cache for whatever identity `pool.params` currently describes.

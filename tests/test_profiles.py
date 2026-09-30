@@ -167,3 +167,110 @@ def test_blank_role_and_warehouse_become_none_in_params() -> None:
     params = Profile(account="A", user="me").to_params()
     assert params.role is None
     assert params.warehouse is None
+
+
+# ---------------------------------------------------------------- remember
+
+
+def test_remembering_databases_keeps_the_stored_name(tmp_path) -> None:
+    """The picker owns the databases, the connect screen the name -- a write
+    from one must not wipe what the other set."""
+    profiles = store(tmp_path)
+    profiles.add(Profile(account="A", user="me", name="Prod"))
+    profiles.remember(ConnectParams(account="A", user="me"), databases=("MYDB",))
+    assert profiles.load() == [
+        Profile(account="A", user="me", name="Prod", databases=("MYDB",))
+    ]
+
+
+def test_remembering_a_connect_keeps_the_stored_databases(tmp_path) -> None:
+    profiles = store(tmp_path)
+    profiles.add(Profile(account="A", user="me", databases=("MYDB",)))
+    profiles.remember(ConnectParams(account="A", user="me"), name="Prod")
+    assert profiles.load() == [
+        Profile(account="A", user="me", name="Prod", databases=("MYDB",))
+    ]
+
+
+def test_remembering_a_connect_refreshes_role_and_warehouse(tmp_path) -> None:
+    profiles = store(tmp_path)
+    profiles.add(Profile(account="A", user="me", role="READER", warehouse="SMALL"))
+    profiles.remember(
+        ConnectParams(account="A", user="me", role="ADMIN", warehouse=None)
+    )
+    stored = profiles.load()[0]
+    assert (stored.role, stored.warehouse) == ("ADMIN", "")
+
+
+def test_remembering_promotes_the_entry_to_the_front(tmp_path) -> None:
+    profiles = store(tmp_path)
+    profiles.add(Profile(account="A", user="me"))
+    profiles.add(Profile(account="B", user="me"))
+    profiles.remember(ConnectParams(account="A", user="me"))
+    assert [p.account for p in profiles.load()] == ["A", "B"]
+
+
+def test_finding_a_profile_by_its_params(tmp_path) -> None:
+    profiles = store(tmp_path)
+    profiles.add(Profile(account="A", user="me", name="Prod"))
+    assert profiles.find(ConnectParams(account="A", user="me")).name == "Prod"
+    assert profiles.find(ConnectParams(account="B", user="me")) is None
+
+
+# ---------------------------------------------------------- unreadable file
+
+
+def test_a_corrupt_file_is_not_overwritten_by_add(tmp_path) -> None:
+    """Degrading the read half of a read-modify-write to "no recents" would
+    replace every stored entry with the one being added."""
+    path = tmp_path / "recent.json"
+    path.write_text("{ not json")
+    ProfileStore(path).add(Profile(account="A", user="me"))
+    assert path.read_text() == "{ not json"
+
+
+def test_a_corrupt_file_is_not_overwritten_by_remember(tmp_path) -> None:
+    path = tmp_path / "recent.json"
+    path.write_text("{ not json")
+    ProfileStore(path).remember(ConnectParams(account="A", user="me"))
+    assert path.read_text() == "{ not json"
+
+
+def test_a_corrupt_file_is_not_overwritten_by_remove(tmp_path) -> None:
+    path = tmp_path / "recent.json"
+    path.write_text("{ not json")
+    ProfileStore(path).remove(Profile(account="A", user="me"))
+    assert path.read_text() == "{ not json"
+
+
+def test_a_file_that_is_not_a_list_is_not_overwritten(tmp_path) -> None:
+    path = tmp_path / "recent.json"
+    path.write_text('{"account": "A"}')
+    ProfileStore(path).add(Profile(account="B", user="me"))
+    assert path.read_text() == '{"account": "A"}'
+
+
+def test_a_missing_file_is_still_created_on_first_add(tmp_path) -> None:
+    profiles = store(tmp_path)
+    profiles.add(Profile(account="A", user="me"))
+    assert profiles.load() == [Profile(account="A", user="me")]
+
+
+# ------------------------------------------------------------ letter case
+
+
+def test_identity_ignores_the_case_of_account_and_user() -> None:
+    """Snowflake resolves both case-insensitively."""
+    assert (
+        Profile(account="MyOrg-Acct", user="Me").identity
+        == Profile(account="myorg-acct", user="ME").identity
+    )
+
+
+def test_a_reconnect_typed_in_a_different_case_updates_rather_than_duplicates(
+    tmp_path,
+) -> None:
+    profiles = store(tmp_path)
+    profiles.add(Profile(account="MyOrg-Acct", user="me", name="Prod"))
+    profiles.remember(ConnectParams(account="myorg-acct", user="ME"))
+    assert profiles.load() == [Profile(account="myorg-acct", user="ME", name="Prod")]

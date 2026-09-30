@@ -871,7 +871,7 @@ browser every time the access token expires.
 
 **snowcone stores no password anywhere.** Each remembered identity is a
 `Profile` (`snowcone/profiles.py`, on disk at `recent.json`): account, user,
-authenticator, role and warehouse, plus the databases last selected for that
+authenticator, role, warehouse and an optional display name, plus the databases last selected for that
 identity's Object tree (see "The Object tree" above) -- UI state riding on
 the same record because it is naturally scoped to the same identity, which is
 also why the type outgrew being just a bundle of connection parameters. For
@@ -882,6 +882,17 @@ Connections are recorded as "recent" only after they have actually worked --
 but a database selection is written the moment the picker confirms one, live,
 since there is no equivalent "did it work" gate for a UI preference the way
 there is for a connection attempt.
+
+The two writers own disjoint fields of the same record -- the connect screen
+the connection fields and the name, the picker the databases -- so both go
+through `ProfileStore.remember`, which merges into the stored record for that
+identity instead of replacing it. Rebuilding the record from the connection
+parameters alone once wiped a profile's name every time its databases were
+picked. Identity is account/user/authenticator, with account and user
+casefolded because Snowflake resolves them case-insensitively. A `recent.json`
+that exists but cannot be read shows as "no recents", but is never written
+over: every write is a read-modify-write, and writing on top of that empty
+read would replace every stored entry with one.
 
 ---
 
