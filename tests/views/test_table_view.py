@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tcw.widgets import DataTable as TcwDataTable
 from textual.widgets import DataTable, Static
 
 from snowcone.models import (
@@ -22,7 +23,7 @@ def _click_header(table: DataTable, label: str) -> DataTable.HeaderSelected:
     """Build the message a real click on the `label` header posts -- the
     same event `ColumnsView.on_data_table_header_selected` bubbles up.
     Matches by prefix, not equality: the active sort column's label carries
-    a trailing direction arrow ("Name ▲") that a bare click target never
+    a trailing sort indicator ("Name ↑") that a bare click target never
     names, and no header word is a prefix of another."""
     column = next(c for c in table.ordered_columns if c.label.plain.startswith(label))
     index = next(i for i, c in enumerate(table.ordered_columns) if c is column)
@@ -306,20 +307,21 @@ async def test_the_active_sort_columns_header_shows_a_direction_arrow(repo) -> N
             )
 
         # Default sort is Ordinal, ascending; every other sortable column
-        # shows a plain dot, not nothing, so it reads as clickable.
-        assert label("Ordinal") == "Ordinal ▲"
-        assert label("Name") == "Name ·"
-        assert label("Type") == "Type ·"
-        assert label("Tags") == "Tags ·"
+        # shows the inactive indicator, not nothing, so it reads as clickable.
+        assert label("Ordinal") == f"Ordinal {TcwDataTable.SORT_ASCENDING}"
+        assert label("Name") == f"Name {TcwDataTable.SORT_INACTIVE}"
+        assert label("Type") == f"Type {TcwDataTable.SORT_INACTIVE}"
+        assert label("Tags") == f"Tags {TcwDataTable.SORT_INACTIVE}"
 
         table.post_message(_click_header(table, "Name"))
         await pilot.pause()
-        assert label("Name") == "Name ▲"
-        assert label("Ordinal") == "Ordinal ·"  # reverted, no longer active
+        assert label("Name") == f"Name {TcwDataTable.SORT_ASCENDING}"
+        # Reverted, no longer active.
+        assert label("Ordinal") == f"Ordinal {TcwDataTable.SORT_INACTIVE}"
 
         table.post_message(_click_header(table, "Name"))
         await pilot.pause()
-        assert label("Name") == "Name ▼"
+        assert label("Name") == f"Name {TcwDataTable.SORT_DESCENDING}"
 
 
 async def test_a_tagged_columns_tags_show_in_the_detail_panel(repo) -> None:
