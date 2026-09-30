@@ -143,17 +143,19 @@ async def test_a_pipes_history_ignores_another_pipes_activity_rows(repo) -> None
 
 
 async def test_the_near_real_time_source_wins_on_an_overlapping_row(repo) -> None:
-    """Merged by (FILE_NAME, LAST_LOAD_TIME) -- the near-real-time source is
-    inserted last, so an identical key from the backfill is overlaid rather
+    """Merged by (FILE_NAME, PIPE_RECEIVED_TIME) -- the near-real-time source
+    is inserted last, so the same load from the backfill is overlaid rather
     than duplicated."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     when = _days_ago(10)
+    received = _days_ago(10.001)
     put_pipe_activity(repo, "LOAD_ORDERS")  # resolves the target table
     put_pipe_activity_history(
         repo,
         "LOAD_ORDERS",
         FILE_NAME="orders_1.csv.gz",
         LAST_LOAD_TIME=when,
+        PIPE_RECEIVED_TIME=received,
         STATUS="Load in progress",
     )
     put_pipe_history(
@@ -161,6 +163,7 @@ async def test_the_near_real_time_source_wins_on_an_overlapping_row(repo) -> Non
         "LOAD_ORDERS",
         FILE_NAME="orders_1.csv.gz",
         LAST_LOAD_TIME=when,
+        PIPE_RECEIVED_TIME=received,
         STATUS="Loaded",
     )
     app = Harness(repo)
@@ -171,6 +174,70 @@ async def test_the_near_real_time_source_wins_on_an_overlapping_row(repo) -> Non
         table = pane.query_one("#detail-history", DataTable)
         assert table.row_count == 1
         assert table.get_cell_at((0, 3)).plain == "Loaded"
+
+
+async def test_the_same_load_is_shown_once_even_when_the_sources_disagree_on_its_load_time(
+    repo,
+) -> None:
+    """The two views stamp LAST_LOAD_TIME independently -- these offsets are
+    the ones a production account reported for one load (AU 11:11:24.961,
+    IS 11:11:24.926, both received 11:11:05.757). Keying on LAST_LOAD_TIME
+    showed that load twice; PIPE_RECEIVED_TIME is what both agree on."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    received = datetime.now().astimezone() - timedelta(days=1)
+    put_pipe_activity(repo, "LOAD_ORDERS")  # resolves the target table
+    put_pipe_activity_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="load_20260930110515.csv",
+        LAST_LOAD_TIME=(received + timedelta(seconds=19.204)).isoformat(),
+        PIPE_RECEIVED_TIME=received.isoformat(),
+        STATUS="Load in progress",
+    )
+    put_pipe_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="load_20260930110515.csv",
+        LAST_LOAD_TIME=(received + timedelta(seconds=19.169)).isoformat(),
+        PIPE_RECEIVED_TIME=received.isoformat(),
+        STATUS="Loaded",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-history", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 3)).plain == "Loaded"
+
+
+async def test_two_loads_of_the_same_file_name_are_both_shown(repo) -> None:
+    """Keying on FILE_NAME alone would be simpler and would hide a file that
+    was genuinely ingested twice -- e.g. overwritten on the stage and picked
+    up again -- which is exactly the history worth seeing."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_ORDERS")  # resolves the target table
+    put_pipe_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=_days_ago(2),
+        PIPE_RECEIVED_TIME=_days_ago(2.001),
+    )
+    put_pipe_history(
+        repo,
+        "LOAD_ORDERS",
+        FILE_NAME="orders_1.csv.gz",
+        LAST_LOAD_TIME=_days_ago(1),
+        PIPE_RECEIVED_TIME=_days_ago(1.001),
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history", DataTable).row_count == 2
 
 
 async def test_rows_older_than_the_show_window_are_hidden_but_stay_cached(repo) -> None:

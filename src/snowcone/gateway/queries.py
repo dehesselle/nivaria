@@ -365,8 +365,8 @@ def pipe_activity_history(fetch_days: int, max_rows: int) -> str:
     """
     return (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
-        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
-        "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
+        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_RECEIVED_TIME, "
+        "TABLE_CATALOG_NAME, TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
@@ -410,8 +410,8 @@ def pipe_history(
     target = f"{quote_identifier(target_catalog)}.INFORMATION_SCHEMA.COPY_HISTORY"
     qualified_table = quote_literal(f"{target_catalog}.{target_schema}.{target_table}")
     return (
-        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME, "
-        "FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
+        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, "
+        "PIPE_RECEIVED_TIME, PIPE_NAME, FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
         f"FROM TABLE({target}("
         f"TABLE_NAME => {qualified_table}, "
         "START_TIME => DATEADD('day', "

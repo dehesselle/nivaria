@@ -173,8 +173,8 @@ def test_pipe_activity_history_targets_one_pipe_with_bound_params() -> None:
     QUALIFY-reduced, since it needs the full history, not just the latest."""
     assert queries.pipe_activity_history(90, 5000) == (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
-        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
-        "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
+        "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_RECEIVED_TIME, "
+        "TABLE_CATALOG_NAME, TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
@@ -188,8 +188,8 @@ def test_pipe_history_targets_information_schema_copy_history() -> None:
     ordinary WHERE values, so they are quote_literal'd/computed as plain SQL
     text; PIPE_NAME filters the function's output and binds normally."""
     assert queries.pipe_history("MYDB", "PUBLIC", "ORDERS", 5000) == (
-        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_NAME, "
-        "FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
+        "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, "
+        "PIPE_RECEIVED_TIME, PIPE_NAME, FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
         'FROM TABLE("MYDB".INFORMATION_SCHEMA.COPY_HISTORY('
         "TABLE_NAME => 'MYDB.PUBLIC.ORDERS', "
         "START_TIME => DATEADD('day', -14, CURRENT_TIMESTAMP())"

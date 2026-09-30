@@ -396,7 +396,17 @@ scope succeeded.
 The merge key differs, and the reason is Snowflake's: a task run has
 `QUERY_ID`, Snowflake's own identifier for one run, present in both sources.
 A pipe's file load has no equivalent, so it is keyed on `(FILE_NAME,
-LAST_LOAD_TIME)`.
+PIPE_RECEIVED_TIME)`.
+
+`LAST_LOAD_TIME` looks like the natural second half of that key and is not,
+and this was a real incident: the two views stamp it independently, so the
+same load carried `11:11:24.961` in `ACCOUNT_USAGE` and `11:11:24.926` in
+`INFORMATION_SCHEMA` on a production account. Every load in both sources
+showed up twice, which the minute-precision "Loaded" column hid. Comparing all
+shared columns for every overlapping load there found `LAST_LOAD_TIME` the
+only one that differed, and `PIPE_RECEIVED_TIME` equal and non-NULL in every
+pair. A row without one falls back to `LAST_LOAD_TIME`, so it cannot collapse
+several loads of one file name into one.
 
 Rows older than the "display window" setting are filtered out of the *view*
 only; they stay in the fetch-window-bounded cache, so shrinking the display

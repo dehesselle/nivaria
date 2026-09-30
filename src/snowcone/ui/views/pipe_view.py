@@ -20,9 +20,12 @@ unlike the schema-wide `pipe_activity_scope` the "Pipes (n)" list uses, which
 is reduced to each pipe's latest row only) and `pipe_history_scope`
 (INFORMATION_SCHEMA.COPY_HISTORY, near-real-time but limited to Snowflake's
 own 14-day retention for that function). Rows are merged by (FILE_NAME,
-LAST_LOAD_TIME), with the near-real-time source inserted last so it wins on
-overlap -- robust to either source being empty or failed, since there is no
-need to reason about which scope succeeded. The result is filtered to the
+PIPE_RECEIVED_TIME), with the near-real-time source inserted last so it wins
+on overlap -- robust to either source being empty or failed, since there is no
+need to reason about which scope succeeded. Not by LAST_LOAD_TIME, the
+obvious candidate: the two views stamp that independently, tens of
+milliseconds apart for the same load on a live account, so keying on it
+showed every overlapping load twice. The result is filtered to the
 "pipe history display window" setting, which can be shorter than the fetch
 window: shrinking it later is a display-only change, since the wider range
 stays cached either way.
@@ -71,6 +74,15 @@ from snowcone.ui.views.tables import (
 )
 
 _HISTORY_COLUMNS = ("Rows", "Size", "Loaded", "Status", "File Name")
+
+
+def _merge_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    """One load's identity across both history sources -- see the module
+    docstring. Falls back to LAST_LOAD_TIME for a row without a
+    PIPE_RECEIVED_TIME, so several such loads of one file name are not
+    collapsed into one."""
+    received = row.get("PIPE_RECEIVED_TIME")
+    return (row.get("FILE_NAME"), received or row.get("LAST_LOAD_TIME"))
 
 
 @register_view
@@ -152,14 +164,15 @@ class PipeView(HistoryView, ObjectView):
         if history_scope is not None:
             self.ensure(history_scope, ttl)
 
-        # Merged by (FILE_NAME, LAST_LOAD_TIME) -- see the module docstring
-        # for why this needs no "which scope succeeded" branching.
+        # Merged by (FILE_NAME, PIPE_RECEIVED_TIME) -- see the module
+        # docstring for why that key, and why this needs no "which scope
+        # succeeded" branching.
         merged: dict[tuple[Any, Any], dict[str, Any]] = {}
         for r in self.repo.raw_rows(activity_history_scope):
-            merged[(r.get("FILE_NAME"), r.get("LAST_LOAD_TIME"))] = r
+            merged[_merge_key(r)] = r
         if history_scope is not None:
             for r in self.repo.raw_rows(history_scope):
-                merged[(r.get("FILE_NAME"), r.get("LAST_LOAD_TIME"))] = r
+                merged[_merge_key(r)] = r
 
         show_days = config.get(PIPE_HISTORY_SHOW_DAYS)
         cutoff = datetime.now().astimezone() - timedelta(days=show_days)
