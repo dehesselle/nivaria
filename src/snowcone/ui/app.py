@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 
 from textual import work
 from textual.app import App
@@ -18,6 +19,10 @@ from snowcone.ui.screens.closing import ClosingDialog
 from snowcone.ui.screens.connect import ConnectScreen
 from snowcone.ui.screens.main import MainScreen
 
+#: How long a "no longer exists" notice stays up, and so how long an
+#: identical one is suppressed.
+_MISSING_TIMEOUT = 5.0
+
 
 class SnowconeApp(App[None]):
     CSS_PATH = "app.tcss"
@@ -34,6 +39,8 @@ class SnowconeApp(App[None]):
         # the app's lifetime, not several independently-reloading views onto
         # the same file.
         self.profiles = ProfileStore()
+        #: When each "no longer exists" notice was last shown, by text.
+        self._missing_notices: dict[str, float] = {}
 
     def on_mount(self) -> None:
         self._start()
@@ -193,13 +200,30 @@ class SnowconeApp(App[None]):
         if isinstance(screen, MainScreen):
             screen.post_message(CacheUpdated(scope, complete))
 
-    def _fetch_failed(self, scope, message: str) -> None:
-        self.call_from_thread(
-            self.notify,
-            f"Could not load {scope}: {message}",
-            severity="error",
-            timeout=8,
-        )
+    def _fetch_failed(self, scope, message: str, missing: bool) -> None:
+        """Called on a fetch worker thread; hop to the event loop."""
+        self.call_from_thread(self._report_fetch_failure, scope, message, missing)
+
+    def _report_fetch_failure(self, scope, message: str, missing: bool) -> None:
+        if not missing:
+            self.notify(
+                f"Could not load {scope}: {message}", severity="error", timeout=8
+            )
+            return
+        # Something dropped elsewhere, which the fetch service is already
+        # clearing out of the tree -- not an error the user has to act on.
+        # Snowflake's own last line names the object ("Schema 'DB.S' does not
+        # exist or not authorized."), which reads better than our scope key.
+        # One visit fails several scopes over the same object at once (a
+        # schema's Grants and Tags), so a repeat of the same text is dropped
+        # while the first toast is still up.
+        lines = [line for line in message.splitlines() if line.strip()]
+        text = f"{lines[-1] if lines else message} Refreshing."
+        now = monotonic()
+        if now - self._missing_notices.get(text, float("-inf")) < _MISSING_TIMEOUT:
+            return
+        self._missing_notices[text] = now
+        self.notify(text, severity="warning", timeout=_MISSING_TIMEOUT)
 
     def on_unmount(self) -> None:
         if self.fetch is not None:

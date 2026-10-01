@@ -356,6 +356,56 @@ def roles_scope() -> Scope:
     return Scope(ScopeType.ROLES)
 
 
+def containing_scopes(scope: Scope) -> list[Scope]:
+    """The listings a vanished object behind `scope` would have to drop out of.
+
+    A fetch that fails with "does not exist" refreshes these, so a node for
+    something dropped elsewhere disappears right away instead of waiting out
+    the TTL. One level up only: if that level is gone too, its own refresh
+    fails the same way and climbs on from there.
+
+    No default arm, same as `Scope.key`: a new scope type has to decide.
+    """
+    match scope.type:
+        case ScopeType.DATABASES | ScopeType.WAREHOUSES | ScopeType.ROLES:
+            return []
+        case ScopeType.SCHEMAS | ScopeType.DATABASE_PRIME:
+            return [databases_scope()]
+        case ScopeType.GRANTS | ScopeType.TAG_REFERENCES | ScopeType.COLUMNS_PRIME if (
+            scope.schema is None
+        ):
+            return [databases_scope()]
+        case (
+            ScopeType.OBJECTS
+            | ScopeType.TABLE_STATS
+            | ScopeType.VIEW_STATS
+            | ScopeType.MATERIALIZED_VIEW_STATS
+            | ScopeType.PIPE_ACTIVITY
+            | ScopeType.TASK_ACTIVITY
+            | ScopeType.GRANTS
+            | ScopeType.TAG_REFERENCES
+            | ScopeType.COLUMNS_PRIME
+        ):
+            assert scope.database is not None
+            return [schemas_scope(scope.database)]
+        case ScopeType.COLUMNS | ScopeType.COLUMN_TAG_REFERENCES:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # The scope names a table or a view without saying which.
+            return [
+                objects_scope(ObjectType.TABLE, scope.database, scope.schema),
+                objects_scope(ObjectType.VIEW, scope.database, scope.schema),
+            ]
+        case ScopeType.PIPE_HISTORY | ScopeType.PIPE_ACTIVITY_HISTORY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            return [objects_scope(ObjectType.PIPE, scope.database, scope.schema)]
+        case ScopeType.TASK_HISTORY | ScopeType.TASK_ACTIVITY_HISTORY:
+            assert scope.database is not None
+            assert scope.schema is not None
+            return [objects_scope(ObjectType.TASK, scope.database, scope.schema)]
+
+
 #: Refresh cadence, in seconds, for a scope whose own data does not change on
 #: the ordinary CACHE_TTL cadence -- see ScopeType.PIPE_ACTIVITY's comment. A
 #: plain constant, not a Setting: it is a correctness bound, not a

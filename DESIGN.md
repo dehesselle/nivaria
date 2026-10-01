@@ -151,8 +151,25 @@ Scopes are **independent of one another**. It is tempting to think a schema's
 tables must wait for that database's schema list to finish refreshing, but each
 query is self-contained, so they simply run concurrently. There is no
 dependency graph, no ordering constraint and no deadlock surface. If a schema
-really was dropped, its tables fetch fails, that failure is recorded, and the
-schema refresh removes the node on its own next pass.
+really was dropped, its tables fetch fails with "does not exist", that failure
+is recorded, and the failing job asks for the listing one level up
+(`models.containing_scopes`), whose refresh removes the node. That request
+is made after the fact and never waited on, so it adds no ordering.
+
+This used to say the schema list's "own next pass" would remove the node,
+and that was true but useless: the next pass was the TTL sweep, up to
+`CACHE_TTL` away and postponed by every navigation, so a schema dropped in
+Snowsight stayed in the tree and failed every visit with an error toast. A
+drop made elsewhere is invisible to snowcone until a statement trips over it,
+so tripping over it is the trigger. "Does not exist" is recognised by the
+driver's error number (2003), not its message text, which varies by object
+kind; it is reported as a warning rather than an error, and identical
+notices are folded, since one visit to a dropped schema fails its Grants and
+Tags together. It climbs one level per failure: a table's columns name only
+the table, so a dropped *schema* found that way first refreshes the schema's
+object listings, and those are requested per schema on purpose -- a
+database-wide prime would succeed and leave the schema node standing, while
+`SHOW ... IN SCHEMA` fails the same way and carries the refresh up.
 
 ### One cache file per identity, not a role dimension on Scope
 
@@ -808,6 +825,13 @@ prompt**. The pool exists to make that a one-time event.
   at checkout cannot see) follows the same rule: replaced transparently for
   an interactive/visible caller, retried once against the fresh connection;
   dropped and shrunk, with no retry, for a background one.
+- **"Does not exist" is the exception to that rule**: the connection that
+  reported it is healthy, so `PoolGateway._fetch_once` hands it back to the
+  pool and only then raises, and `_fetch` does not retry it. Before this,
+  every visit to an object dropped elsewhere closed two working connections
+  and opened two new ones, each a possible MFA prompt. Kept to that one error
+  number on purpose: an expired session is the same driver exception type,
+  and that one must still be discarded.
 
 `ConnectionPool.close()` -- called on quit and at the start of a reconnect,
 right after `FetchService.stop()` -- only closes connections that are
@@ -912,6 +936,10 @@ worker writes into sqlite and then posts a message naming the scope it changed.
   higher-priority request for an already-queued scope supersedes it rather than
   duplicating it. This is what stops a burst of expand events queueing the same
   work five times.
+- **Self-healing**: a job that fails with "does not exist" requests the
+  listing one level up, at its own priority, so a node for something dropped
+  elsewhere disappears straight away -- see "Scopes: the unit of
+  everything".
 - **Cancellable**: switching database drops queued work for the old one. A page
   already in flight cannot be interrupted, but its continuation is suppressed.
 - **Guarded**: a continuation is only queued if the cursor actually *advanced*

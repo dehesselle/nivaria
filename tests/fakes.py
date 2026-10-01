@@ -18,6 +18,14 @@ from snowcone.models import ObjectType
 Row = dict[str, Any]
 
 
+class MissingObjectError(Exception):
+    """Stands in for the driver's ProgrammingError for a dropped object:
+    Snowflake reports it as errno 2003, "... does not exist or not
+    authorized", and that number is all `is_missing_object` reads."""
+
+    errno = 2003
+
+
 class FakeCursor:
     def __init__(self, owner: FakeConnection) -> None:
         self._owner = owner
@@ -200,9 +208,26 @@ class FakeGateway:
         #: knob rather than a hard-coded {PIPE, STAGE} because the point of
         #: the guard is that it holds for a type nobody has verified yet.
         self.paging_noop_types: set[ObjectType] = set()
+        #: Schemas dropped by `drop_schema`: statements naming one fail the
+        #: way Snowflake's do, rather than quietly returning nothing.
+        self.dropped_schemas: set[tuple[str, str]] = set()
         #: Every call, so a test can assert *what was fetched*, not merely
         #: what ended up rendered.
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    def drop_schema(self, database: str, schema: str) -> None:
+        """Drop a schema "elsewhere", as if done in Snowsight."""
+        self.schemas[database] = [
+            name for name in self.schemas.get(database, []) if name != schema
+        ]
+        self.dropped_schemas.add((database, schema))
+
+    def _check_schema(self, database: str, schema: str) -> None:
+        if (database, schema) in self.dropped_schemas:
+            raise MissingObjectError(
+                "SQL compilation error:\n"
+                f"Schema '{database}.{schema}' does not exist or not authorized."
+            )
 
     @staticmethod
     def _page(names: list[str], after: str | None, limit: int) -> list[str]:
@@ -251,6 +276,7 @@ class FakeGateway:
         self.calls.append(
             ("show_objects", (object_type, database, schema, after, limit))
         )
+        self._check_schema(database, schema)
         all_names = self.objects.get((database, schema, object_type), [])
         if object_type in self.paging_noop_types:
             names = sorted(all_names)
@@ -314,6 +340,7 @@ class FakeGateway:
     ) -> list[Row]:
         """Returns raw SHOW COLUMNS shape, so the real mapper is exercised."""
         self.calls.append(("show_columns", (database, schema, table)))
+        self._check_schema(database, schema)
         raw = [
             {
                 "table_name": table,
@@ -516,6 +543,7 @@ class FakeGateway:
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]:
         self.calls.append(("show_grants_on_schema", (database, schema)))
+        self._check_schema(database, schema)
         return list(self._grants_schema.get((database, schema), []))
 
     def show_grants_on_database(
@@ -528,6 +556,7 @@ class FakeGateway:
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]:
         self.calls.append(("tag_references_schema", (database, schema)))
+        self._check_schema(database, schema)
         if self.raise_on_tag_references:
             raise RuntimeError("No active warehouse selected in the current session")
         return list(self._tag_references_schema.get((database, schema), []))

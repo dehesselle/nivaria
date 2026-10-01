@@ -7,7 +7,7 @@ from textual.widgets import Input
 
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
-from snowcone.models import databases_scope
+from snowcone.models import databases_scope, grants_scope, tag_references_scope
 from snowcone.ui.app import SnowconeApp
 from snowcone.ui.screens.closing import ClosingDialog
 from snowcone.ui.screens.connect import ConnectScreen
@@ -20,6 +20,39 @@ async def settle(pilot, rounds: int = 4) -> None:
         await pilot.pause()
         await asyncio.sleep(0.05)
         await pilot.pause()
+
+
+_GONE = "SQL compilation error:\nSchema 'MYDB.GONE' does not exist or not authorized."
+
+
+async def test_a_dropped_object_is_reported_as_a_warning_not_an_error() -> None:
+    """The fetch service is already clearing it out of the tree; nothing is
+    broken that the user has to act on."""
+    app = SnowconeApp(connector=FakeConnector())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._report_fetch_failure(grants_scope("MYDB", "GONE"), _GONE, True)
+        app._report_fetch_failure(databases_scope(), "network down", False)
+        await pilot.pause()
+        toasts = [(toast.severity, toast.message) for toast in app._notifications]
+    assert toasts == [
+        (
+            "warning",
+            "Schema 'MYDB.GONE' does not exist or not authorized. Refreshing.",
+        ),
+        ("error", "Could not load databases: network down"),
+    ]
+
+
+async def test_one_dropped_object_failing_several_scopes_toasts_once() -> None:
+    """Opening a dropped schema fails its Grants and its Tags together."""
+    app = SnowconeApp(connector=FakeConnector())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._report_fetch_failure(grants_scope("MYDB", "GONE"), _GONE, True)
+        app._report_fetch_failure(tag_references_scope("MYDB", "GONE"), _GONE, True)
+        await pilot.pause()
+        assert len(list(app._notifications)) == 1
 
 
 async def test_the_app_opens_the_connect_screen_first() -> None:

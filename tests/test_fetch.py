@@ -10,9 +10,12 @@ from snowcone.cache.repository import Repository
 from snowcone.models import (
     CacheState,
     ObjectType,
+    columns_scope,
     databases_scope,
+    grants_scope,
     objects_scope,
     schemas_scope,
+    tag_references_scope,
 )
 from snowcone.service.fetch import FetchService
 from snowcone.service.jobs import FetchJob, Priority, fetch_page
@@ -483,7 +486,9 @@ def test_a_failing_fetch_records_the_error_and_keeps_stale_rows(repo) -> None:
 
     errors: list[tuple[str, str]] = []
     service = make_service(
-        Boom(), repo, on_error=lambda s, message: errors.append((s.key, message))
+        Boom(),
+        repo,
+        on_error=lambda s, message, _missing: errors.append((s.key, message)),
     )
     try:
         service.request(scope)
@@ -494,6 +499,78 @@ def test_a_failing_fetch_records_the_error_and_keeps_stale_rows(repo) -> None:
     assert errors[0] == ("databases", "network down")
     assert repo.entry(scope).state is CacheState.ERROR
     assert [d.name for d in repo.databases(scope).rows] == ["ACME"]
+
+
+def cache_schemas(repo, database: str, *names: str) -> None:
+    scope = schemas_scope(database)
+    generation = repo.begin_pass(scope)
+    rows = [{"name": name, "database_name": database} for name in names]
+    repo.write_page(scope, generation, rows, None)
+    repo.finish_pass(scope, generation)
+
+
+def cached_schema_names(repo, database: str) -> list[str]:
+    return [row.name for row in repo.schemas(schemas_scope(database)).rows]
+
+
+def test_a_schema_dropped_elsewhere_leaves_the_cache_once_a_fetch_finds_it_gone(
+    repo,
+) -> None:
+    """Visiting a dropped schema used to fail and leave it listed until the
+    TTL sweep; the failure itself now refreshes the list it came from."""
+    gateway = FakeGateway(schemas={"MYDB": ["AAA", "GONE"]})
+    cache_schemas(repo, "MYDB", "AAA", "GONE")
+    gateway.drop_schema("MYDB", "GONE")
+    errors: list[tuple[str, bool]] = []
+    service = make_service(
+        gateway,
+        repo,
+        on_error=lambda s, message, missing: errors.append((s.key, missing)),
+    )
+    try:
+        service.request(grants_scope("MYDB", "GONE"))
+        assert wait_until(lambda: cached_schema_names(repo, "MYDB") == ["AAA"])
+    finally:
+        service.stop()
+    assert errors == [("grants:MYDB.GONE", True)]
+
+
+def test_a_failure_that_is_not_a_missing_object_refreshes_nothing_else(
+    repo,
+) -> None:
+    """A session without a warehouse fails every SELECT-backed scope on every
+    visit; that must not also cost a SHOW SCHEMAS each time."""
+    gateway = FakeGateway(schemas={"MYDB": ["AAA"]})
+    gateway.raise_on_tag_references = True
+    errors: list[bool] = []
+    service = make_service(
+        gateway, repo, on_error=lambda s, message, missing: errors.append(missing)
+    )
+    try:
+        service.request(tag_references_scope("MYDB", "AAA"))
+        assert wait_until(lambda: bool(errors))
+        time.sleep(0.05)
+    finally:
+        service.stop()
+    assert errors == [False]
+    assert [name for name, _ in gateway.calls] == ["tag_references_schema"]
+
+
+def test_a_dropped_schema_found_one_level_further_down_is_still_cleared(
+    repo,
+) -> None:
+    """A table's columns name the table, not the schema, so the refresh
+    climbs: the schema's own table listing fails the same way, and that
+    failure refreshes the schema list."""
+    gateway = FakeGateway(schemas={"MYDB": ["AAA", "GONE"]})
+    cache_schemas(repo, "MYDB", "AAA", "GONE")
+    gateway.drop_schema("MYDB", "GONE")
+    service = make_service(gateway, repo)
+    try:
+        service.request(columns_scope("MYDB", "GONE", "ORDERS"))
+        assert wait_until(lambda: cached_schema_names(repo, "MYDB") == ["AAA"])
+    finally:
+        service.stop()
 
 
 def test_a_listener_that_raises_does_not_strand_the_worker(repo) -> None:
@@ -922,7 +999,7 @@ def test_a_failing_prime_is_reported(repo) -> None:
 
     errors: list[str] = []
     service = make_service(
-        Boom(), repo, on_error=lambda scope, message: errors.append(message)
+        Boom(), repo, on_error=lambda scope, message, _missing: errors.append(message)
     )
     try:
         service.request(prime_scope(ObjectType.TABLE, "MYDB"))
@@ -1052,7 +1129,7 @@ def test_a_failing_table_stats_fetch_keeps_previously_cached_stats(repo) -> None
     scope = table_stats_scope("MYDB", "PUBLIC")
     errors: list[str] = []
     service = make_service(
-        gateway, repo, on_error=lambda s, message: errors.append(message)
+        gateway, repo, on_error=lambda s, message, _missing: errors.append(message)
     )
     try:
         service.request(scope)
@@ -1128,7 +1205,7 @@ def test_a_failing_pipe_activity_fetch_keeps_previously_cached_activity(repo) ->
     scope = pipe_activity_scope("MYDB", "PUBLIC")
     errors: list[str] = []
     service = make_service(
-        gateway, repo, on_error=lambda s, message: errors.append(message)
+        gateway, repo, on_error=lambda s, message, _missing: errors.append(message)
     )
     try:
         service.request(scope)
@@ -1247,7 +1324,9 @@ def test_pipe_history_fails_gracefully_with_no_pipe_activity_data_cached(repo) -
     scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
     errors: list[str] = []
     service = make_service(
-        FakeGateway(), repo, on_error=lambda s, message: errors.append(message)
+        FakeGateway(),
+        repo,
+        on_error=lambda s, message, _missing: errors.append(message),
     )
     try:
         service.request(scope)
@@ -1308,7 +1387,7 @@ def test_a_failing_task_activity_fetch_keeps_previously_cached_activity(repo) ->
     scope = task_activity_scope("MYDB", "PUBLIC")
     errors: list[str] = []
     service = make_service(
-        gateway, repo, on_error=lambda s, message: errors.append(message)
+        gateway, repo, on_error=lambda s, message, _missing: errors.append(message)
     )
     try:
         service.request(scope)
@@ -1573,7 +1652,7 @@ def test_a_failing_columns_prime_is_reported(repo) -> None:
 
     errors: list[str] = []
     service = make_service(
-        Boom(), repo, on_error=lambda scope, message: errors.append(message)
+        Boom(), repo, on_error=lambda scope, message, _missing: errors.append(message)
     )
     try:
         service.request(columns_prime_scope("MYDB"))

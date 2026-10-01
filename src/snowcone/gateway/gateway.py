@@ -38,6 +38,23 @@ class ResultTooLargeError(RuntimeError):
     """
 
 
+#: Snowflake's error number for "<object> does not exist or not authorized",
+#: printed as `002003 (02000)`.
+_MISSING_OBJECT_ERRNO = 2003
+
+
+def is_missing_object(error: BaseException) -> bool:
+    """Whether a statement failed because what it names is gone.
+
+    Read off the driver error's `errno` rather than its message: the text
+    varies by object kind ("Schema ... does not exist", "Table ... does not
+    exist", "Object does not exist"), the number does not. `getattr` rather
+    than an isinstance check against the driver's ProgrammingError, so this
+    module still never imports the driver and a fake can raise it.
+    """
+    return getattr(error, "errno", None) == _MISSING_OBJECT_ERRNO
+
+
 class SnowflakeGateway(Protocol):
     def show_databases(
         self,
@@ -224,10 +241,13 @@ class PoolGateway:
         try:
             return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
         except ResultTooLargeError:
-            # The one failure the retry above must not repeat: it is a
-            # property of the statement, not of the connection.
+            # A failure the retry above must not repeat: it is a property of
+            # the statement, not of the connection.
             raise
-        except Exception:  # noqa: BLE001 -- see pool.acquire, same boundary
+        except Exception as error:  # see pool.acquire, same boundary
+            if is_missing_object(error):
+                # Same: a dropped object stays dropped on a fresh connection.
+                raise
             return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
 
     def _fetch_once(
@@ -237,6 +257,7 @@ class PoolGateway:
         *,
         allow_reconnect: bool,
     ) -> list[Row]:
+        missing: Exception | None = None
         with self._pool.acquire(allow_reconnect=allow_reconnect) as connection:
             cursor = connection.cursor()
             try:
@@ -247,8 +268,21 @@ class PoolGateway:
                     cursor.execute(statement)
                 columns = [description[0] for description in cursor.description]
                 return self._collect(cursor, columns, statement)
+            except Exception as error:
+                # Anything escaping this block makes the pool discard the
+                # connection and open a replacement -- right for a dead
+                # session, but a "does not exist" came back over a perfectly
+                # healthy one, and a reconnect can mean an MFA prompt. So that
+                # one error leaves the block normally and is raised outside.
+                # Kept this narrow on purpose: an expired session is a
+                # ProgrammingError too, and that one must still be discarded.
+                if not is_missing_object(error):
+                    raise
+                missing = error
             finally:
                 cursor.close()
+        assert missing is not None
+        raise missing
 
     @staticmethod
     def _collect(cursor: Any, columns: list[str], statement: str) -> list[Row]:

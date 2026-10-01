@@ -72,7 +72,7 @@ from snowcone.ui.views import (  # noqa: F401 -- registers views
     view_view,
 )
 from snowcone.ui.widgets.detail_pane import DetailPane
-from snowcone.ui.widgets.object_tree import ObjectTree
+from snowcone.ui.widgets.object_tree import NodeType, ObjectTree
 from snowcone.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
 from snowcone.version import __version__
 
@@ -642,6 +642,10 @@ class MainScreen(Screen):
     def action_refresh(self) -> None:
         """Explicitly refresh whatever the cursor is on."""
         node = self.tree.cursor_node
+        if node is not None and node.data and node.data.type is NodeType.SCHEMA:
+            # A schema node owns no scope; the list it appears in is its
+            # database's, and refreshing that is what drops it if it is gone.
+            node = node.parent
         scope = node.data.scope if node is not None and node.data else None
         if scope is None:
             scope = databases_scope() if not self.databases else None

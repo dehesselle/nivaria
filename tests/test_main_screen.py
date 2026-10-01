@@ -436,6 +436,30 @@ async def test_refresh_targets_the_scope_under_the_cursor(repo) -> None:
     assert fetch.scopes == ["schemas:MYDB"]
 
 
+async def test_refresh_on_a_schema_node_refreshes_the_list_it_is_in(repo) -> None:
+    """A schema node owns no scope of its own, so F5 there used to do
+    nothing -- not even drop a schema that was dropped elsewhere."""
+    put_databases(repo, "MYDB")
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        tree = screen.query_one(ObjectTree)
+        tree.root.children[0].expand()
+        await pilot.pause()
+        tree.focus()
+        tree.move_cursor(tree.root.children[0].children[0])
+        await settle(pilot)
+        fetch.requests.clear()
+        screen.action_refresh()
+        await pilot.pause()
+    assert fetch.scopes == ["schemas:MYDB"]
+
+
 async def test_refresh_on_an_object_leaf_asks_for_nothing(repo) -> None:
     """A leaf owns no scope of its own; its columns are the detail pane's job."""
     put_databases(repo, "MYDB")

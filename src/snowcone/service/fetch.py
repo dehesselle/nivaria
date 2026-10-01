@@ -9,9 +9,11 @@ Scopes are deliberately **independent of one another**. It is tempting to think
 a `tables:MYDB.PUBLIC` fetch must wait for `schemas:MYDB` to finish refreshing,
 but `SHOW TABLES IN SCHEMA MYDB.PUBLIC` is a self-contained query either way,
 so the two just run concurrently on different pool connections. If the schema
-really was dropped, the tables job fails, that failure lands in the ledger, and
-the schema refresh removes the node on its own sweep. No dependency graph, no
-ordering constraints, and no deadlock surface.
+really was dropped, the tables job fails with "does not exist", that failure
+lands in the ledger, and the job asks for the listing that contains it
+(`models.containing_scopes`) -- whose refresh removes the node. That request
+is the only link between scopes, and it is made after the fact, never waited
+on: no dependency graph, no ordering constraints, and no deadlock surface.
 """
 
 from __future__ import annotations
@@ -23,13 +25,14 @@ from collections.abc import Callable
 from typing import Any
 
 from snowcone.cache.repository import Repository
-from snowcone.gateway.gateway import SnowflakeGateway
+from snowcone.gateway.gateway import SnowflakeGateway, is_missing_object
 from snowcone.models import (
     ObjectType,
     Scope,
     ScopeType,
     columns_prime_scope,
     columns_scope,
+    containing_scopes,
     objects_scope,
     schemas_scope,
 )
@@ -47,7 +50,9 @@ from snowcone.settings import MAX_PAGES_PER_PASS, config
 _log = logging.getLogger(__name__)
 
 Notify = Callable[[Scope, bool], None]
-OnError = Callable[[Scope, str], None]
+#: (scope, message, missing) -- `missing` is set when the failure was the
+#: object itself being gone, which the UI reports more gently.
+OnError = Callable[[Scope, str, bool], None]
 
 
 class FetchService:
@@ -212,11 +217,7 @@ class FetchService:
         # raise unrelated exception types, and any escape here would kill the
         # thread and silently strand every later job.
         except Exception as error:  # noqa: BLE001
-            message = str(error) or error.__class__.__name__
-            if generation:
-                self._repo.fail_pass(scope, generation, message)
-            self._report(scope, message)
-            self._announce(scope, complete=True)
+            self._fail(job, error, generation)
             return
 
         cursor = page.cursor
@@ -290,9 +291,7 @@ class FetchService:
             )
         # See _execute: a worker thread boundary.
         except Exception as error:  # noqa: BLE001
-            message = str(error) or error.__class__.__name__
-            self._report(scope, message)
-            self._announce(scope, complete=True)
+            self._fail(job, error)
             return
 
         if not usable:
@@ -353,9 +352,7 @@ class FetchService:
                 )
         # See _execute: a worker thread boundary.
         except Exception as error:  # noqa: BLE001
-            message = str(error) or error.__class__.__name__
-            self._report(scope, message)
-            self._announce(scope, complete=True)
+            self._fail(job, error)
             return
 
         if not usable:
@@ -429,6 +426,29 @@ class FetchService:
             ).rows:
                 self.request(columns_scope(database, schema, obj.name), priority)
 
+    def _fail(self, job: FetchJob, error: Exception, generation: int = 0) -> None:
+        """Record and report a failed job, and react if its object is gone.
+
+        A "does not exist" means the cache still lists something that was
+        dropped elsewhere, so the listing it came from is asked for straight
+        away rather than left for the TTL sweep -- otherwise the node stays
+        on screen and every visit to it fails again. Requested as-is, not
+        upgraded to a database-wide prime the way MainScreen.on_scope_needed
+        upgrades OBJECTS: the per-schema SHOW is what fails in turn when the
+        whole schema was dropped, carrying the refresh up to the schema list,
+        while a prime would succeed and leave the schema node standing.
+        """
+        scope = job.scope
+        message = str(error) or error.__class__.__name__
+        missing = is_missing_object(error)
+        if generation:
+            self._repo.fail_pass(scope, generation, message)
+        if missing:
+            for container in containing_scopes(scope):
+                self.request(container, job.priority)
+        self._report(scope, message, missing=missing)
+        self._announce(scope, complete=True)
+
     def _announce(self, scope: Scope, *, complete: bool) -> None:
         if self._notify is None:
             return
@@ -439,10 +459,10 @@ class FetchService:
         except Exception:  # noqa: BLE001 -- see _execute
             _log.exception("cache-update listener failed for %s", scope)
 
-    def _report(self, scope: Scope, message: str) -> None:
+    def _report(self, scope: Scope, message: str, *, missing: bool = False) -> None:
         if self._on_error is None:
             return
         try:
-            self._on_error(scope, message)
+            self._on_error(scope, message, missing)
         except Exception:  # noqa: BLE001 -- see _execute
             _log.exception("error listener failed for %s", scope)

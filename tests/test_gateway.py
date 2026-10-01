@@ -8,6 +8,7 @@ import pytest
 from snowcone.gateway.gateway import PoolGateway
 from snowcone.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
 from snowcone.models import ObjectType
+from tests.fakes import MissingObjectError
 
 
 class RecordingCursor:
@@ -21,7 +22,7 @@ class RecordingCursor:
         self._owner.attempts += 1
         if self._owner.fail_times > 0:
             self._owner.fail_times -= 1
-            raise RuntimeError("session expired")
+            raise self._owner.error
         self._owner.executed.append((statement, params))
         self.description = [(name,) for name in self._owner.columns]
         self._rows = list(self._owner.rows)
@@ -57,6 +58,8 @@ class RecordingConnection:
         #: test prove there was exactly one retry, not a loop.
         self.fail_times = 0
         self.attempts = 0
+        #: What each of those failures raises.
+        self.error: Exception = RuntimeError("session expired")
 
     def cursor(self) -> RecordingCursor:
         return RecordingCursor(self)
@@ -173,6 +176,41 @@ def test_a_query_that_keeps_failing_surfaces_the_real_error() -> None:
     with pytest.raises(RuntimeError):
         gateway.show_databases()
     assert connection.attempts == 2
+
+
+def test_a_missing_object_is_not_retried() -> None:
+    """A dropped schema is just as dropped on a fresh connection, so a retry
+    would only double the round trip."""
+    gateway, connection, _ = make_gateway()
+    connection.error = MissingObjectError("Schema 'MYDB.GONE' does not exist")
+    connection.fail_times = 5
+    with pytest.raises(MissingObjectError):
+        gateway.show_grants_on_schema("MYDB", "GONE")
+    assert connection.attempts == 1
+
+
+def test_a_missing_object_keeps_its_healthy_connection() -> None:
+    """The session that reported "does not exist" is fine; replacing it would
+    open a new one, which can mean an MFA prompt."""
+    connection = RecordingConnection()
+    connects: list[dict[str, Any]] = []
+
+    def connector(**kwargs: Any) -> RecordingConnection:
+        connects.append(kwargs)
+        return connection
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    gateway = PoolGateway(pool)
+    connection.error = MissingObjectError("Schema 'MYDB.GONE' does not exist")
+    connection.fail_times = 1
+    with pytest.raises(MissingObjectError):
+        gateway.show_grants_on_schema("MYDB", "GONE")
+    assert len(connects) == 1
+    assert pool.size == 1
+    assert pool.in_use == 0
+    assert gateway.show_databases() == [{"name": "ACME"}]
+    assert len(connects) == 1
 
 
 # -------------------------------------------------------------- sql logging

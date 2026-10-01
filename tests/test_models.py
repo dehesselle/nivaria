@@ -7,7 +7,9 @@ from snowcone.models import (
     ObjectType,
     Scope,
     ScopeType,
+    columns_prime_scope,
     columns_scope,
+    containing_scopes,
     databases_scope,
     grants_scope,
     materialized_view_stats_scope,
@@ -15,6 +17,7 @@ from snowcone.models import (
     pipe_activity_history_scope,
     pipe_activity_scope,
     pipe_history_scope,
+    prime_scope,
     roles_scope,
     schemas_scope,
     scope_ttl,
@@ -183,6 +186,44 @@ def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
     only OBJECTS and DATABASE_PRIME are. Every scope here narrows by
     database/schema/table instead, so it stays unset."""
     assert scope.object_type is None
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        (databases_scope(), []),
+        (warehouses_scope(), []),
+        (schemas_scope("MYDB"), [databases_scope()]),
+        (grants_scope("MYDB"), [databases_scope()]),
+        (prime_scope(ObjectType.TABLE, "MYDB"), [databases_scope()]),
+        (columns_prime_scope("MYDB"), [databases_scope()]),
+        (grants_scope("MYDB", "S"), [schemas_scope("MYDB")]),
+        (tag_references_scope("MYDB", "S"), [schemas_scope("MYDB")]),
+        (objects_scope(ObjectType.PIPE, "MYDB", "S"), [schemas_scope("MYDB")]),
+        (table_stats_scope("MYDB", "S"), [schemas_scope("MYDB")]),
+        (columns_prime_scope("MYDB", "S"), [schemas_scope("MYDB")]),
+        (
+            columns_scope("MYDB", "S", "T"),
+            [
+                objects_scope(ObjectType.TABLE, "MYDB", "S"),
+                objects_scope(ObjectType.VIEW, "MYDB", "S"),
+            ],
+        ),
+        (
+            pipe_history_scope("MYDB", "S", "P"),
+            [objects_scope(ObjectType.PIPE, "MYDB", "S")],
+        ),
+        (
+            task_activity_history_scope("MYDB", "S", "T"),
+            [objects_scope(ObjectType.TASK, "MYDB", "S")],
+        ),
+    ],
+    ids=str,
+)
+def test_a_vanished_object_is_cleared_by_refreshing_the_listing_one_level_up(
+    scope, expected
+) -> None:
+    assert containing_scopes(scope) == expected
 
 
 def test_scope_ttl_leaves_an_ordinary_scope_untouched() -> None:
