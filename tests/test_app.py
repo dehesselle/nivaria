@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from tcw.widgets import FooterBinding
+from tcoda.widgets import FooterBinding
 from textual.widgets import Input
 
 from snowcone.cache.db import Database
@@ -317,7 +317,7 @@ async def test_the_command_palette_binding_is_hidden_from_the_footer(tmp_path) -
     """The footer's right corner is snowcone's own status indicators, so
     Textual's ctrl+p key must not claim it.
 
-    tcw's footer needs no setting for that: ctrl+p is an app binding like any
+    tcoda's footer needs no setting for that: ctrl+p is an app binding like any
     other and is declared `show=False`, so it is only ever rendered if the app
     asks for it by name in `pinned=`.
     """

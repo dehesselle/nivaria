@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from tcw.dialogs import ConfirmDialog
+from tcoda.dialogs import ConfirmDialog
 from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 

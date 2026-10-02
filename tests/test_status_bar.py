@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tcw.widgets import Countdown, Footer, FooterBinding
+from tcoda.widgets import Countdown, Footer, FooterBinding
 from textual.app import App
 
 import snowcone.ui.app as app_module
@@ -81,7 +81,7 @@ def test_the_countdown_is_capped_at_three_digits() -> None:
 
 
 # "Blanks when disabled" and the spinner's own frame-by-frame advance are
-# tcw's business now -- see its tests/test_countdown.py. Disabling is no
+# tcoda's business now -- see its tests/test_countdown.py. Disabling is no
 # longer a blank render either: `test_a_ttl_of_zero_disables_the_countdown`
 # below asserts the widget is hidden, which is what keeps a real zero
 # distinguishable from a countdown that is switched off.
@@ -155,7 +155,7 @@ async def test_the_role_label_widens_for_a_longer_name(repo) -> None:
 
 
 async def test_the_command_palette_key_does_not_claim_the_corner(repo) -> None:
-    """It gets no special treatment in tcw's footer -- it is an app binding
+    """It gets no special treatment in tcoda's footer -- it is an app binding
     like any other, and it is declared `show=False`, so it simply is not
     rendered. The right corner is the status area's."""
     app = Harness(repo, RecordingFetch())

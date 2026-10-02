@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from rich.text import Text
-from tcw.widgets import Resizable
+from tcoda.widgets import Resizable
 from textual.geometry import Region
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
@@ -98,7 +98,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
 
     #: Guard rails for `Resizable` -- just enough that neither this pane nor
     #: its DetailPane sibling can be dragged into uselessness. The drag
-    #: itself lives in tcw now, which is where snakecam's identical copy of
+    #: itself lives in tcoda now, which is where snakecam's identical copy of
     #: it went too.
     RESIZE_MIN = 15
     RESIZE_MIN_SIBLING = 20

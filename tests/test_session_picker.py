@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tcw.widgets import MenuItem
+from tcoda.widgets import MenuItem
 from textual.app import App
 from textual.widgets import Input, OptionList
 

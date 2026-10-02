@@ -69,13 +69,13 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcw`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Two menus. **Snowcone** (`s`), the app-identity menu, leftmost: **About ...** (`a`) -- a `tcw.widgets.AboutMenuItem` reading `ui/about.txt` (see "Shared widgets" below for why that's a real filesystem path, not just an `importlib.resources` handle) -- then a separator, **Settings ...** (`s`) -- a `tcw.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it -- then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. **Connection** (`c`), the session menu: **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming". Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcoda`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Two menus. **Snowcone** (`s`), the app-identity menu, leftmost: **About ...** (`a`) -- a `tcoda.widgets.AboutMenuItem` reading `ui/about.txt` (see "Shared widgets" below for why that's a real filesystem path, not just an `importlib.resources` handle) -- then a separator, **Settings ...** (`s`) -- a `tcoda.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it -- then another separator and **Quit** (`q`, `F10` shown right-aligned), which runs `app.quit`. **Connection** (`c`), the session menu: **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming". Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` and `F10` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
 | **Detail pane** | Hosts exactly one detail view at a time, chosen by whatever node the cursor is on. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
 | **Object view** | The per-type detail UI for one object (e.g. Table view, Pipe view). Owns its whole detail body. One of four view families the pane can host -- see "Detail views" below for the other three. |
 | **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
-| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen: every statement snowcone sends, live. `tcw`'s `LogViewer`, fed by `gateway/sql_log.py` -- see "The SQL log" below. |
+| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen: every statement snowcone sends, live. `tcoda`'s `LogViewer`, fed by `gateway/sql_log.py` -- see "The SQL log" below. |
 
 The tree/Detail split starts at 25 % / 75 % of the width, in `fr` units, and
 is now genuinely resizable: dragging `ObjectTree`'s right border (the same
@@ -1371,7 +1371,7 @@ consults no warehouse, so nothing about the cache needs to change when it does.
 ## The SQL log
 
 `F1` slides a log panel down over the top third of the screen; `F1` again
-hides it. It is `tcw`'s `LogViewer` (see "Shared widgets"), mounted in
+hides it. It is `tcoda`'s `LogViewer` (see "Shared widgets"), mounted in
 `MainScreen.compose` with its defaults, so snowcone wires nothing for it: the
 widget installs its own key binding and its own screen layer, owns a rolling
 in-memory buffer that exists whether or not the panel is mounted, and offers
@@ -1414,7 +1414,7 @@ Values are read **at the point of use**, never cached, so a change takes effect
 without a restart.
 
 All of that machinery -- `Setting`, the registry, `ConfigStore`, the dialog --
-is `tcw`'s (see "Shared widgets" below). `snowcone/settings.py` is only the
+is `tcoda`'s (see "Shared widgets" below). `snowcone/settings.py` is only the
 declarations plus the one `configure("snowcone")` call that tells the shared
 store which app's config file to use; the store resolves that path lazily, on
 first read, so importing the module touches no disk.
@@ -1446,7 +1446,7 @@ how a setting is reset to its default. A value that fails to parse
 discarding it or falling back to the default -- that fallback exists for a
 hand-edited settings.json, not for a mistake made in the dialog itself.
 
-`tcw`'s dialog also supports per-instance settings and callback-only action
+`tcoda`'s dialog also supports per-instance settings and callback-only action
 rows, which snowcone declares none of; they exist for the sibling app the
 dialog originally came from.
 
@@ -1456,34 +1456,35 @@ dialog originally came from.
 
 The menu bar, the settings system, the log panel (`LogViewer`, see "The SQL
 log") and the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
-live in **`tcw`** ("Textual Common Widgets"), a sibling project shared with
+live in **`tcoda`** ("Textual coda"), a sibling project shared with
 `snakecam` and `vc`. They were extracted because the same code had been
 copied into three apps and had already started to drift.
 
 It is consumed as an editable path dependency (`[tool.uv.sources]` in
 `pyproject.toml`), so an edit there is live here with no reinstall.
 
-> **`tcw` must never appear in `[project.dependencies]`.** It is not published
+> **`tcoda` must never appear in `[project.dependencies]`.** It is not published
 > anywhere, so a built snowcone wheel instead bundles a copy of its sources
 > directly (`hatch_build.py`, triggered as a custom build hook on both the
 > `sdist` and `wheel` targets — see the hook's own comments for how it locates
 > a source copy for each). `[tool.uv.sources]`'s path override only takes
 > effect inside this project's own `uv sync`/lock resolution; it does nothing
 > for a plain `pip install`/`uv pip install` of the built wheel elsewhere. If
-> `tcw` were listed as a real dependency, any such install would resolve it
-> against PyPI instead — where an unrelated, same-named package already
-> exists — silently shadowing the bundled copy with the wrong one. `tcw` is
+> `tcoda` were listed as a real dependency, any such install would resolve it
+> against PyPI instead — where it either fails to resolve or, should anyone
+> ever claim the name, silently shadows the bundled copy with the wrong
+> package. `tcoda` is
 > therefore listed only under `[dependency-groups] dev`, which `uv sync`
 > honors for the local venv but which never becomes part of a built
 > distribution's metadata.
 
 Three things about it are worth knowing from inside snowcone:
 
-- **`tcw` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
+- **`tcoda` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
   than in a stylesheet -- a library cannot rely on a consumer's `CSS_PATH`.
   So the menu-bar and settings-dialog rules are no longer in `app.tcss`.
   `app.tcss` outranks `DEFAULT_CSS` regardless of specificity, so anything
-  tcw does style can still be overridden here.
+  tcoda does style can still be overridden here.
 - **`MenuBar` installs its own `F9` binding** on whichever screen it is
   mounted on, which is why `MainScreen.BINDINGS` no longer carries one.
   Textual only consults the focus chain plus the screen and the app when
@@ -1506,7 +1507,7 @@ Three things about it are worth knowing from inside snowcone:
 
 - **uv** manages the project and the virtualenv. Use `uv sync --all-groups` for
   dependencies and `uv add` to introduce one. The interpreter is the project
-  `.venv`. `tcw` is an editable checkout of a sibling directory rather than a
+  `.venv`. `tcoda` is an editable checkout of a sibling directory rather than a
   released package, and is deliberately not a real dependency of the built
   package -- see "Shared widgets".
 - **ruff** formats and lints, on **default settings with no configuration** —

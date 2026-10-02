@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 from typing import ClassVar
 
-from tcw.dialogs import ConfirmDialog
+from tcoda.dialogs import ConfirmDialog
 from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding

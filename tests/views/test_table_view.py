@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tcw.widgets import DataTable as TcwDataTable
+from tcoda.widgets import DataTable as TcodaDataTable
 from textual.widgets import DataTable, Static
 
 from snowcone.models import (
@@ -308,20 +308,20 @@ async def test_the_active_sort_columns_header_shows_a_direction_arrow(repo) -> N
 
         # Default sort is Ordinal, ascending; every other sortable column
         # shows the inactive indicator, not nothing, so it reads as clickable.
-        assert label("Ordinal") == f"Ordinal {TcwDataTable.SORT_ASCENDING}"
-        assert label("Name") == f"Name {TcwDataTable.SORT_INACTIVE}"
-        assert label("Type") == f"Type {TcwDataTable.SORT_INACTIVE}"
-        assert label("Tags") == f"Tags {TcwDataTable.SORT_INACTIVE}"
+        assert label("Ordinal") == f"Ordinal {TcodaDataTable.SORT_ASCENDING}"
+        assert label("Name") == f"Name {TcodaDataTable.SORT_INACTIVE}"
+        assert label("Type") == f"Type {TcodaDataTable.SORT_INACTIVE}"
+        assert label("Tags") == f"Tags {TcodaDataTable.SORT_INACTIVE}"
 
         table.post_message(_click_header(table, "Name"))
         await pilot.pause()
-        assert label("Name") == f"Name {TcwDataTable.SORT_ASCENDING}"
+        assert label("Name") == f"Name {TcodaDataTable.SORT_ASCENDING}"
         # Reverted, no longer active.
-        assert label("Ordinal") == f"Ordinal {TcwDataTable.SORT_INACTIVE}"
+        assert label("Ordinal") == f"Ordinal {TcodaDataTable.SORT_INACTIVE}"
 
         table.post_message(_click_header(table, "Name"))
         await pilot.pause()
-        assert label("Name") == f"Name {TcwDataTable.SORT_DESCENDING}"
+        assert label("Name") == f"Name {TcodaDataTable.SORT_DESCENDING}"
 
 
 async def test_a_tagged_columns_tags_show_in_the_detail_panel(repo) -> None:

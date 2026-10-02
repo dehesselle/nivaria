@@ -18,11 +18,11 @@ def colour_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Point every store at tmp_path so tests never touch the real config.
 
-    Settings need no monkeypatching any more: `tcw`'s store resolves its path
+    Settings need no monkeypatching any more: `tcoda`'s store resolves its path
     lazily, so `configure(path=...)` is enough and it takes effect for every
     module that already imported `config` by name.
     """
-    from tcw.settings import configure
+    from tcoda.settings import configure
 
     from snowcone import paths
 

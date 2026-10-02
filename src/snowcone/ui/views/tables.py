@@ -40,7 +40,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar, Protocol
 
 from rich.text import Text
-from tcw.widgets import DataTable
+from tcoda.widgets import DataTable
 from textual.binding import Binding
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable as TextualDataTable
@@ -187,7 +187,7 @@ class ItemDetailView:
         -- not left to RowHighlighted alone, since it's not guaranteed to
         re-fire on a table.clear()-and-repopulate while a row is already
         highlighted."""
-        # Textual's type, not tcw's: this panel watches whichever table a
+        # Textual's type, not tcoda's: this panel watches whichever table a
         # view points it at, and a plain history table has no reason to be
         # sortable or to carry tooltips.
         table = self.query_one(f"#{self.detail_table_id}", TextualDataTable)  # type: ignore[attr-defined]

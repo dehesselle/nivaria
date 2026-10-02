@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from rich.text import Text
-from tcw.widgets import DataTable
+from tcoda.widgets import DataTable
 from textual.app import ComposeResult
 from textual.widgets import Static
 

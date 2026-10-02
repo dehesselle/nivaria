@@ -40,7 +40,7 @@ still-uncancellable wait from being an unbounded, unexplained one instead.
 
 from __future__ import annotations
 
-from tcw.dialogs import Dialog
+from tcoda.dialogs import Dialog
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Label, Static

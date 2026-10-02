@@ -1259,7 +1259,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "tcw" },
+    { name = "tcoda" },
     { name = "textual-dev" },
     { name = "wonderwords" },
 ]
@@ -1275,7 +1275,7 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
-    { name = "tcw", editable = "../tcw" },
+    { name = "tcoda", editable = "../tcoda" },
     { name = "textual-dev", specifier = ">=1.8.0" },
     { name = "wonderwords", specifier = ">=3.0.1" },
 ]
@@ -1342,8 +1342,8 @@ wheels = [
 ]
 
 [[package]]
-name = "tcw"
-source = { editable = "../tcw" }
+name = "tcoda"
+source = { editable = "../tcoda" }
 dependencies = [
     { name = "platformdirs" },
     { name = "textual" },

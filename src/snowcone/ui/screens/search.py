@@ -47,7 +47,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from rich.text import Text
-from tcw.dialogs import Dialog
+from tcoda.dialogs import Dialog
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical

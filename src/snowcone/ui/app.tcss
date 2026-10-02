@@ -149,7 +149,7 @@ ClosingDialog > #dialog {
 
 /* ---- status footer ----------------------------------------------------- */
 
-/* Colours and padding come from tcw's `FooterStatus > *`. Only the countdown's
+/* Colours and padding come from tcoda's `FooterStatus > *`. Only the countdown's
    fixed width is ours: at three digits plus a cell either side the box does
    not resize, so the digits don't visibly shift as the count drops. */
 #footer-countdown { width: 5; text-align: right; }

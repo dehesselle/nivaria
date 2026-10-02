@@ -1,7 +1,7 @@
 """Where snowcone keeps its files.
 
 The generic parts -- per-app config/cache directories and the JSON read/write
-helpers -- come from `tcw.paths`; what stays here is the Snowflake-specific
+helpers -- come from `tcoda.paths`; what stays here is the Snowflake-specific
 part, above all the per-identity cache file.
 """
 
@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcw.paths import cache_dir as _cache_dir
-from tcw.paths import config_dir as _config_dir
-from tcw.paths import read_json, write_json_atomic
-from tcw.paths import settings_file as _settings_file
+from tcoda.paths import cache_dir as _cache_dir
+from tcoda.paths import config_dir as _config_dir
+from tcoda.paths import read_json, write_json_atomic
+from tcoda.paths import settings_file as _settings_file
 
 APP_NAME = "snowcone"
 

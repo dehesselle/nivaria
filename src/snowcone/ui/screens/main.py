@@ -13,7 +13,7 @@ from math import ceil
 from time import monotonic
 from typing import ClassVar
 
-from tcw.widgets import (
+from tcoda.widgets import (
     OPEN_ACTION,
     AboutMenuItem,
     Countdown,

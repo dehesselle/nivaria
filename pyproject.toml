@@ -12,12 +12,12 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# Not a real dependency: tcw's sources are bundled into our own wheel by
+# Not a real dependency: tcoda's sources are bundled into our own wheel by
 # hatch_build.py rather than installed from anywhere, so it must not appear in
-# [project.dependencies] (there's an unrelated package also named "tcw" on
-# PyPI, and any plain `pip install` would resolve to that one). Listed here
-# only so `uv sync`'s dev dependency group below can install it editable.
-tcw = { path = "../tcw", editable = true }
+# [project.dependencies] (it isn't on PyPI, so any plain `pip install` would
+# fail to resolve it, or pick up whatever else might claim the name). Listed
+# here only so `uv sync`'s dev dependency group below can install it editable.
+tcoda = { path = "../tcoda", editable = true }
 
 [project.scripts]
 snowcone = "snowcone:main"
@@ -46,7 +46,7 @@ asyncio_default_fixture_loop_scope = "function"
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
-    "tcw",
+    "tcoda",
     "textual-dev>=1.8.0",
     "wonderwords>=3.0.1",
 ]

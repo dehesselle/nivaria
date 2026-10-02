@@ -1,7 +1,7 @@
 """snowcone's menu bar: the Snowcone and Connection menus.
 
 The bar itself -- auto-hide, the staged bar/dropdown flow, mnemonics,
-separators, the F9 binding -- belongs to `tcw` and is tested there. What is
+separators, the F9 binding -- belongs to `tcoda` and is tested there. What is
 snowcone's is *what the menus offer* and what each entry actually does.
 """
 
@@ -11,8 +11,8 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from tcw.dialogs import AboutDialog, SettingsDialog
-from tcw.widgets import Menu, MenuBar, MenuItem
+from tcoda.dialogs import AboutDialog, SettingsDialog
+from tcoda.widgets import Menu, MenuBar, MenuItem
 from textual.app import App
 from textual.widgets import OptionList, Static
 
