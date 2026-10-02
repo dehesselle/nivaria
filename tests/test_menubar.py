@@ -110,15 +110,15 @@ async def test_the_connection_menu_offers_the_documented_entries(repo) -> None:
 
 
 async def test_the_hidden_key_bindings_are_advertised_as_shortcuts(repo) -> None:
-    """Ctrl+D/W/R and F10 are `show=False` in the footer, so the menu's
+    """ctrl+D/W/R and F10 are `show=False` in the footer, so the menu's
     shortcut column is the only place they are advertised."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         shortcuts = {item.id: item.shortcut for item in app.screen.query(MenuItem)}
-        assert shortcuts["database"] == "Ctrl+D"
-        assert shortcuts["warehouse"] == "Ctrl+W"
-        assert shortcuts["role"] == "Ctrl+R"
+        assert shortcuts["database"] == "ctrl+D"
+        assert shortcuts["warehouse"] == "ctrl+W"
+        assert shortcuts["role"] == "ctrl+R"
         assert shortcuts["quit"] == "F10"
 
 

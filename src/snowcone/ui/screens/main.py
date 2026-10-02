@@ -135,15 +135,15 @@ class MainScreen(Screen):
             # "connection-menu", not "connection": a Menu id is a CSS id too,
             # and app.tcss already styles #connect (the connect dialog).
             with Menu("Connection", id="connection-menu"):
-                yield MenuItem("Open...", id="open", mnemonic="o", shortcut="Ctrl+O")
+                yield MenuItem("Open...", id="open", mnemonic="o", shortcut="ctrl+O")
                 yield MenuSeparator()
                 yield MenuItem(
-                    "Databases ...", id="database", mnemonic="d", shortcut="Ctrl+D"
+                    "Databases ...", id="database", mnemonic="d", shortcut="ctrl+D"
                 )
                 yield MenuItem(
-                    "Warehouse ...", id="warehouse", mnemonic="w", shortcut="Ctrl+W"
+                    "Warehouse ...", id="warehouse", mnemonic="w", shortcut="ctrl+W"
                 )
-                yield MenuItem("Role ...", id="role", mnemonic="r", shortcut="Ctrl+R")
+                yield MenuItem("Role ...", id="role", mnemonic="r", shortcut="ctrl+R")
                 yield MenuItem("Pre-warm cache", id="prewarm", mnemonic="p")
         yield LogViewer(show_key=False)
         tree = ObjectTree(self.repo, id="tree")
