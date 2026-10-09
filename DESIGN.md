@@ -57,7 +57,7 @@ terminal:
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ ┌────────────────────────────────────────────────────────────────────┐   │
-│ │ search objects                                                      │   │
+│ │ search objects -- more words narrow by schema or database           │   │
 │ │ ......................................................................│
 │ │  MYDB.STAGING.STG_CUSTOMER_ORDERS                            table  │   │
 │ │  MYDB.SALES.ORDERS                                              view │   │
@@ -1244,6 +1244,30 @@ third, database level would spend the query's leading characters on the
 database too, for no benefit: there is no database-repeats-inside-object-name
 ambiguity the way `STAGING`/`STG_` justifies it for schema. Don't assume the
 database participates in match scoring the way the schema does — it doesn't.
+It can still be *matched*, by a filter word (below), just never scored.
+
+**Multi-word queries: the first word ranks, the rest filter.** Everything
+above describes the query's first word; it is matched, scored and ordered
+exactly as a one-word query always was. Each further word, after a space, only
+narrows: a row survives if every filter word fuzzy-matches inside *one* of
+its parts — database, schema or name — so `MY_TEST_TABLE my_test_schema
+test_db` walks a name repeated across databases down to one row. Filters
+never touch the score, so adding a word can only drop rows, never reorder the
+list or bring one back. An fzf-style reading, where every word scores
+equally in any order, was rejected for exactly that: a lone word must keep
+the database out (otherwise `prod` lists every object in `PROD_DB`), so a
+second word would change what the first may match and the list could grow
+or reshuffle while the user narrows it. Matching a filter one part at a time
+rather than across `DB.SCHEMA.NAME` is what makes it narrow at all — across
+the dots, a subsequence like `test_db` can borrow letters from all three
+parts and matches nearly everything. Filters are applied to the corpora
+*before* ranking, because ranking stops at `MAX_RESULTS`: filtering its
+output would only see that top slice, and a name repeated across enough
+databases pushes the wanted row past it. Each query is ranked from scratch,
+not by narrowing the previous list, which would break on backspace, a
+mid-query edit or a paste. Whatever a filter word matched is highlighted,
+including in the otherwise dim database prefix, so a row shows why it
+stayed.
 
 Column and schema names are matched against the bare name only — there is no
 schema-repeats-in-object-name ambiguity to resolve for either, so the simpler

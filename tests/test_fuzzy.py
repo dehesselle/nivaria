@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from snowcone.fuzzy import highlight, match, match_qualified, rank, rank_qualified
+from snowcone.fuzzy import (
+    highlight,
+    match,
+    match_qualified,
+    match_segment,
+    rank,
+    rank_qualified,
+    split_query,
+)
 
 
 def names(*items: str) -> list[tuple[str, str]]:
@@ -183,3 +191,49 @@ def test_a_name_only_match_is_kept_when_the_qualified_form_fails() -> None:
 def test_rank_qualified_respects_the_limit() -> None:
     candidates = [("S", f"ORDERS_{i}", i) for i in range(20)]
     assert len(rank_qualified("ord", candidates, limit=3)) == 3
+
+
+# ------------------------------------------------------ multi-word queries
+
+
+def test_a_query_splits_into_a_ranking_word_and_filter_words() -> None:
+    assert split_query("orders sales mydb") == ("orders", ("sales", "mydb"))
+
+
+def test_a_single_word_query_has_no_filter_words() -> None:
+    assert split_query("orders") == ("orders", ())
+
+
+def test_surplus_whitespace_produces_no_empty_filter_words() -> None:
+    assert split_query("  orders   sales  ") == ("orders", ("sales",))
+
+
+def test_an_empty_query_splits_into_nothing() -> None:
+    assert split_query("   ") == ("", ())
+
+
+def test_a_filter_word_matches_inside_a_single_segment() -> None:
+    found = match_segment("tstdb", ("TEST_DB", "SALES", "ORDERS"))
+    assert found is not None
+    index, hit = found
+    assert index == 0
+    assert "".join("TEST_DB"[i] for i in hit.positions).lower() == "tstdb"
+
+
+def test_a_filter_word_may_not_straddle_segments() -> None:
+    """Across the dotted whole, 'test_db' could take TEST_ from the schema
+    and D/B from elsewhere -- which is how a filter ends up matching nearly
+    everything."""
+    segments = ("MYDB", "TEST_SCHEMA", "DB_ORDERS")
+    assert match("test_db", ".".join(segments)) is not None
+    assert match_segment("test_db", segments) is None
+
+
+def test_a_filter_word_matching_no_segment_is_rejected() -> None:
+    assert match_segment("zzz", ("MYDB", "SALES", "ORDERS")) is None
+
+
+def test_a_filter_word_keeps_its_best_segment() -> None:
+    found = match_segment("sales", ("SALES_DB", "SALES", "ORDERS"))
+    assert found is not None
+    assert found[0] == 1

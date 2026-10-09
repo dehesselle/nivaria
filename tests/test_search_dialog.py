@@ -22,7 +22,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.ui.screens.search import SearchDialog
+from snowcone.ui.screens.search import MAX_RESULTS, SearchDialog
 
 
 @pytest.fixture
@@ -459,6 +459,134 @@ async def test_searching_without_a_database_is_empty_not_an_error(repo) -> None:
         await pilot.pause()
         await type_query(pilot, app, "ord")
         assert shown(app) == []
+
+
+# ------------------------------------------------------ multi-word queries
+
+
+def shown_qualified(app: Harness) -> list[str]:
+    return [f"{ref.database}.{ref.schema}.{ref.name}" for ref in app.screen._shown]
+
+
+async def test_a_second_word_narrows_to_the_matching_schema(repo) -> None:
+    put(repo, ObjectType.TABLE, "SALES", "ORDERS")
+    put(repo, ObjectType.TABLE, "RAW", "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders raw")
+        assert shown(app) == ["RAW.ORDERS"]
+
+
+async def test_a_further_word_narrows_by_database(repo) -> None:
+    for database in ("DEV_DB", "TEST_DB", "PROD_DB"):
+        put(repo, ObjectType.TABLE, "SALES", "ORDERS", database=database)
+        put(repo, ObjectType.TABLE, "RAW", "ORDERS", database=database)
+    app = Harness(repo, databases=("DEV_DB", "TEST_DB", "PROD_DB"))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders sales test_db")
+        assert shown_qualified(app) == ["TEST_DB.SALES.ORDERS"]
+
+
+async def test_filter_words_may_come_in_any_order(repo) -> None:
+    for database in ("DEV_DB", "TEST_DB"):
+        put(repo, ObjectType.TABLE, "SALES", "ORDERS", database=database)
+        put(repo, ObjectType.TABLE, "RAW", "ORDERS", database=database)
+    app = Harness(repo, databases=("DEV_DB", "TEST_DB"))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders test_db sales")
+        assert shown_qualified(app) == ["TEST_DB.SALES.ORDERS"]
+
+
+async def test_a_single_word_never_matches_the_database(repo) -> None:
+    """The database stays out of ranking (see DESIGN.md "Matching and
+    ranking"); only a filter word may match it."""
+    put(repo, ObjectType.TABLE, "SALES", "ORDERS", database="PRODDB")
+    app = Harness(repo, databases=("PRODDB",))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "prod")
+        assert shown(app) == []
+        await type_query(pilot, app, "orders prod")
+        assert shown(app) == ["SALES.ORDERS"]
+
+
+async def test_filter_words_apply_before_the_result_cap(repo) -> None:
+    """Filtering the ranked output instead would only ever see the top
+    MAX_RESULTS, and the one row the filter is after ranks below that here."""
+    put(
+        repo,
+        ObjectType.TABLE,
+        "SALES",
+        *(f"ORDERS_{index:03}" for index in range(MAX_RESULTS + 50)),
+        database="BUSYDB",
+    )
+    put(repo, ObjectType.TABLE, "SALES", "ORDERS_RANKED_LAST", database="TARGETDB")
+    app = Harness(repo, databases=("BUSYDB", "TARGETDB"))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "orders")
+        assert "SALES.ORDERS_RANKED_LAST" not in shown(app)
+        await type_query(pilot, app, "orders target")
+        assert shown(app) == ["SALES.ORDERS_RANKED_LAST"]
+
+
+async def test_adding_a_word_never_reorders_the_surviving_results(repo) -> None:
+    put(repo, ObjectType.TABLE, "SALES", "ORD", "ORDERS", "ORDER_ITEMS_ARCHIVE")
+    put(repo, ObjectType.TABLE, "RAW", "ORD", "ORDERS", "ORDER_ITEMS_ARCHIVE")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "ord")
+        before = shown(app)
+        await type_query(pilot, app, "ord sales")
+        after = shown(app)
+        assert after == [row for row in before if row.startswith("SALES.")]
+        assert len(after) == 3
+
+
+async def test_filter_words_also_narrow_schema_hits(repo) -> None:
+    put_schemas(repo, "STAGING", database="DEV_DB")
+    put_schemas(repo, "STAGING", database="TEST_DB")
+    app = Harness(repo, databases=("DEV_DB", "TEST_DB"))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "staging test")
+        assert app.screen._shown == [SchemaRef(database="TEST_DB", name="STAGING")]
+
+
+async def test_a_trailing_space_changes_nothing(repo) -> None:
+    put(repo, ObjectType.TABLE, "SALES", "ORDERS", "ORDER_ITEMS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await type_query(pilot, app, "ord")
+        before = shown(app)
+        await type_query(pilot, app, "ord ")
+        assert shown(app) == before
+
+
+async def test_a_filter_word_lights_up_the_database_it_matched(repo) -> None:
+    """The database prefix is dim and never highlighted by the ranking word;
+    a filter word matching it is highlighted, so a row shows why it stayed."""
+    put(repo, ObjectType.TABLE, "SALES", "ORDERS", database="TEST_DB")
+    app = Harness(repo, databases=("TEST_DB",))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+
+        def database_is_highlighted() -> bool:
+            results = app.screen.query_one("#search-results", OptionList)
+            prompt = results.get_option_at_index(0).prompt
+            return any(
+                span.start == 0 and "bold" in str(span.style) for span in prompt.spans
+            )
+
+        await type_query(pilot, app, "orders")
+        assert not database_is_highlighted()
+        await type_query(pilot, app, "orders test")
+        assert database_is_highlighted()
 
 
 # --------------------------------------------------------------- selection

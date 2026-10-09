@@ -55,7 +55,14 @@ from textual.widgets import Input, OptionList
 from textual.widgets.option_list import Option
 
 from snowcone.cache.repository import Repository
-from snowcone.fuzzy import Match, highlight, rank, rank_qualified
+from snowcone.fuzzy import (
+    Match,
+    highlight,
+    match_segment,
+    rank,
+    rank_qualified,
+    split_query,
+)
 from snowcone.models import ObjectRef, SchemaRef
 
 #: What the modal hands back: an object, a column's owning object, or a
@@ -81,6 +88,11 @@ MAX_RESULTS = 200
 MIN_COLUMN_QUERY_LENGTH = 3
 
 
+def _passes(filters: Sequence[str], segments: Sequence[str]) -> bool:
+    """Whether every filter word matches inside one of `segments`."""
+    return all(match_segment(token, segments) is not None for token in filters)
+
+
 class SearchDialog(Dialog[Hit]):
     """Pick one object or schema by fuzzy name, or dismiss with None."""
 
@@ -96,11 +108,15 @@ class SearchDialog(Dialog[Hit]):
         self._column_corpus: list[tuple[ObjectRef, str]] = []
         self._schema_corpus: list[SchemaRef] = []
         self._shown: list[Hit] = []
+        self._filters: tuple[str, ...] = ()
         self._timer = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
-            yield Input(placeholder="search objects", id="search-query")
+            yield Input(
+                placeholder="search objects -- more words narrow by schema or database",
+                id="search-query",
+            )
             yield OptionList(id="search-results")
 
     def on_mount(self) -> None:
@@ -233,10 +249,19 @@ class SearchDialog(Dialog[Hit]):
         # thread was running; drop a stale result rather than flash it.
         if self.query_one("#search-query", Input).value.strip() != query:
             return
-        self._apply_results(ranked)
+        self._apply_results(ranked, split_query(query)[1])
 
     def _rank(self, query: str) -> list[tuple[Hit, Match, str | None]]:
         """Best hit per object or schema, from a name, a column, or itself.
+
+        Only the query's first word ranks; any further words are filters (see
+        `split_query`). They are applied to the corpora *before* ranking, not
+        to its output: ranking stops at `MAX_RESULTS`, and a name repeated
+        across enough databases would push the one the filters are after past
+        that cut before they ever saw it. Each query is also ranked from
+        scratch rather than by narrowing the previous result list, which would
+        break on backspace, a mid-query edit or a paste, and inherit the same
+        cut.
 
         Pure and widget-free -- safe to call from a thread. `_corpus`,
         `_column_corpus` and `_schema_corpus` do get reassigned once each,
@@ -247,7 +272,28 @@ class SearchDialog(Dialog[Hit]):
         other, never a partial write (see the module docstring for why this
         runs against a possibly-incomplete corpus at all).
         """
+        query, filters = split_query(query)
         search_columns = len(query) >= MIN_COLUMN_QUERY_LENGTH
+
+        objects = [
+            ref
+            for _, ref in self._corpus
+            if _passes(filters, (ref.database, ref.schema, ref.name))
+        ]
+        schemas = [
+            schema
+            for schema in self._schema_corpus
+            if _passes(filters, (schema.database, schema.name))
+        ]
+        columns: list[tuple[ObjectRef, str]] = []
+        if search_columns:
+            columns = self._column_corpus
+            if filters:
+                # The repository only pairs a column with an owner that is in
+                # the object corpus too, so the owners that survived above
+                # are exactly the columns' owners that would.
+                kept = set(objects)
+                columns = [(ref, column) for ref, column in columns if ref in kept]
 
         # `rank`/`rank_qualified` break score ties by corpus order, which is
         # what keeps an empty query a plain passthrough; merging ranked lists
@@ -257,18 +303,17 @@ class SearchDialog(Dialog[Hit]):
         # length gate, same as the ranking itself -- otherwise a short query
         # would still pay for walking all of it just for this.
         order: dict[Hit, int] = {}
-        for _, ref in self._corpus:
+        for ref in objects:
             order.setdefault(ref, len(order))
-        if search_columns:
-            for ref, _ in self._column_corpus:
-                order.setdefault(ref, len(order))
-        for schema in self._schema_corpus:
+        for ref, _ in columns:
+            order.setdefault(ref, len(order))
+        for schema in schemas:
             order.setdefault(schema, len(order))
 
         object_hits: dict[ObjectRef, Match] = dict(
             rank_qualified(
                 query,
-                ((ref.schema, ref.name, ref) for _, ref in self._corpus),
+                ((ref.schema, ref.name, ref) for ref in objects),
                 limit=MAX_RESULTS,
             )
         )
@@ -278,19 +323,18 @@ class SearchDialog(Dialog[Hit]):
         # positions are already relative to the name itself, ready to
         # highlight directly.
         column_hits: dict[ObjectRef, tuple[str, Match]] = {}
-        if search_columns:
-            for (ref, column), hit in rank(
-                query,
-                ((column, (ref, column)) for ref, column in self._column_corpus),
-                limit=MAX_RESULTS,
-            ):
-                best = column_hits.get(ref)
-                if best is None or hit.score > best[1].score:
-                    column_hits[ref] = (column, hit)
+        for (ref, column), hit in rank(
+            query,
+            ((column, (ref, column)) for ref, column in columns),
+            limit=MAX_RESULTS,
+        ):
+            best = column_hits.get(ref)
+            if best is None or hit.score > best[1].score:
+                column_hits[ref] = (column, hit)
         schema_hits: dict[SchemaRef, Match] = dict(
             rank(
                 query,
-                ((schema.name, schema) for schema in self._schema_corpus),
+                ((schema.name, schema) for schema in schemas),
                 limit=MAX_RESULTS,
             )
         )
@@ -314,9 +358,12 @@ class SearchDialog(Dialog[Hit]):
         merged.sort(key=lambda item: (-item[1].score, order[item[0]]))
         return merged[:MAX_RESULTS]
 
-    def _apply_results(self, ranked: list[tuple[Hit, Match, str | None]]) -> None:
+    def _apply_results(
+        self, ranked: list[tuple[Hit, Match, str | None]], filters: tuple[str, ...]
+    ) -> None:
         results = self.query_one("#search-results", OptionList)
         self._shown = [ref for ref, _, _ in ranked]
+        self._filters = filters
         results.clear_options()
         results.add_options(
             [
@@ -334,12 +381,15 @@ class SearchDialog(Dialog[Hit]):
         style = f"bold {accent}" if accent else "bold"
         text = Text()
         if isinstance(ref, SchemaRef):
-            # The database is a plain, unhighlighted prefix -- several can be
-            # active at once now, so it has to be shown, but it never
-            # competed for ranking (see rank_qualified below), so there is
-            # nothing to highlight in it.
-            text.append(f"{ref.database}.", style="dim")
-            for run, matched in highlight(ref.name, hit.positions):
+            # The database is a dim prefix -- several can be active at once
+            # now, so it has to be shown, but it never competes for ranking
+            # (see rank_qualified below); only a filter word lights it up.
+            database_marks, name_marks = self._filter_marks((ref.database, ref.name))
+            for run, matched in highlight(ref.database, sorted(database_marks)):
+                text.append(run, style=style if matched else "dim")
+            text.append(".", style="dim")
+            marks = name_marks.union(hit.positions)
+            for run, matched in highlight(ref.name, sorted(marks)):
                 text.append(run, style=style if matched else "")
             text.append("  schema", style="dim")
             return text
@@ -351,9 +401,17 @@ class SearchDialog(Dialog[Hit]):
         # ranking to a third level would spend the query's leading
         # characters on the database too, and there is no
         # database-repeats-inside-object-name ambiguity the way schema/
-        # STAGING.STG_ has to justify that cost.
-        text.append(f"{ref.database}.", style="dim")
-        for run, matched in highlight(f"{ref.schema}.{ref.name}", name_positions):
+        # STAGING.STG_ has to justify that cost. Filter words may match it,
+        # though, and are highlighted so a row shows why it survived.
+        database_marks, schema_marks, name_marks = self._filter_marks(
+            (ref.database, ref.schema, ref.name)
+        )
+        for run, matched in highlight(ref.database, sorted(database_marks)):
+            text.append(run, style=style if matched else "dim")
+        text.append(".", style="dim")
+        offset = len(ref.schema) + 1
+        marks = schema_marks.union(name_positions, (p + offset for p in name_marks))
+        for run, matched in highlight(f"{ref.schema}.{ref.name}", sorted(marks)):
             text.append(run, style=style if matched else "")
         text.append(f"  {ref.type.value.lower()}", style="dim")
         if column is not None:
@@ -361,6 +419,21 @@ class SearchDialog(Dialog[Hit]):
             for run, matched in highlight(column, hit.positions):
                 text.append(run, style=style if matched else "dim")
         return text
+
+    def _filter_marks(self, segments: Sequence[str]) -> list[set[int]]:
+        """Per segment, the positions the current filter words matched.
+
+        Recomputed here rather than carried out of `_rank`: it is at most
+        `MAX_RESULTS` rows, and it keeps the ranking result's shape free of
+        something only rendering needs.
+        """
+        marks: list[set[int]] = [set() for _ in segments]
+        for token in self._filters:
+            found = match_segment(token, segments)
+            if found is not None:
+                index, hit = found
+                marks[index].update(hit.positions)
+        return marks
 
     def _choose(self, index: int) -> None:
         if 0 <= index < len(self._shown):

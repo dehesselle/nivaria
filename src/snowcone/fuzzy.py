@@ -161,6 +161,35 @@ def match_qualified(query: str, prefix: str, name: str) -> Match | None:
     return best
 
 
+def split_query(query: str) -> tuple[str, tuple[str, ...]]:
+    """Split a typed query into the word that ranks and the words that filter.
+
+    Only the first word is scored. Every later word narrows the results
+    without re-scoring them, so adding one can never reorder the list or bring
+    a row back. Letting every word score equally, fzf-style, was rejected: a
+    lone word must keep the database out of matching (see DESIGN.md "Matching
+    and ranking"), so a second word would change what the first one may
+    match, and the list could grow or reshuffle as the user typed more.
+    """
+    first, *rest = query.split() or [""]
+    return first, tuple(rest)
+
+
+def match_segment(token: str, segments: Sequence[str]) -> tuple[int, Match] | None:
+    """The best segment `token` matches inside, as `(index, match)`, or None.
+
+    One segment at a time rather than the dotted whole: across
+    `DB.SCHEMA.NAME` a subsequence like `test_db` can borrow letters from all
+    three, which matches nearly everything and narrows nothing.
+    """
+    best: tuple[int, Match] | None = None
+    for index, segment in enumerate(segments):
+        hit = match(token, segment)
+        if hit is not None and (best is None or hit.score > best[1].score):
+            best = (index, hit)
+    return best
+
+
 def rank_qualified[T](
     query: str,
     candidates: Iterable[tuple[str, str, T]],
