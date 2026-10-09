@@ -1073,6 +1073,14 @@ move, and the two alternated forever. The UI went sluggish, the tree
 scrolled by itself, and the countdown froze, because every selection
 restarts it. No Snowflake work was involved at all.
 
+The tree also filters what it announces. It drops a highlight for a node the
+cursor has already left, because that move posts a highlight of its own and
+holding an arrow key would otherwise repaint the Detail pane for every
+object passed. It drops Textual's repeat highlight of the node it announced
+last, because each repeat re-showed the same table, which reset its sort and
+cursor. `set_databases` forgets the last announcement: the screen clears the
+Detail pane alongside it, so the next highlight has to be able to refill it.
+
 ---
 
 ## Detail views

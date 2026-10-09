@@ -114,6 +114,10 @@ class ObjectTree(Resizable, Tree[NodeData]):
         #: Set while this widget is restructuring, so the NodeHighlighted that
         #: a cursor restore emits is not mistaken for a user selection.
         self.rebuilding = False
+        #: The node whose highlight was last announced, so Textual's repeat
+        #: highlight of an unmoved cursor is not announced twice -- see
+        #: on_tree_node_highlighted.
+        self._announced: TreeNode[NodeData] | None = None
 
     # ----------------------------------------------------------------- repo
 
@@ -139,6 +143,9 @@ class ObjectTree(Resizable, Tree[NodeData]):
         free, the same machinery already built for schema/object children.
         """
         self.databases = list(databases)
+        # The caller clears the detail pane alongside this, so whatever the
+        # cursor rests on next has to be announced again to refill it.
+        self._announced = None
         self._apply(self.root, self._desired(self.root))
 
     def _walk(self, path: tuple[str, ...]) -> TreeNode[NodeData] | None:
@@ -276,9 +283,21 @@ class ObjectTree(Resizable, Tree[NodeData]):
         if self.rebuilding:
             # Mid-restructure; the cursor restore decides what is selected.
             return
+        if event.node is not self.cursor_node:
+            # The cursor moved on before this was handled, and that move
+            # posts its own highlight. Holding an arrow key would otherwise
+            # repaint the detail pane for every object it passes.
+            return
+        if event.node is self._announced:
+            # Not a move: Textual re-highlights the cursor's node whenever
+            # its *line* changes (Tree._build reassigns cursor_line, and
+            # watch_cursor_line compares against whichever node now holds
+            # the old line). Announcing it again re-showed the same object.
+            return
         data = event.node.data
         if data is None:
             return
+        self._announced = event.node
         if data.ref is not None:
             self.post_message(ObjectSelected(data.ref))
         elif data.type is NodeType.CATEGORY and data.scope is not None:

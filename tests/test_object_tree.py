@@ -758,3 +758,69 @@ async def test_the_tree_reads_the_cache_ttl_at_the_point_of_use(repo) -> None:
             assert scope.key in [key for key, _ in app.needed]
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+# ------------------------------------------------------------ announcements
+
+
+async def test_a_line_shift_does_not_reannounce_the_highlighted_object(repo) -> None:
+    """Textual re-highlights a node whose line merely changed. Announcing
+    that again re-showed the same table, resetting its sort and cursor."""
+    put_schemas(repo, "MYDB", "AAA", "ZZZ")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    put_tables(repo, "MYDB", "ZZZ", "PAYMENTS")
+    seen: list[str] = []
+
+    class Listening(Harness):
+        def on_object_selected(self, event: ObjectSelected) -> None:
+            seen.append(event.ref.fqn)
+
+    app = Listening(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        database_node(tree).expand()
+        await pilot.pause()
+        upper, lower = database_node(tree).children
+        lower.expand()
+        await pilot.pause()
+        lower.children[0].expand()
+        await pilot.pause()
+        tree.move_cursor(lower.children[0].children[0])
+        await pilot.pause()
+        assert seen == ["MYDB.ZZZ.PAYMENTS"]
+
+        upper.expand()
+        await pilot.pause()
+        await pilot.pause()
+
+        assert tree.cursor_node.data.key == "PAYMENTS"
+    assert seen == ["MYDB.ZZZ.PAYMENTS"]
+
+
+async def test_only_the_latest_of_two_quick_cursor_moves_is_announced(repo) -> None:
+    """A highlight handled after the cursor has already moved on describes
+    where it no longer is; the later move announces itself."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS", "PAYMENTS")
+    seen: list[str] = []
+
+    class Listening(Harness):
+        def on_object_selected(self, event: ObjectSelected) -> None:
+            seen.append(event.ref.fqn)
+
+    app = Listening(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        database_node(tree).expand()
+        await pilot.pause()
+        schema = database_node(tree).children[0]
+        schema.expand()
+        await pilot.pause()
+        tables = schema.children[0]
+        tables.expand()
+        await pilot.pause()
+
+        tree.move_cursor(tables.children[0])
+        tree.move_cursor(tables.children[1])
+        await pilot.pause()
+    assert seen == ["MYDB.AAA.PAYMENTS"]
