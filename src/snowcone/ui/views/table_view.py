@@ -15,10 +15,8 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from snowcone.cache.repository import Repository
-from snowcone.format import format_data_type
 from snowcone.models import (
     CacheState,
-    Column,
     ObjectRef,
     ObjectType,
     Scope,
@@ -97,7 +95,7 @@ class ColumnsView(ItemDetailView, ObjectView):
         cell is a single cached field tooltips that field's name -- the
         cache's `INFORMATION_SCHEMA.COLUMNS` vocabulary -- as proof the column
         is Snowflake's and not a term invented here. Type and Tags have none:
-        Type is DATA_TYPE recombined with its length/precision/scale, and Tags
+        Type is DESC TABLE's full rendering, not DATA_TYPE alone, and Tags
         is snowcone's own count, so no single Snowflake name would be true.
         """
         table.add_column(
@@ -147,15 +145,6 @@ class ColumnsView(ItemDetailView, ObjectView):
         # transient state that resolves the moment the scope completes.
         tags_confirmed = self.repo.entry(tags_scope).state is CacheState.COMPLETE
 
-        def _type_of(column: Column) -> str:
-            return format_data_type(
-                column.data_type,
-                character_maximum_length=column.character_maximum_length,
-                numeric_precision=column.numeric_precision,
-                numeric_scale=column.numeric_scale,
-                datetime_precision=column.datetime_precision,
-            )
-
         table = self.query_one("#detail-columns", DataTable)
         if not table.columns:
             self._add_columns(table)
@@ -175,13 +164,13 @@ class ColumnsView(ItemDetailView, ObjectView):
                 "tags": tags,
                 "ordinal": column.ordinal_position,
                 "name": column.column_name.casefold(),
-                "type": _type_of(column).casefold(),
+                "type": column.desc_type.casefold(),
                 "tag_count": len(tags),
             }
             table.add_row(
                 Text(str(column.ordinal_position)),
                 Text(column.column_name),
-                Text(_type_of(column)),
+                Text(column.desc_type),
                 # YES/NO verbatim, as INFORMATION_SCHEMA.IS_NULLABLE
                 # reports it -- a column headed "Nullable" showing
                 # "NOT NULL" read backwards.

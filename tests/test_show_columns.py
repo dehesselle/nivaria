@@ -8,7 +8,20 @@ mapping below is what keeps the cache mirror stable.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
 from snowcone.gateway.queries import map_show_columns, show_columns
+
+#: SHOW COLUMNS' data_type JSON next to what DESC TABLE printed for the same
+#: column, captured from a live account -- one column per declared type.
+_LIVE_TYPES = json.loads(
+    (Path(__file__).parent / "data" / "show_column_types.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 def raw(**overrides) -> dict:
@@ -142,3 +155,50 @@ def test_a_missing_data_type_degrades_rather_than_fails() -> None:
 
 def test_an_empty_result_maps_to_nothing() -> None:
     assert map_show_columns([]) == []
+
+
+@pytest.mark.parametrize(
+    "case", _LIVE_TYPES, ids=[case["declared"] for case in _LIVE_TYPES]
+)
+def test_the_desc_type_matches_what_desc_table_printed_live(case) -> None:
+    """The column list shows `_desc_type`, so it has to be Snowflake's own
+    rendering to the character -- INT as NUMBER(38,0), CHAR as VARCHAR(1),
+    a VECTOR's element as declared, NOT NULL only on an object's fields."""
+    mapped = map_show_columns([raw(data_type=case["show_data_type"])])[0]
+    assert mapped["_desc_type"] == case["desc_type"]
+
+
+def test_a_binary_length_is_kept_out_of_character_maximum_length() -> None:
+    """INFORMATION_SCHEMA leaves every length field NULL for BINARY; the
+    length still reaches the column list, through `_desc_type`."""
+    mapped = map_show_columns(
+        [raw(data_type='{"type":"BINARY","length":8,"byteLength":8}')]
+    )[0]
+    assert mapped["CHARACTER_MAXIMUM_LENGTH"] is None
+    assert mapped["_desc_type"] == "BINARY(8)"
+
+
+def test_an_unparseable_data_type_renders_as_unknown() -> None:
+    assert map_show_columns([raw(data_type="not json")])[0]["_desc_type"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ('{"type":"FIXED","precision":38}', "NUMBER"),
+        ('{"type":"ARRAY","elementType":"oops"}', "ARRAY"),
+        ('{"type":"MAP","keyType":{"type":"TEXT"}}', "MAP"),
+        ('{"type":"OBJECT","fields":[{"fieldName":"a"}]}', "OBJECT"),
+        (
+            '{"type":"VECTOR","vectorElementType":{"type":"TEXT"},"dimension":3}',
+            "VECTOR",
+        ),
+        ('{"type":"SOMETHING_NEW","precision":5}', "SOMETHING_NEW"),
+    ],
+)
+def test_a_malformed_or_unknown_type_degrades_to_its_bare_name(
+    payload, expected
+) -> None:
+    """A partial or unexpected payload renders the category alone rather than
+    a malformed type -- or failing the whole fetch."""
+    assert map_show_columns([raw(data_type=payload)])[0]["_desc_type"] == expected

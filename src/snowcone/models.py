@@ -511,10 +511,9 @@ class Column:
     ordinal_position: int
     data_type: str
     is_nullable: bool
-    character_maximum_length: int | None = None
-    numeric_precision: int | None = None
-    numeric_scale: int | None = None
-    datetime_precision: int | None = None
+    #: The full type as DESC TABLE prints it, e.g. NUMBER(38,0) where
+    #: `data_type` is just NUMBER -- what the column list shows.
+    desc_type: str = ""
     default: str = ""
     comment: str = ""
 

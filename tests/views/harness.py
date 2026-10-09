@@ -80,7 +80,8 @@ def put_table(repo: Repository, name: str, **extra) -> ObjectRef:
 
 def put_columns(repo: Repository, table: str, *columns: tuple) -> None:
     """Each column is (name, data_type) or (name, data_type, extra), where
-    extra is a dict of additional INFORMATION_SCHEMA fields, e.g. precision."""
+    extra is a dict of additional fields, e.g. `_desc_type` for a type whose
+    full rendering is more than its DATA_TYPE (which it defaults to)."""
     rows = []
     for position, column in enumerate(columns, start=1):
         name, data_type, *rest = column
@@ -94,6 +95,7 @@ def put_columns(repo: Repository, table: str, *columns: tuple) -> None:
             "IS_NULLABLE": "YES",
             "COLUMN_DEFAULT": None,
             "COMMENT": "",
+            "_desc_type": data_type,
         }
         if rest:
             row.update(rest[0])

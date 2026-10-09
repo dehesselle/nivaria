@@ -550,6 +550,16 @@ def task_history(database: str, schema: str, task: str, max_rows: int) -> str:
 #: is already INFORMATION_SCHEMA's value and passes through unchanged.
 _INFORMATION_SCHEMA_TYPES = {"FIXED": "NUMBER", "REAL": "FLOAT"}
 
+#: Categories whose "scale" is a fractional-seconds count, not a decimal scale.
+_DATETIME_TYPES = frozenset({"TIMESTAMP_LTZ", "TIMESTAMP_NTZ", "TIMESTAMP_TZ", "TIME"})
+
+#: How DESC TABLE names a category, where that differs from the category.
+_DESC_NAMES = {**_INFORMATION_SCHEMA_TYPES, "TEXT": "VARCHAR"}
+
+#: A VECTOR's element type, which DESC TABLE writes the way it was declared:
+#: VECTOR(INT, 768), not VECTOR(NUMBER(38,0), 768).
+_VECTOR_ELEMENTS = {"FIXED": "INT", "REAL": "FLOAT"}
+
 
 def _data_type_fields(raw: object) -> dict[str, object]:
     """Unpack SHOW COLUMNS' data_type, which is a JSON string.
@@ -569,6 +579,78 @@ def _data_type_fields(raw: object) -> dict[str, object]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _type_arguments(fields: dict[str, Any], *keys: str) -> str:
+    """ "(a,b)" from integer `keys` of `fields`, or "" unless all are present.
+
+    All or nothing: NUMBER always reports precision and scale together, and
+    half of them would render a malformed NUMBER(38) rather than the real type.
+    """
+    values = [fields.get(key) for key in keys]
+    if not all(isinstance(value, int) for value in values):
+        return ""
+    return "(" + ",".join(str(value) for value in values) + ")"
+
+
+def desc_type(fields: dict[str, Any]) -> str:
+    """The type exactly as DESC TABLE prints it, from SHOW COLUMNS' JSON.
+
+    INFORMATION_SCHEMA.COLUMNS cannot express a full type -- it has nowhere
+    for a BINARY's length, a VECTOR's element and dimension, or a structured
+    type's fields -- but SHOW's JSON carries all of it, and DESC TABLE's
+    rendering is Snowflake's own. The rules were taken from live DESC TABLE
+    output (tests/data/show_column_types.json), including the quirks: a
+    VECTOR's element keeps its declared spelling, and NOT NULL appears only on
+    an object's fields, because Snowflake rejects it on an array element or a
+    map value and never prints it for a map key.
+
+    Anything malformed degrades to the bare category, and no category at all
+    to "UNKNOWN", rather than failing the fetch.
+    """
+    category = fields.get("type")
+    if not isinstance(category, str):
+        return "UNKNOWN"
+    name = _DESC_NAMES.get(category, category)
+    if category == "FIXED":
+        return name + _type_arguments(fields, "precision", "scale")
+    if category in ("TEXT", "BINARY"):
+        return name + _type_arguments(fields, "length")
+    if category in _DATETIME_TYPES:
+        return name + _type_arguments(fields, "scale")
+    if category == "DECFLOAT":
+        return name + _type_arguments(fields, "precision")
+    if category == "VECTOR":
+        element = fields.get("vectorElementType")
+        dimension = fields.get("dimension")
+        if isinstance(element, dict) and isinstance(dimension, int):
+            spelled = _VECTOR_ELEMENTS.get(element.get("type"))
+            if spelled is not None:
+                return f"{name}({spelled}, {dimension})"
+        return name
+    if category == "ARRAY":
+        element = fields.get("elementType")
+        return f"{name}({desc_type(element)})" if isinstance(element, dict) else name
+    if category == "MAP":
+        key, value = fields.get("keyType"), fields.get("valueType")
+        if isinstance(key, dict) and isinstance(value, dict):
+            return f"{name}({desc_type(key)}, {desc_type(value)})"
+        return name
+    if category == "OBJECT":
+        members = fields.get("fields")
+        if not isinstance(members, list):
+            return name  # semi-structured OBJECT, as opposed to OBJECT()
+        rendered = []
+        for member in members:
+            field_type = member.get("fieldType") if isinstance(member, dict) else None
+            if not isinstance(field_type, dict):
+                return name
+            not_null = " NOT NULL" if field_type.get("nullable") is False else ""
+            rendered.append(
+                f"{member.get('fieldName', '')} {desc_type(field_type)}{not_null}"
+            )
+        return f"{name}({', '.join(rendered)})"
+    return name
+
+
 def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     """Map SHOW COLUMNS output onto the INFORMATION_SCHEMA.COLUMNS shape.
 
@@ -581,6 +663,10 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     SHOW COLUMNS has no ORDINAL_POSITION -- it returns columns in declaration
     order instead -- so position is derived from that order, counted per table
     so a multi-table result does not keep incrementing across tables.
+
+    `_desc_type` is the one field that is not INFORMATION_SCHEMA's: the full
+    type as DESC TABLE prints it (see `desc_type`), underscored as snowcone's
+    own column because INFORMATION_SCHEMA has no field that could hold it.
     """
     position: dict[tuple[str, str, str], int] = {}
     mapped: list[dict[str, Any]] = []
@@ -601,15 +687,11 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         category = fields.get("type", "UNKNOWN")
         category = _INFORMATION_SCHEMA_TYPES.get(category, category)
         # The JSON blob reports the same "precision"/"scale" keys for NUMBER's
-        # decimal scale and for a timestamp/time's fractional-seconds count;
-        # INFORMATION_SCHEMA keeps those concepts in separate columns, so the
-        # mirror gates each source key to the category it actually describes.
-        is_datetime = category in {
-            "TIMESTAMP_LTZ",
-            "TIMESTAMP_NTZ",
-            "TIMESTAMP_TZ",
-            "TIME",
-        }
+        # decimal scale and for a timestamp/time's fractional-seconds count,
+        # and a "length" for BINARY too; INFORMATION_SCHEMA keeps those apart
+        # (and leaves every length field NULL for BINARY, verified live), so
+        # the mirror gates each source key to the category it describes.
+        is_datetime = category in _DATETIME_TYPES
 
         mapped.append(
             {
@@ -623,13 +705,16 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                 if str(nullable).upper() in {"Y", "YES", "TRUE"}
                 else "NO",
                 "COLUMN_DEFAULT": row.get("default"),
-                "CHARACTER_MAXIMUM_LENGTH": fields.get("length"),
+                "CHARACTER_MAXIMUM_LENGTH": fields.get("length")
+                if category == "TEXT"
+                else None,
                 "NUMERIC_PRECISION": fields.get("precision")
                 if category == "NUMBER"
                 else None,
                 "NUMERIC_SCALE": fields.get("scale") if category == "NUMBER" else None,
                 "DATETIME_PRECISION": fields.get("scale") if is_datetime else None,
                 "COMMENT": row.get("comment"),
+                "_desc_type": desc_type(fields),
             }
         )
     return mapped

@@ -44,13 +44,17 @@ async def test_the_table_view_lists_cached_columns(repo) -> None:
         assert table.get_cell_at((1, 2)).plain == "FLOAT"
 
 
-async def test_the_table_view_renders_full_ddl_style_type_names(repo) -> None:
+async def test_the_type_column_shows_desc_tables_rendering_not_data_type(
+    repo,
+) -> None:
+    """DATA_TYPE alone is NUMBER; the column list shows the full type, as
+    rendered when the column was cached (see test_show_columns.py)."""
     ref = put_table(repo, "ORDERS")
     put_columns(
         repo,
         "ORDERS",
-        ("TOTAL", "NUMBER", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
-        ("CREATED_AT", "TIMESTAMP_LTZ", {"DATETIME_PRECISION": 9}),
+        ("TOTAL", "NUMBER", {"_desc_type": "NUMBER(38,0)"}),
+        ("CREATED_AT", "TIMESTAMP_LTZ", {"_desc_type": "TIMESTAMP_LTZ(9)"}),
     )
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
@@ -251,7 +255,7 @@ async def test_clicking_the_type_header_sorts_by_formatted_type_then_reverses(
         repo,
         "ORDERS",
         ("ID", "TEXT"),
-        ("TOTAL", "NUMBER", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
+        ("TOTAL", "NUMBER", {"_desc_type": "NUMBER(38,0)"}),
     )
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:

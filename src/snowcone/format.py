@@ -26,41 +26,6 @@ def format_bytes(size: int | None) -> str:
     return f"{value:.1f}{_BYTE_UNITS[-1]}"
 
 
-_DDL_NAMES = {"TEXT": "VARCHAR"}
-_SCALE_ONLY = {"TIMESTAMP_LTZ", "TIMESTAMP_NTZ", "TIMESTAMP_TZ", "TIME"}
-
-
-def format_data_type(
-    data_type: str,
-    *,
-    character_maximum_length: int | None = None,
-    numeric_precision: int | None = None,
-    numeric_scale: int | None = None,
-    datetime_precision: int | None = None,
-) -> str:
-    """A DDL-style type name, e.g. VARCHAR(16777216), NUMBER(38,0), TIMESTAMP_LTZ(9).
-
-    INFORMATION_SCHEMA (which the cache mirrors) reports a bare type with
-    precision split into separate fields; this recombines them so the column
-    list reads like a CREATE TABLE statement, and like DESC TABLE -- which
-    also shows TEXT as VARCHAR.
-    """
-    if data_type == "NUMBER":
-        if numeric_precision is not None and numeric_scale is not None:
-            return f"NUMBER({numeric_precision},{numeric_scale})"
-        return "NUMBER"
-    if data_type in ("TEXT", "BINARY"):
-        name = _DDL_NAMES.get(data_type, data_type)
-        if character_maximum_length is not None:
-            return f"{name}({character_maximum_length})"
-        return name
-    if data_type in _SCALE_ONLY:
-        if datetime_precision is not None:
-            return f"{data_type}({datetime_precision})"
-        return data_type
-    return data_type
-
-
 def _local(value: str) -> datetime:
     """Parse a stored timestamp and convert it to this machine's local time.
 
@@ -96,7 +61,7 @@ def format_date(value: str | None) -> str:
     """YYYY-MM-DD in local time, for a cell too narrow for the full timestamp.
 
     Falls back to the raw value when it doesn't parse, the same
-    degrade-don't-fail convention `format_data_type` uses for an unparseable
+    degrade-don't-fail convention `desc_type` uses for an unparseable
     SHOW COLUMNS type -- a timestamp snowcone cannot format is still a
     timestamp worth showing.
     """

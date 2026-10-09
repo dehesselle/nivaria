@@ -297,6 +297,20 @@ Snowflake statement accepts. A live comparison of all three sources (SHOW,
 name. A type that cannot be parsed degrades to
 "unknown"; a column snowcone cannot describe is still a column worth listing.
 
+What `INFORMATION_SCHEMA.COLUMNS` cannot do is describe a type in full. It has
+no field for a BINARY's length (every length field is NULL for it), DECFLOAT's
+fixed precision of 38, a VECTOR's element type and dimension, or a structured
+type's elements and fields. SHOW's JSON carries all of that, so the mirror
+gains one column of its own: `_desc_type`, the type exactly as `DESC TABLE`
+prints it (`NUMBER(38,0)`, `VECTOR(INT, 768)`, `OBJECT(a VARCHAR(16777216)
+NOT NULL, b FLOAT)`). The underscore marks the column as snowcone's, not
+Snowflake's, because no Snowflake field holds this value, but the rendering
+itself is Snowflake's. The column list shows it as Type. The rendering rules
+come from live `DESC TABLE` output, and `tests/data/show_column_types.json`
+keeps that output (51 declared types) as the test that holds them. The
+`INFORMATION_SCHEMA` fields stay faithful next to it: BINARY's length goes
+only into `_desc_type`, never into `CHARACTER_MAXIMUM_LENGTH`.
+
 ### A second source: one new mirror table per SELECT, never a retrofit
 
 `SHOW` remains the strong default above: it needs no warehouse and covers
@@ -1170,8 +1184,9 @@ field it shows, in the cache's own upper-case vocabulary: "Ordinal" is
 `ORDINAL_POSITION`, "Nullable" is `IS_NULLABLE`, "Default" is
 `COLUMN_DEFAULT`, and so on, so a user can confirm the column is Snowflake's
 and not a term snowcone made up. Type and Tags have no tooltip, because no
-single Snowflake name would be true of them. Type is `DATA_TYPE` recombined
-with its length, precision and scale. `DATA_TYPE_ALIAS` was rejected: it is
+single Snowflake name would be true of them. Type is `DESC TABLE`'s full
+rendering (see "`SHOW`, because it needs no warehouse"), which is more than
+`DATA_TYPE` alone. `DATA_TYPE_ALIAS` was rejected: it is
 the alias written in the DDL, such as `INT`, which SHOW COLUMNS does not
 return and the cache does not hold. Tags is a count of the
 `TAG_REFERENCES_ALL_COLUMNS` rows. A test holds every tooltip to a column the

@@ -1,0 +1,257 @@
+[
+ {
+  "declared": "NUMBER",
+  "show_data_type": "{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":true}",
+  "desc_type": "NUMBER(38,0)"
+ },
+ {
+  "declared": "NUMBER(10,2)",
+  "show_data_type": "{\"type\":\"FIXED\",\"precision\":10,\"scale\":2,\"nullable\":true}",
+  "desc_type": "NUMBER(10,2)"
+ },
+ {
+  "declared": "INT",
+  "show_data_type": "{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":true}",
+  "desc_type": "NUMBER(38,0)"
+ },
+ {
+  "declared": "DECIMAL(5,1)",
+  "show_data_type": "{\"type\":\"FIXED\",\"precision\":5,\"scale\":1,\"nullable\":true}",
+  "desc_type": "NUMBER(5,1)"
+ },
+ {
+  "declared": "NUMBER(38,37)",
+  "show_data_type": "{\"type\":\"FIXED\",\"precision\":38,\"scale\":37,\"nullable\":true}",
+  "desc_type": "NUMBER(38,37)"
+ },
+ {
+  "declared": "FLOAT",
+  "show_data_type": "{\"type\":\"REAL\",\"nullable\":true}",
+  "desc_type": "FLOAT"
+ },
+ {
+  "declared": "DOUBLE",
+  "show_data_type": "{\"type\":\"REAL\",\"nullable\":true}",
+  "desc_type": "FLOAT"
+ },
+ {
+  "declared": "REAL",
+  "show_data_type": "{\"type\":\"REAL\",\"nullable\":true}",
+  "desc_type": "FLOAT"
+ },
+ {
+  "declared": "DECFLOAT",
+  "show_data_type": "{\"type\":\"DECFLOAT\",\"precision\":38,\"nullable\":true}",
+  "desc_type": "DECFLOAT(38)"
+ },
+ {
+  "declared": "VARCHAR",
+  "show_data_type": "{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}",
+  "desc_type": "VARCHAR(16777216)"
+ },
+ {
+  "declared": "VARCHAR(10)",
+  "show_data_type": "{\"type\":\"TEXT\",\"length\":10,\"byteLength\":40,\"nullable\":true,\"fixed\":false}",
+  "desc_type": "VARCHAR(10)"
+ },
+ {
+  "declared": "CHAR",
+  "show_data_type": "{\"type\":\"TEXT\",\"length\":1,\"byteLength\":4,\"nullable\":true,\"fixed\":false}",
+  "desc_type": "VARCHAR(1)"
+ },
+ {
+  "declared": "CHAR(5)",
+  "show_data_type": "{\"type\":\"TEXT\",\"length\":5,\"byteLength\":20,\"nullable\":true,\"fixed\":false}",
+  "desc_type": "VARCHAR(5)"
+ },
+ {
+  "declared": "TEXT",
+  "show_data_type": "{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}",
+  "desc_type": "VARCHAR(16777216)"
+ },
+ {
+  "declared": "STRING",
+  "show_data_type": "{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}",
+  "desc_type": "VARCHAR(16777216)"
+ },
+ {
+  "declared": "BINARY",
+  "show_data_type": "{\"type\":\"BINARY\",\"length\":8388608,\"byteLength\":8388608,\"nullable\":true,\"fixed\":true}",
+  "desc_type": "BINARY(8388608)"
+ },
+ {
+  "declared": "BINARY(16)",
+  "show_data_type": "{\"type\":\"BINARY\",\"length\":16,\"byteLength\":16,\"nullable\":true,\"fixed\":true}",
+  "desc_type": "BINARY(16)"
+ },
+ {
+  "declared": "VARBINARY(8)",
+  "show_data_type": "{\"type\":\"BINARY\",\"length\":8,\"byteLength\":8,\"nullable\":true,\"fixed\":false}",
+  "desc_type": "BINARY(8)"
+ },
+ {
+  "declared": "BOOLEAN",
+  "show_data_type": "{\"type\":\"BOOLEAN\",\"nullable\":true}",
+  "desc_type": "BOOLEAN"
+ },
+ {
+  "declared": "DATE",
+  "show_data_type": "{\"type\":\"DATE\",\"nullable\":true}",
+  "desc_type": "DATE"
+ },
+ {
+  "declared": "TIME",
+  "show_data_type": "{\"type\":\"TIME\",\"precision\":0,\"scale\":9,\"nullable\":true}",
+  "desc_type": "TIME(9)"
+ },
+ {
+  "declared": "TIME(3)",
+  "show_data_type": "{\"type\":\"TIME\",\"precision\":0,\"scale\":3,\"nullable\":true}",
+  "desc_type": "TIME(3)"
+ },
+ {
+  "declared": "TIMESTAMP",
+  "show_data_type": "{\"type\":\"TIMESTAMP_NTZ\",\"precision\":0,\"scale\":9,\"nullable\":true}",
+  "desc_type": "TIMESTAMP_NTZ(9)"
+ },
+ {
+  "declared": "DATETIME",
+  "show_data_type": "{\"type\":\"TIMESTAMP_NTZ\",\"precision\":0,\"scale\":9,\"nullable\":true}",
+  "desc_type": "TIMESTAMP_NTZ(9)"
+ },
+ {
+  "declared": "TIMESTAMP_NTZ(6)",
+  "show_data_type": "{\"type\":\"TIMESTAMP_NTZ\",\"precision\":0,\"scale\":6,\"nullable\":true}",
+  "desc_type": "TIMESTAMP_NTZ(6)"
+ },
+ {
+  "declared": "TIMESTAMP_LTZ",
+  "show_data_type": "{\"type\":\"TIMESTAMP_LTZ\",\"precision\":0,\"scale\":9,\"nullable\":true}",
+  "desc_type": "TIMESTAMP_LTZ(9)"
+ },
+ {
+  "declared": "TIMESTAMP_LTZ(0)",
+  "show_data_type": "{\"type\":\"TIMESTAMP_LTZ\",\"precision\":0,\"scale\":0,\"nullable\":true}",
+  "desc_type": "TIMESTAMP_LTZ(0)"
+ },
+ {
+  "declared": "TIMESTAMP_TZ(0)",
+  "show_data_type": "{\"type\":\"TIMESTAMP_TZ\",\"precision\":0,\"scale\":0,\"nullable\":true}",
+  "desc_type": "TIMESTAMP_TZ(0)"
+ },
+ {
+  "declared": "TIMESTAMP_TZ",
+  "show_data_type": "{\"type\":\"TIMESTAMP_TZ\",\"precision\":0,\"scale\":9,\"nullable\":true}",
+  "desc_type": "TIMESTAMP_TZ(9)"
+ },
+ {
+  "declared": "VARIANT",
+  "show_data_type": "{\"type\":\"VARIANT\",\"nullable\":true}",
+  "desc_type": "VARIANT"
+ },
+ {
+  "declared": "OBJECT",
+  "show_data_type": "{\"type\":\"OBJECT\",\"nullable\":true}",
+  "desc_type": "OBJECT"
+ },
+ {
+  "declared": "ARRAY",
+  "show_data_type": "{\"type\":\"ARRAY\",\"nullable\":true}",
+  "desc_type": "ARRAY"
+ },
+ {
+  "declared": "GEOGRAPHY",
+  "show_data_type": "{\"type\":\"GEOGRAPHY\",\"outputType\":\"OBJECT\",\"nullable\":true}",
+  "desc_type": "GEOGRAPHY"
+ },
+ {
+  "declared": "GEOMETRY",
+  "show_data_type": "{\"type\":\"GEOMETRY\",\"outputType\":\"OBJECT\",\"nullable\":true}",
+  "desc_type": "GEOMETRY"
+ },
+ {
+  "declared": "FILE",
+  "show_data_type": "{\"type\":\"FILE\",\"outputType\":\"OBJECT\",\"nullable\":true}",
+  "desc_type": "FILE"
+ },
+ {
+  "declared": "VECTOR(FLOAT, 3)",
+  "show_data_type": "{\"type\":\"VECTOR\",\"nullable\":true,\"vectorElementType\":{\"type\":\"REAL\",\"nullable\":false},\"dimension\":3}",
+  "desc_type": "VECTOR(FLOAT, 3)"
+ },
+ {
+  "declared": "VECTOR(INT, 768)",
+  "show_data_type": "{\"type\":\"VECTOR\",\"nullable\":true,\"vectorElementType\":{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":false},\"dimension\":768}",
+  "desc_type": "VECTOR(INT, 768)"
+ },
+ {
+  "declared": "ARRAY(NUMBER)",
+  "show_data_type": "{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":true}}",
+  "desc_type": "ARRAY(NUMBER(38,0))"
+ },
+ {
+  "declared": "ARRAY(VARCHAR(5))",
+  "show_data_type": "{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"TEXT\",\"length\":5,\"byteLength\":20,\"nullable\":true,\"fixed\":false}}",
+  "desc_type": "ARRAY(VARCHAR(5))"
+ },
+ {
+  "declared": "ARRAY(ARRAY(DATE))",
+  "show_data_type": "{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"DATE\",\"nullable\":true}}}",
+  "desc_type": "ARRAY(ARRAY(DATE))"
+ },
+ {
+  "declared": "ARRAY(TIMESTAMP_TZ(3))",
+  "show_data_type": "{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"TIMESTAMP_TZ\",\"precision\":0,\"scale\":3,\"nullable\":true}}",
+  "desc_type": "ARRAY(TIMESTAMP_TZ(3))"
+ },
+ {
+  "declared": "OBJECT(a VARCHAR, b NUMBER)",
+  "show_data_type": "{\"type\":\"OBJECT\",\"nullable\":true,\"fields\":[{\"fieldName\":\"a\",\"fieldType\":{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}},{\"fieldName\":\"b\",\"fieldType\":{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":true}}]}",
+  "desc_type": "OBJECT(a VARCHAR(16777216), b NUMBER(38,0))"
+ },
+ {
+  "declared": "OBJECT(\"my field\" VARCHAR, \"lower\" INT, UPPER INT)",
+  "show_data_type": "{\"type\":\"OBJECT\",\"nullable\":true,\"fields\":[{\"fieldName\":\"my field\",\"fieldType\":{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}},{\"fieldName\":\"lower\",\"fieldType\":{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":true}},{\"fieldName\":\"UPPER\",\"fieldType\":{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":true}}]}",
+  "desc_type": "OBJECT(my field VARCHAR(16777216), lower NUMBER(38,0), UPPER NUMBER(38,0))"
+ },
+ {
+  "declared": "OBJECT(inner OBJECT(x BOOLEAN), arr ARRAY(BINARY(4)))",
+  "show_data_type": "{\"type\":\"OBJECT\",\"nullable\":true,\"fields\":[{\"fieldName\":\"inner\",\"fieldType\":{\"type\":\"OBJECT\",\"nullable\":true,\"fields\":[{\"fieldName\":\"x\",\"fieldType\":{\"type\":\"BOOLEAN\",\"nullable\":true}}]}},{\"fieldName\":\"arr\",\"fieldType\":{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"BINARY\",\"length\":4,\"byteLength\":4,\"nullable\":true,\"fixed\":true}}}]}",
+  "desc_type": "OBJECT(inner OBJECT(x BOOLEAN), arr ARRAY(BINARY(4)))"
+ },
+ {
+  "declared": "OBJECT()",
+  "show_data_type": "{\"type\":\"OBJECT\",\"nullable\":true,\"fields\":[]}",
+  "desc_type": "OBJECT()"
+ },
+ {
+  "declared": "MAP(VARCHAR, NUMBER)",
+  "show_data_type": "{\"type\":\"MAP\",\"nullable\":true,\"keyType\":{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":false,\"fixed\":false},\"valueType\":{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":true}}",
+  "desc_type": "MAP(VARCHAR(16777216), NUMBER(38,0))"
+ },
+ {
+  "declared": "MAP(NUMBER(10,0), ARRAY(VARCHAR))",
+  "show_data_type": "{\"type\":\"MAP\",\"nullable\":true,\"keyType\":{\"type\":\"FIXED\",\"precision\":10,\"scale\":0,\"nullable\":false},\"valueType\":{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}}}",
+  "desc_type": "MAP(NUMBER(10,0), ARRAY(VARCHAR(16777216)))"
+ },
+ {
+  "declared": "ARRAY(VECTOR(FLOAT, 2))",
+  "show_data_type": "{\"type\":\"ARRAY\",\"nullable\":true,\"elementType\":{\"type\":\"VECTOR\",\"nullable\":true,\"vectorElementType\":{\"type\":\"REAL\",\"nullable\":false},\"dimension\":2}}",
+  "desc_type": "ARRAY(VECTOR(FLOAT, 2))"
+ },
+ {
+  "declared": "OBJECT(a VARCHAR NOT NULL, b FLOAT) NOT NULL",
+  "show_data_type": "{\"type\":\"OBJECT\",\"nullable\":false,\"fields\":[{\"fieldName\":\"a\",\"fieldType\":{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":false,\"fixed\":false}},{\"fieldName\":\"b\",\"fieldType\":{\"type\":\"REAL\",\"nullable\":true}}]}",
+  "desc_type": "OBJECT(a VARCHAR(16777216) NOT NULL, b FLOAT)"
+ },
+ {
+  "declared": "OBJECT(o OBJECT(z INT NOT NULL) NOT NULL) NOT NULL",
+  "show_data_type": "{\"type\":\"OBJECT\",\"nullable\":false,\"fields\":[{\"fieldName\":\"o\",\"fieldType\":{\"type\":\"OBJECT\",\"nullable\":false,\"fields\":[{\"fieldName\":\"z\",\"fieldType\":{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":false}}]}}]}",
+  "desc_type": "OBJECT(o OBJECT(z NUMBER(38,0) NOT NULL) NOT NULL)"
+ },
+ {
+  "declared": "NUMBER NOT NULL",
+  "show_data_type": "{\"type\":\"FIXED\",\"precision\":38,\"scale\":0,\"nullable\":false}",
+  "desc_type": "NUMBER(38,0)"
+ }
+]
