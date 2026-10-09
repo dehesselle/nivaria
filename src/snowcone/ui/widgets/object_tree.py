@@ -111,8 +111,10 @@ class ObjectTree(Resizable, Tree[NodeData]):
         #: Nodes whose children come from a scope, so an update can be routed
         #: to exactly one node instead of rebuilding the tree.
         self._scoped: dict[Scope, TreeNode[NodeData]] = {}
-        #: Set while this widget is restructuring, so the NodeHighlighted that
-        #: a cursor restore emits is not mistaken for a user selection.
+        #: Set while this widget is restructuring, so a highlight handled
+        #: before the cursor restore runs is not mistaken for a user
+        #: selection. The restore's own highlight is handled after this is
+        #: cleared; `_restore_cursor` deals with that one.
         self.rebuilding = False
         #: The node whose highlight was last announced, so Textual's repeat
         #: highlight of an unmoved cursor is not announced twice -- see
@@ -552,6 +554,12 @@ class ObjectTree(Resizable, Tree[NodeData]):
             if path is not None:
                 node = self._find(path)
                 if node is not None:
+                    announced = self._announced
+                    if announced is not None and announced.data == node.data:
+                        # The same object on a rebuilt node. Its highlight
+                        # arrives after `rebuilding` is cleared below, so
+                        # it is recognised as a repeat by identity instead.
+                        self._announced = node
                     self.move_cursor(node)
         finally:
             self.rebuilding = False

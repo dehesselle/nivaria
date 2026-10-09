@@ -824,3 +824,41 @@ async def test_only_the_latest_of_two_quick_cursor_moves_is_announced(repo) -> N
         tree.move_cursor(tables.children[1])
         await pilot.pause()
     assert seen == ["MYDB.AAA.PAYMENTS"]
+
+
+async def test_a_rebuild_does_not_reannounce_the_object_under_the_cursor(
+    repo,
+) -> None:
+    """A mid-order insert rebuilds the category and restores the cursor onto
+    a new node for the same object -- not a selection of anything new."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "AAA_T", "CCC_T")
+    seen: list[str] = []
+
+    class Listening(Harness):
+        def on_object_selected(self, event: ObjectSelected) -> None:
+            seen.append(event.ref.fqn)
+
+    app = Listening(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        database_node(tree).expand()
+        await pilot.pause()
+        schema = database_node(tree).children[0]
+        schema.expand()
+        await pilot.pause()
+        tables = schema.children[0]
+        tables.expand()
+        await pilot.pause()
+        tree.move_cursor(tables.children[1])
+        await pilot.pause()
+        assert seen == ["MYDB.AAA.CCC_T"]
+
+        put_tables(repo, "MYDB", "AAA", "AAA_T", "BBB_T", "CCC_T")
+        tree.cache_updated(objects_scope(ObjectType.TABLE, "MYDB", "AAA"))
+        await pilot.pause()
+        await pilot.pause()
+
+        assert keys(tables) == ["AAA_T", "BBB_T", "CCC_T"]
+        assert tree.cursor_node.data.key == "CCC_T"
+    assert seen == ["MYDB.AAA.CCC_T"]

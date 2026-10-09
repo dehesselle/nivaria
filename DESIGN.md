@@ -1037,7 +1037,10 @@ must not assume away:
 > previous, else the parent — never the top).
 
 Tier 3 destroys node objects, so the cursor is restored afterwards **by key
-path** — node ids and line numbers are meaningless across a rebuild. Expansion
+path** — node ids and line numbers are meaningless across a rebuild. The
+restore lands on a new node for the same object, which is not a new
+selection, so it is not announced to the Detail pane again (see "A highlight
+is not a jump" below). Expansion
 state is carried across too; silently collapsing everything loses the user's
 place just as surely as moving the cursor.
 
