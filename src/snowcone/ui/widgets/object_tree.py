@@ -120,6 +120,11 @@ class ObjectTree(Resizable, Tree[NodeData]):
         #: highlight of an unmoved cursor is not announced twice -- see
         #: on_tree_node_highlighted.
         self._announced: TreeNode[NodeData] | None = None
+        #: Where the latest reveal is taking the cursor, until its deferred
+        #: move has run. A path, not a node: a rebuild landing in between
+        #: destroys the node, and it restores the cursor here rather than to
+        #: wherever it was before the jump.
+        self._reveal_path: tuple[str, ...] | None = None
 
     # ----------------------------------------------------------------- repo
 
@@ -180,16 +185,28 @@ class ObjectTree(Resizable, Tree[NodeData]):
         """
         if ref.database not in self.databases:
             return False
-        node = self._walk((ref.database, ref.schema, ref.type.value, ref.name))
-        if node is None:
+        path = (ref.database, ref.schema, ref.type.value, ref.name)
+        if self._walk(path) is None:
             return False
         # Not an immediate move_cursor: the node just materialised on the way
         # down still has _line == -1 until the next refresh, so the cursor
         # would silently land on line 0 instead of on the object.
-        self.call_after_refresh(self._settle_on_object, node)
+        self._reveal_path = path
+        self.call_after_refresh(self._settle_on_object, path)
         return True
 
-    def _settle_on_object(self, node: TreeNode[NodeData]) -> None:
+    def _claim_reveal(self, path: tuple[str, ...]) -> TreeNode[NodeData] | None:
+        """The node a deferred reveal is landing on, found by path now.
+
+        None when a later reveal has taken over the cursor since, or the
+        node is gone.
+        """
+        if path != self._reveal_path:
+            return None
+        self._reveal_path = None
+        return self._find(path)
+
+    def _settle_on_object(self, path: tuple[str, ...]) -> None:
         """Put the cursor on `node` and scroll it to the middle of the tree.
 
         `move_cursor`'s default scroll scrolls the least distance to bring
@@ -197,6 +214,9 @@ class ObjectTree(Resizable, Tree[NodeData]):
         visible row with nothing shown below it. Not `Tree.center_scroll`:
         that would center every arrow-key step too, not just the jump.
         """
+        node = self._claim_reveal(path)
+        if node is None:
+            return
         self.move_cursor(node)
         label = self._get_label_region(node._line)
         if label is None:
@@ -220,15 +240,17 @@ class ObjectTree(Resizable, Tree[NodeData]):
         """
         if ref.database not in self.databases:
             return False
-        node = self._walk((ref.database, ref.name))
+        path = (ref.database, ref.name)
+        node = self._walk(path)
         if node is None:
             return False
         node.expand()
         self._apply(node, self._desired(node))
-        self.call_after_refresh(self._settle_on_schema, node)
+        self._reveal_path = path
+        self.call_after_refresh(self._settle_on_schema, path)
         return True
 
-    def _settle_on_schema(self, node: TreeNode[NodeData]) -> None:
+    def _settle_on_schema(self, path: tuple[str, ...]) -> None:
         """Put the cursor on `node` and scroll so its just-expanded category
         children are visible too, not only the schema's own line.
 
@@ -242,6 +264,9 @@ class ObjectTree(Resizable, Tree[NodeData]):
         do not (`Region.crop_size`, which the scroll math crops through,
         keeps a region's top-left and only shrinks toward it).
         """
+        node = self._claim_reveal(path)
+        if node is None:
+            return
         self.move_cursor(node)
         label = self._get_label_region(node._line)
         if label is None:
@@ -504,7 +529,9 @@ class ObjectTree(Resizable, Tree[NodeData]):
             self._forget(child)
 
     def _rebuild(self, node: TreeNode[NodeData], desired: list[Child]) -> None:
-        path = self._cursor_path()
+        # A pending reveal owns the cursor: restoring it to where it was
+        # before the jump would undo the jump.
+        path = self._reveal_path or self._cursor_path()
         expanded = {
             child.data.key
             for child in node.children

@@ -862,3 +862,46 @@ async def test_a_rebuild_does_not_reannounce_the_object_under_the_cursor(
         assert keys(tables) == ["AAA_T", "BBB_T", "CCC_T"]
         assert tree.cursor_node.data.key == "CCC_T"
     assert seen == ["MYDB.AAA.CCC_T"]
+
+
+# ------------------------------------------------------ reveal vs. rebuild
+
+
+async def test_a_reveal_survives_a_rebuild_landing_in_the_same_tick(repo) -> None:
+    """The deferred cursor move used to hold a node the rebuild destroyed,
+    and the rebuild restored the cursor to where it was before the jump --
+    which left it on the database node instead of the hit."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", *[f"T{i:02d}" for i in range(0, 40, 2)])
+    app = Harness(repo)
+    async with app.run_test(size=(80, 15)) as pilot:
+        tree = await open_tree(app, pilot)
+        assert tree.reveal(ObjectRef(ObjectType.TABLE, "MYDB", "AAA", "T20"))
+        put_tables(repo, "MYDB", "AAA", *[f"T{i:02d}" for i in range(40)])
+        tree.cache_updated(objects_scope(ObjectType.TABLE, "MYDB", "AAA"))
+        await pilot.pause()
+        await pilot.pause()
+
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "T20"
+        assert tree.cursor_node.tree is tree
+        assert tree.cursor_node.parent.parent.data.key == "AAA"
+
+
+async def test_a_schema_reveal_survives_a_rebuild_landing_in_the_same_tick(
+    repo,
+) -> None:
+    put_schemas(repo, "MYDB", "AAA", "CCC")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 15)) as pilot:
+        tree = await open_tree(app, pilot)
+        assert tree.reveal_schema(SchemaRef(database="MYDB", name="CCC"))
+        put_schemas(repo, "MYDB", "AAA", "BBB", "CCC")
+        tree.cache_updated(schemas_scope("MYDB"))
+        await pilot.pause()
+        await pilot.pause()
+
+        assert tree.cursor_node is not None
+        assert tree.cursor_node.data.key == "CCC"
+        assert tree.cursor_node.is_expanded
+        assert keys(database_node(tree)) == ["AAA", "BBB", "CCC"]

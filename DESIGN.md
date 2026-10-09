@@ -1050,6 +1050,11 @@ There is no insert-at-index in Textual's tree API. That single gap is why tier
 One more constraint that bites repeatedly: a freshly created node has no line
 number until the next refresh, so **any cursor move onto newly created nodes
 must be deferred by one refresh** or it silently lands on the first row.
+The deferred move holds a **key path**, not a node, because a rebuild can
+land in between and destroy the node. A pending reveal also outranks that
+rebuild's own cursor restore. Otherwise the restore puts the cursor back
+where it was before the jump, and a search hit racing a cache update
+leaves it on the database node instead.
 
 ### A highlight is not a jump
 
