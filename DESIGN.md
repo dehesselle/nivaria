@@ -1157,8 +1157,24 @@ table, the header is qualified rather than renamed — `SHOW TASKS` and
 Likewise "Last Scheduled" is `SCHEDULED_TIME` and says so; a task scheduled
 but never started still has one, which "Last Run" would have misrepresented.
 
-There is exactly one derived column in the app, and it is called out as such
-in `pipe_list_view.py`: the Pipes (n) Status tab's **Execution State**, which
+The column list (tables, and a view's Columns tab) is the exception that
+keeps short headers, because `INFORMATION_SCHEMA.COLUMNS`' names would widen
+the table well past what its content needs. Instead, each header tooltips the
+field it shows, in the cache's own upper-case vocabulary: "Ordinal" is
+`ORDINAL_POSITION`, "Nullable" is `IS_NULLABLE`, "Default" is
+`COLUMN_DEFAULT`, and so on, so a user can confirm the column is Snowflake's
+and not a term snowcone made up. Type and Tags have no tooltip, because no
+single Snowflake name would be true of them. Type is `DATA_TYPE` recombined
+with its length, precision and scale. `DATA_TYPE_ALIAS` was rejected: it is
+the alias written in the DDL, such as `INT`, which SHOW COLUMNS does not
+return and the cache does not hold. Tags is a count of the
+`TAG_REFERENCES_ALL_COLUMNS` rows. A test holds every tooltip to a column the
+cache actually has.
+
+Type and Tags are computed, but only restate what the cache holds. There is
+exactly one *inferred* column in the app, one that stands in for a Snowflake
+value snowcone never reads, and it is called out as such in
+`pipe_list_view.py`: the Pipes (n) Status tab's **Execution State**, which
 is `RUNNING` when `invalid_reason` is empty and `STOPPED` when it is not.
 Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`' `executionState`,
 which snowcone never queries — it is a per-pipe function call, so covering a

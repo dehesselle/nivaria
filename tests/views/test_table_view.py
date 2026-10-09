@@ -347,3 +347,74 @@ async def test_a_tagged_columns_tags_show_in_the_detail_panel(repo) -> None:
         table.move_cursor(row=0)
         await pilot.pause()
         assert not panel.display
+
+
+#: What hovering each header of the column list shows. Type and Tags have no
+#: single Snowflake field behind them -- see `ColumnsView._add_columns`.
+_HEADER_TOOLTIPS = {
+    "Ordinal": "ORDINAL_POSITION",
+    "Name": "COLUMN_NAME",
+    "Type": None,
+    "Nullable": "IS_NULLABLE",
+    "Default": "COLUMN_DEFAULT",
+    "Tags": None,
+    "Comment": "COMMENT",
+}
+
+
+async def _hover_header(pilot, table: DataTable, label: str) -> None:
+    # The header is the table's first line, and a column starts where the
+    # ones before it end; prefix match as in `_click_header`.
+    index = next(
+        i
+        for i, c in enumerate(table.ordered_columns)
+        if c.label.plain.startswith(label)
+    )
+    x = sum(c.get_render_width(table) for c in table.ordered_columns[:index])
+    await pilot.hover(table, offset=(x + 1, 0))
+    await pilot.pause()
+
+
+async def test_each_column_list_header_tooltips_its_snowflake_name(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("ID", "NUMBER"))
+    app = Harness(repo)
+    async with app.run_test(size=(120, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-columns", DataTable)
+        for label, expected in _HEADER_TOOLTIPS.items():
+            await _hover_header(pilot, table, label)
+            assert table.tooltip == expected, label
+
+
+async def test_a_header_keeps_its_tooltip_once_sorted_on(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("ID", "NUMBER"), ("TOTAL", "FLOAT"))
+    app = Harness(repo)
+    async with app.run_test(size=(120, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-columns", DataTable)
+        table.post_message(_click_header(table, "Name"))
+        await pilot.pause()
+        assert table.sort_column == "name"
+        await _hover_header(pilot, table, "Name")
+        assert table.tooltip == "COLUMN_NAME"
+
+
+def test_every_header_tooltip_names_a_field_of_the_cached_column_list(repo) -> None:
+    """The tooltips exist to show Snowflake's own name, and the cache keeps
+    Snowflake's names -- so one the cache does not have is one this app made
+    up, or one left behind by a rename."""
+    with repo._db.connect() as connection:
+        cached = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(information_schema_columns)"
+            )
+        }
+    named = {tooltip for tooltip in _HEADER_TOOLTIPS.values() if tooltip}
+    assert named <= cached, sorted(named - cached)

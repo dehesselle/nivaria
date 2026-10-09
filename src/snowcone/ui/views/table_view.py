@@ -92,22 +92,37 @@ class ColumnsView(ItemDetailView, ObjectView):
 
         Nullable/Default/Comment stay unsortable -- nobody asked to sort by
         those.
+
+        The headers are short to keep the table narrow, so each one whose
+        cell is a single cached field tooltips that field's name -- the
+        cache's `INFORMATION_SCHEMA.COLUMNS` vocabulary -- as proof the column
+        is Snowflake's and not a term invented here. Type and Tags have none:
+        Type is DATA_TYPE recombined with its length/precision/scale, and Tags
+        is snowcone's own count, so no single Snowflake name would be true.
         """
         table.add_column(
-            "Ordinal", key="ordinal", sortable=True, sort_key=self._rank("ordinal", 0)
+            "Ordinal",
+            key="ordinal",
+            sortable=True,
+            sort_key=self._rank("ordinal", 0),
+            tooltip="ORDINAL_POSITION",
         )
         table.add_column(
-            "Name", key="name", sortable=True, sort_key=self._rank("name", "")
+            "Name",
+            key="name",
+            sortable=True,
+            sort_key=self._rank("name", ""),
+            tooltip="COLUMN_NAME",
         )
         table.add_column(
             "Type", key="type", sortable=True, sort_key=self._rank("type", "")
         )
-        table.add_column("Nullable")
-        table.add_column("Default")
+        table.add_column("Nullable", tooltip="IS_NULLABLE")
+        table.add_column("Default", tooltip="COLUMN_DEFAULT")
         table.add_column(
             "Tags", key="tags", sortable=True, sort_key=self._rank("tag_count", 0)
         )
-        table.add_column("Comment")
+        table.add_column("Comment", tooltip="COMMENT")
 
     def update_content(self) -> None:
         scope = self.columns_scope()

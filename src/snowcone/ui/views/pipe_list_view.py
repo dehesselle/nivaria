@@ -6,8 +6,8 @@ healthy one) opens by default, alongside Load history (last load activity
 per pipe). Status needs no new scope: `invalid_reason` is already mirrored
 onto the same `SHOW PIPES` rows this view already reads for the Name column.
 
-"Execution State" is the one **derived** column in this app: it is not read
-from anywhere, it is `RUNNING` when `invalid_reason` is empty and `STOPPED`
+"Execution State" is the one **inferred** column in this app (see DESIGN.md,
+"Column headers mirror Snowflake"): it is not read from anywhere, it is `RUNNING` when `invalid_reason` is empty and `STOPPED`
 when it is not. Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`'
 `executionState`, which snowcone never queries -- that is a per-pipe function
 call, so showing it for a whole schema would cost one round trip per pipe,
