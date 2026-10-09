@@ -192,7 +192,6 @@ async def test_the_picker_and_quit_shortcuts_are_hidden_from_the_footer(
     assert "ctrl+d" not in keys
     assert "ctrl+r" not in keys
     assert "ctrl+w" not in keys
-    assert "f10" not in keys
 
 
 async def test_the_gauge_follows_the_pool(repo) -> None:

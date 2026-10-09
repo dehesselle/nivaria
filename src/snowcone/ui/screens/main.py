@@ -97,7 +97,6 @@ class MainScreen(Screen):
         Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
         Binding("slash", "search", "Search"),
         Binding("f5", "refresh", "Refresh"),
-        Binding("f10", "app.quit", "Quit", show=False),
     ]
 
     def __init__(
@@ -130,7 +129,11 @@ class MainScreen(Screen):
                 yield SettingsMenuItem()
                 yield MenuSeparator()
                 yield MenuItem(
-                    "Quit", id="quit", mnemonic="q", shortcut="F10", action="app.quit"
+                    "Quit",
+                    id="quit",
+                    mnemonic="q",
+                    shortcut="ctrl+Q",
+                    action="app.quit",
                 )
             # "connection-menu", not "connection": a Menu id is a CSS id too,
             # and app.tcss already styles #connect (the connect dialog).

@@ -110,7 +110,7 @@ async def test_the_connection_menu_offers_the_documented_entries(repo) -> None:
 
 
 async def test_the_hidden_key_bindings_are_advertised_as_shortcuts(repo) -> None:
-    """ctrl+D/W/R and F10 are `show=False` in the footer, so the menu's
+    """ctrl+D/W/R are `show=False` in the footer, so the menu's
     shortcut column is the only place they are advertised."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
@@ -119,7 +119,7 @@ async def test_the_hidden_key_bindings_are_advertised_as_shortcuts(repo) -> None
         assert shortcuts["database"] == "ctrl+D"
         assert shortcuts["warehouse"] == "ctrl+W"
         assert shortcuts["role"] == "ctrl+R"
-        assert shortcuts["quit"] == "F10"
+        assert shortcuts["quit"] == "ctrl+Q"
 
 
 async def test_the_snowcone_menu_separators_group_the_entries(repo) -> None:
@@ -229,16 +229,5 @@ async def test_quit_exits_the_app(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await open_snowcone_menu(pilot)
         await pilot.press("q")
-        await settle(pilot)
-    assert app.is_running is False
-
-
-async def test_f10_quits_too(repo) -> None:
-    """The same action as the menu's Quit entry, kept as a binding for the
-    people who never open the menu."""
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("f10")
         await settle(pilot)
     assert app.is_running is False
