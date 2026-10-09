@@ -543,6 +543,14 @@ def task_history(database: str, schema: str, task: str, max_rows: int) -> str:
     )
 
 
+#: SHOW COLUMNS' type categories that INFORMATION_SCHEMA.COLUMNS.DATA_TYPE
+#: names differently. Verified against a live account: these two are the only
+#: ones, and `FIXED` is not even valid DDL -- it exists only inside this JSON.
+#: Every other category (TEXT, BINARY, the timestamps, VARIANT, VECTOR, ...)
+#: is already INFORMATION_SCHEMA's value and passes through unchanged.
+_INFORMATION_SCHEMA_TYPES = {"FIXED": "NUMBER", "REAL": "FLOAT"}
+
+
 def _data_type_fields(raw: object) -> dict[str, object]:
     """Unpack SHOW COLUMNS' data_type, which is a JSON string.
 
@@ -566,6 +574,9 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
 
     The mirror keeps INFORMATION_SCHEMA's vocabulary because that is the
     documented, stable name for each of these fields; only the source changed.
+    That goes for DATA_TYPE's values as well as its name: SHOW's internal
+    `FIXED`/`REAL` are stored as the `NUMBER`/`FLOAT` INFORMATION_SCHEMA
+    reports, so the cache never holds a type name no Snowflake DDL accepts.
 
     SHOW COLUMNS has no ORDINAL_POSITION -- it returns columns in declaration
     order instead -- so position is derived from that order, counted per table
@@ -588,7 +599,8 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
             nullable = "Y" if fields.get("nullable", True) else "N"
 
         category = fields.get("type", "UNKNOWN")
-        # The JSON blob reports the same "precision"/"scale" keys for FIXED's
+        category = _INFORMATION_SCHEMA_TYPES.get(category, category)
+        # The JSON blob reports the same "precision"/"scale" keys for NUMBER's
         # decimal scale and for a timestamp/time's fractional-seconds count;
         # INFORMATION_SCHEMA keeps those concepts in separate columns, so the
         # mirror gates each source key to the category it actually describes.
@@ -613,9 +625,9 @@ def map_show_columns(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                 "COLUMN_DEFAULT": row.get("default"),
                 "CHARACTER_MAXIMUM_LENGTH": fields.get("length"),
                 "NUMERIC_PRECISION": fields.get("precision")
-                if category == "FIXED"
+                if category == "NUMBER"
                 else None,
-                "NUMERIC_SCALE": fields.get("scale") if category == "FIXED" else None,
+                "NUMERIC_SCALE": fields.get("scale") if category == "NUMBER" else None,
                 "DATETIME_PRECISION": fields.get("scale") if is_datetime else None,
                 "COMMENT": row.get("comment"),
             }

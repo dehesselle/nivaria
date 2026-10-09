@@ -283,7 +283,7 @@ def test_columns_carry_precision_fields_through_the_cache(repo) -> None:
                 "TABLE_NAME": "ORDERS",
                 "COLUMN_NAME": "TOTAL",
                 "ORDINAL_POSITION": 1,
-                "DATA_TYPE": "FIXED",
+                "DATA_TYPE": "NUMBER",
                 "IS_NULLABLE": "NO",
                 "NUMERIC_PRECISION": 38,
                 "NUMERIC_SCALE": 0,

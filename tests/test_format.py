@@ -41,9 +41,9 @@ def test_format_data_type_renders_text_as_varchar_with_length() -> None:
     )
 
 
-def test_format_data_type_renders_fixed_as_number_with_precision_and_scale() -> None:
+def test_format_data_type_renders_number_with_precision_and_scale() -> None:
     assert (
-        format_data_type("FIXED", numeric_precision=38, numeric_scale=0)
+        format_data_type("NUMBER", numeric_precision=38, numeric_scale=0)
         == "NUMBER(38,0)"
     )
 
@@ -74,7 +74,7 @@ def test_format_data_type_appends_scale_to_timestamp_and_time_variants(
         "ARRAY",
         "GEOGRAPHY",
         "GEOMETRY",
-        "REAL",
+        "FLOAT",
         "UNKNOWN",
     ],
 )
@@ -88,10 +88,10 @@ def test_format_data_type_omits_parens_when_length_is_missing() -> None:
     assert format_data_type("TEXT") == "VARCHAR"
 
 
-def test_format_data_type_omits_parens_when_scale_is_missing_for_fixed() -> None:
-    """FIXED always reports both precision and scale together; a partial
+def test_format_data_type_omits_parens_when_scale_is_missing_for_number() -> None:
+    """NUMBER always reports both precision and scale together; a partial
     result would produce a malformed NUMBER(38) rather than the real type."""
-    assert format_data_type("FIXED", numeric_precision=38) == "NUMBER"
+    assert format_data_type("NUMBER", numeric_precision=38) == "NUMBER"
 
 
 def test_format_data_type_omits_parens_when_datetime_precision_is_missing() -> None:

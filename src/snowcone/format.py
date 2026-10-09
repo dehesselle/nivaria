@@ -26,7 +26,7 @@ def format_bytes(size: int | None) -> str:
     return f"{value:.1f}{_BYTE_UNITS[-1]}"
 
 
-_DDL_NAMES = {"TEXT": "VARCHAR", "FIXED": "NUMBER"}
+_DDL_NAMES = {"TEXT": "VARCHAR"}
 _SCALE_ONLY = {"TIMESTAMP_LTZ", "TIMESTAMP_NTZ", "TIMESTAMP_TZ", "TIME"}
 
 
@@ -40,11 +40,12 @@ def format_data_type(
 ) -> str:
     """A DDL-style type name, e.g. VARCHAR(16777216), NUMBER(38,0), TIMESTAMP_LTZ(9).
 
-    SHOW COLUMNS reports a bare category with precision split into separate
-    fields; this recombines them so the column list reads like a CREATE
-    TABLE statement instead of Snowflake's internal category names.
+    INFORMATION_SCHEMA (which the cache mirrors) reports a bare type with
+    precision split into separate fields; this recombines them so the column
+    list reads like a CREATE TABLE statement, and like DESC TABLE -- which
+    also shows TEXT as VARCHAR.
     """
-    if data_type == "FIXED":
+    if data_type == "NUMBER":
         if numeric_precision is not None and numeric_scale is not None:
             return f"NUMBER({numeric_precision},{numeric_scale})"
         return "NUMBER"

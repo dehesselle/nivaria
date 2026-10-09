@@ -53,9 +53,21 @@ def test_names_map_onto_information_schema_vocabulary() -> None:
 def test_the_data_type_json_is_unpacked() -> None:
     """SHOW COLUMNS returns data_type as a JSON blob, not a type name."""
     mapped = map_show_columns([raw()])[0]
-    assert mapped["DATA_TYPE"] == "FIXED"
+    assert mapped["DATA_TYPE"] == "NUMBER"
     assert mapped["NUMERIC_PRECISION"] == 38
     assert mapped["NUMERIC_SCALE"] == 0
+
+
+def test_shows_internal_type_names_are_stored_as_information_schemas() -> None:
+    """`FIXED` and `REAL` are SHOW COLUMNS' own categories -- `FIXED` is not
+    even valid DDL. INFORMATION_SCHEMA calls them NUMBER and FLOAT, and the
+    cache mirrors INFORMATION_SCHEMA's values as well as its field names."""
+    fixed = '{"type":"FIXED","precision":10,"scale":2,"nullable":true}'
+    real = '{"type":"REAL","nullable":true}'
+    mapped = map_show_columns([raw(data_type=fixed), raw(data_type=real)])
+    assert [m["DATA_TYPE"] for m in mapped] == ["NUMBER", "FLOAT"]
+    assert (mapped[0]["NUMERIC_PRECISION"], mapped[0]["NUMERIC_SCALE"]) == (10, 2)
+    assert mapped[1]["NUMERIC_PRECISION"] is None
 
 
 def test_text_length_lands_in_character_maximum_length() -> None:
@@ -68,7 +80,7 @@ def test_text_length_lands_in_character_maximum_length() -> None:
 
 
 def test_timestamp_scale_lands_in_datetime_precision_not_numeric_scale() -> None:
-    """TIMESTAMP_LTZ's JSON reuses the "precision"/"scale" keys FIXED uses for
+    """TIMESTAMP_LTZ's JSON reuses the "precision"/"scale" keys NUMBER uses for
     its decimal scale, but INFORMATION_SCHEMA keeps the two concepts apart."""
     mapped = map_show_columns(
         [

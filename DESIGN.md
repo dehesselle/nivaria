@@ -288,7 +288,13 @@ ordinal position (columns arrive in declaration order, so position is derived
 from that order, restarting per table), and the data type arrives as a JSON
 blob that is unpacked into type/length/precision/scale. The cache keeps
 `INFORMATION_SCHEMA`'s vocabulary because it is the stable, documented name for
-each field — only the source changed. A type that cannot be parsed degrades to
+each field — only the source changed. That holds for `DATA_TYPE`'s values too:
+SHOW's JSON reports two internal categories, `FIXED` and `REAL`, which are
+stored as the `NUMBER` and `FLOAT` that `INFORMATION_SCHEMA` reports. `FIXED`
+is not valid DDL, so keeping it would put a type name in the cache that no
+Snowflake statement accepts. A live comparison of all three sources (SHOW,
+`INFORMATION_SCHEMA`, `DESC TABLE`) found no other differences in the type
+name. A type that cannot be parsed degrades to
 "unknown"; a column snowcone cannot describe is still a column worth listing.
 
 ### A second source: one new mirror table per SELECT, never a retrofit

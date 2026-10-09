@@ -49,7 +49,7 @@ async def test_the_table_view_renders_full_ddl_style_type_names(repo) -> None:
     put_columns(
         repo,
         "ORDERS",
-        ("TOTAL", "FIXED", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
+        ("TOTAL", "NUMBER", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
         ("CREATED_AT", "TIMESTAMP_LTZ", {"DATETIME_PRECISION": 9}),
     )
     app = Harness(repo)
@@ -251,7 +251,7 @@ async def test_clicking_the_type_header_sorts_by_formatted_type_then_reverses(
         repo,
         "ORDERS",
         ("ID", "TEXT"),
-        ("TOTAL", "FIXED", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
+        ("TOTAL", "NUMBER", {"NUMERIC_PRECISION": 38, "NUMERIC_SCALE": 0}),
     )
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
