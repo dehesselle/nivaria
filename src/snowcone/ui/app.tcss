@@ -33,7 +33,7 @@ ConnectScreen {
        is in: a fixed 90x24 was clipped on both axes at 80x24. */
     width: 90;
     max-width: 100%;
-    height: 24;
+    height: 25;
     max-height: 100%;
     border: thick $background 80%;
     background: $surface;
@@ -55,6 +55,7 @@ ConnectScreen {
 }
 
 #connect-fields {
+    margin-top: 1;
     height: 1fr;
     scrollbar-size-vertical: 1;
 }
