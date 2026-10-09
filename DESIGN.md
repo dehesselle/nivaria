@@ -1005,6 +1005,14 @@ handled. Nothing fetches in the background between those two triggers
 (countdown reaching zero, or a navigation that changes what's shown) except
 the initial requests `MainScreen.on_mount` issues at startup.
 
+A view's paint-time check never re-requests the scope whose own update it is
+painting. A scope whose first fetch failed has no `fetched_at`, so it always
+reads as stale. Re-requesting it from the repaint its failure caused made a
+failing statement (no warehouse, say) retry itself. Whether that looped
+depended on a race: the worker had to leave `FetchService._running` before
+the repaint ran. A failed scope is retried by the sweep, or when the user
+navigates back to it.
+
 ---
 
 ## The Object tree

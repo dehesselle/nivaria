@@ -45,10 +45,17 @@ class _ScopedView(Widget):
     #: only in the three constructors that happen to satisfy it.
     repo: Repository
 
+    #: The scope whose cache update this repaint answers, while it runs.
+    _announcing: Scope | None = None
+
     def cache_updated(self, scope: Scope) -> None:
         """Repaint if the scope that changed is one this view is showing."""
         if scope in self.scopes():
-            self.update_content()
+            self._announcing = scope
+            try:
+                self.update_content()
+            finally:
+                self._announcing = None
 
     def scopes(self) -> list[Scope]:
         """Cache scopes this view reads, for freshness and the countdown."""
@@ -61,7 +68,18 @@ class _ScopedView(Widget):
     # ------------------------------------------------------------ freshness
 
     def ensure(self, scope: Scope, ttl: float, *, interactive: bool = True) -> bool:
-        """Ask for `scope` if it is missing or stale. Returns whether it asked."""
+        """Ask for `scope` if it is missing or stale. Returns whether it asked.
+
+        Never for the scope whose own update is being painted. A scope whose
+        first fetch failed has no `fetched_at` and so always reads as stale,
+        and asking again from the repaint its failure caused made a failing
+        statement retry itself: whether it looped depended only on the
+        worker leaving `FetchService._running` before this ran. Reordering
+        that would make the loop certain rather than remove it. The sweep and
+        navigating back still retry it.
+        """
+        if scope == self._announcing:
+            return False
         if is_stale(scope, self.repo.entry(scope).age(), ttl):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
             return True

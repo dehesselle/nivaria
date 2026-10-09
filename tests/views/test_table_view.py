@@ -444,3 +444,27 @@ async def test_showing_the_table_already_shown_keeps_its_sort(repo) -> None:
             "ID",
             "TOTAL",
         ]
+
+
+async def test_a_failed_fetchs_own_announcement_does_not_request_it_again(
+    repo,
+) -> None:
+    """A scope whose first fetch failed has never been fetched, so it reads
+    as stale. Re-requesting it from the repaint its own failure caused
+    turned a failing statement into a retry loop; the sweep and navigating
+    back are what retry it."""
+    orders = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("ID", "NUMBER"))
+    tags = column_tag_references_scope("MYDB", "PUBLIC", "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(orders)
+        await pilot.pause()
+        generation = repo.begin_pass(tags)
+        repo.fail_pass(tags, generation, "No active warehouse selected")
+        app.needed.clear()
+
+        pane.cache_updated(tags)
+        await pilot.pause()
+    assert tags.key not in app.needed
