@@ -8,6 +8,7 @@ from textual.app import App, ComposeResult
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
+    ObjectRef,
     ObjectType,
     SchemaRef,
     objects_scope,
@@ -619,6 +620,32 @@ async def test_an_object_name_with_markup_is_not_interpreted(repo) -> None:
         tables.expand()
         await pilot.pause()
         assert tables.children[0].label.plain == "ORDERS[beta]"
+
+
+# -------------------------------------------------------------------- reveal
+
+
+async def test_reveal_centers_the_object_instead_of_pinning_it_to_the_bottom(
+    repo,
+) -> None:
+    """An object far down a long list used to land at the very last visible
+    row -- the least scroll needed to bring that one line into view -- with
+    none of its neighbours below it. The reveal should put it mid-pane."""
+    put_schemas(repo, "MYDB", "AAA")
+    tables = [f"TABLE{i:03d}" for i in range(50)]
+    put_tables(repo, "MYDB", "AAA", *tables)
+    app = Harness(repo)
+    async with app.run_test(size=(80, 15)) as pilot:
+        tree = await open_tree(app, pilot)
+        ref = ObjectRef(ObjectType.TABLE, "MYDB", "AAA", "TABLE030")
+        assert tree.reveal(ref)
+        await pilot.pause()
+
+        node = tree.cursor_node
+        assert node is not None
+        assert node.data.key == "TABLE030"
+        middle = int(tree.scroll_y) + tree.size.height // 2
+        assert abs(node._line - middle) <= 1
 
 
 # ------------------------------------------------------------- reveal_schema

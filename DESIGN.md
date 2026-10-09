@@ -1298,7 +1298,9 @@ already a plain function precisely so this stayed an easy change.
 
 Choosing an object or column hit **reveals it in the tree** (`ObjectTree.
 reveal`) as well as opening it in the detail pane, so search leaves you
-somewhere you can keep browsing from. A **schema** hit is different —
+somewhere you can keep browsing from. The object is scrolled to the middle
+of the tree rather than the least distance into view, which would pin a hit
+further down to the last visible row. A **schema** hit is different —
 `SchemaRef` carries only `database`/`name`, deliberately not an `ObjectRef`
 with some placeholder type, since a schema has no `ObjectType` and no mirror
 row of its own to show. Choosing one instead **reveals and expands it** in

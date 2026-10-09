@@ -177,8 +177,29 @@ class ObjectTree(Resizable, Tree[NodeData]):
         # Not an immediate move_cursor: the node just materialised on the way
         # down still has _line == -1 until the next refresh, so the cursor
         # would silently land on line 0 instead of on the object.
-        self.call_after_refresh(self.move_cursor, node)
+        self.call_after_refresh(self._settle_on_object, node)
         return True
+
+    def _settle_on_object(self, node: TreeNode[NodeData]) -> None:
+        """Put the cursor on `node` and scroll it to the middle of the tree.
+
+        `move_cursor`'s default scroll scrolls the least distance to bring
+        the line into view, which pins a hit further down at the very last
+        visible row with nothing shown below it. Not `Tree.center_scroll`:
+        that would center every arrow-key step too, not just the jump.
+        """
+        self.move_cursor(node)
+        label = self._get_label_region(node._line)
+        if label is None:
+            return
+        self.scroll_to_region(
+            label,
+            animate=False,
+            force=True,
+            center=True,
+            origin_visible=False,
+            x_axis=False,
+        )
 
     def reveal_schema(self, ref: SchemaRef) -> bool:
         """Expand down to a schema, expand it too, and put the cursor on it.
