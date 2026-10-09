@@ -1105,7 +1105,10 @@ care about. Mounting on demand keeps exactly one view alive.
 re-points the existing view, so the widget, its columns and its scroll
 position all survive — which is what makes arrowing down three hundred tables
 cheap. A different type is a genuine change of shape, so that view is
-replaced.
+replaced. Pointing the pane at what it already shows changes nothing at all.
+Re-showing would repaint the view and reset its sort and cursor, and that
+happens without the user moving: when the open table is picked again in
+search, or when a search jump's own cursor move announces it.
 
 **A view owns its whole body.** There used to be a second registry contract —
 a view's `compose_context()` fed a separate "Context bar" pane above the

@@ -422,3 +422,25 @@ def test_every_header_tooltip_names_a_field_of_the_cached_column_list(repo) -> N
         }
     named = {tooltip for tooltip in _HEADER_TOOLTIPS.values() if tooltip}
     assert named <= cached, sorted(named - cached)
+
+
+async def test_showing_the_table_already_shown_keeps_its_sort(repo) -> None:
+    """Pointing the pane at what it already shows -- picking the open table
+    again in search, say -- is not moving to another table."""
+    orders = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("TOTAL", "FLOAT"), ("ID", "NUMBER"))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(orders)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+        table.post_message(_click_header(table, "Name"))
+        await pilot.pause()
+
+        pane.show(orders)
+        await pilot.pause()
+        assert [table.get_cell_at((r, 1)).plain for r in range(2)] == [
+            "ID",
+            "TOTAL",
+        ]

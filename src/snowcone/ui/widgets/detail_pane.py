@@ -48,7 +48,15 @@ class DetailPane(Vertical):
         return self._scope
 
     def show(self, ref: ObjectRef) -> ObjectView | None:
-        """Point the pane at an object. Returns the view now showing it."""
+        """Point the pane at an object. Returns the view now showing it.
+
+        Pointing it at what it already shows changes nothing: re-showing
+        would repaint the view and reset its sort and cursor, though the user
+        never moved. `clear()` forgets what was shown, so an emptied pane is
+        never mistaken for this case.
+        """
+        if ref == self._ref and isinstance(self._view, ObjectView):
+            return self._view
         self._ref = ref
         self._scope = None
         self._schema = None
@@ -73,8 +81,11 @@ class DetailPane(Vertical):
         """Point the pane at a category node ("Tables (n)", ...).
 
         Same swap rule as `show`: same type re-points the mounted view, a
-        different type (or one with no registered view) replaces it.
+        different type (or one with no registered view) replaces it. Like
+        `show`, pointing it at what it already shows changes nothing.
         """
+        if scope == self._scope and isinstance(self._view, CategoryView):
+            return self._view
         self._ref = None
         self._scope = scope
         self._schema = None
@@ -102,8 +113,11 @@ class DetailPane(Vertical):
 
         No registry lookup, unlike `show`/`show_category`: there is exactly
         one view for a schema node, not one of several types sharing a
-        lookup, so this constructs SchemaView directly.
+        lookup, so this constructs SchemaView directly. Like `show`,
+        pointing it at what it already shows changes nothing.
         """
+        if ref == self._schema and type(self._view) is SchemaView:
+            return self._view
         self._ref = None
         self._scope = None
         self._database = None
@@ -122,6 +136,8 @@ class DetailPane(Vertical):
 
     def show_database(self, database: str) -> DatabaseView:
         """Point the pane at a database's Grants/Tags view. See `show_schema`."""
+        if database == self._database and type(self._view) is DatabaseView:
+            return self._view
         self._ref = None
         self._scope = None
         self._schema = None
