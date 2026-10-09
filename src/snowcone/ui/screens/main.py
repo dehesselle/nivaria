@@ -329,7 +329,13 @@ class MainScreen(Screen):
         self.detail.cache_updated(scope)
 
     def on_object_selected(self, event: ObjectSelected) -> None:
-        self._select(event.ref)
+        # Show, not _select: the cursor is already on the object, and
+        # revealing it again queues a cursor move of its own. Textual
+        # re-highlights a node whose line merely shifted, so a highlight
+        # that moves the cursor can answer another one forever -- see
+        # DESIGN.md "A highlight is not a jump".
+        self.detail.show(event.ref)
+        self._restart_countdown()
 
     def on_category_selected(self, event: CategorySelected) -> None:
         self._select_category(event.scope)
@@ -354,7 +360,8 @@ class MainScreen(Screen):
     def _select(self, ref: ObjectRef) -> None:
         # A search hit leaves the tree somewhere you can keep browsing from,
         # rather than a detail pane pointing at an object the tree has never
-        # heard of.
+        # heard of. A jump from outside the tree only: see
+        # on_object_selected for why a tree highlight must not come here.
         self.tree.reveal(ref)
         self.detail.show(ref)
         self._restart_countdown()

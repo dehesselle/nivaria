@@ -1048,6 +1048,31 @@ One more constraint that bites repeatedly: a freshly created node has no line
 number until the next refresh, so **any cursor move onto newly created nodes
 must be deferred by one refresh** or it silently lands on the first row.
 
+### A highlight is not a jump
+
+A tree highlight shows the object in the Detail pane and does nothing else.
+Revealing (`ObjectTree.reveal`: expand down to a node, then move the cursor
+there and centre it) is for a jump from outside the tree, which today means
+a search hit.
+
+The two used to share one path, and that was a real incident. The trigger is
+a second Textual property:
+
+> When the cursor's own node merely **changes line** -- something above it
+> was expanded or added -- `Tree._build` reassigns `cursor_line` from the
+> node, and `watch_cursor_line` compares against whichever node *now*
+> occupies the old line. So Textual posts `NodeHighlighted` for the same
+> node again, although the cursor never moved.
+
+With the cursor on a table in a lower schema, a search jump to a table in a
+collapsed schema above it expanded that schema, which shifted the highlighted
+table and re-highlighted it. Because a highlight also revealed, that queued a
+deferred cursor move back to the old table while the jump's own move was
+still pending. Each move highlighted its node, each highlight queued another
+move, and the two alternated forever. The UI went sluggish, the tree
+scrolled by itself, and the countdown froze, because every selection
+restarts it. No Snowflake work was involved at all.
+
 ---
 
 ## Detail views

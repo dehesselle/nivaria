@@ -13,6 +13,7 @@ import snowcone.ui.app as app_module
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
 from snowcone.models import (
+    ObjectRef,
     ObjectType,
     Scope,
     ScopeType,
@@ -850,3 +851,65 @@ async def test_escape_closes_the_search_modal_without_choosing(repo) -> None:
 
         assert app.screen is screen
         assert screen.detail.ref is None
+
+
+# ------------------------------------------------------- highlight vs. jump
+
+
+async def test_a_search_jump_above_the_highlighted_object_settles_on_the_hit(
+    repo,
+) -> None:
+    """The jump expands a schema above the highlighted table, which shifts
+    that table's line, and Textual re-highlights a node whose line shifted.
+    When a highlight also revealed, that re-highlight queued a cursor move
+    of its own, and the two moves chased each other forever: the tree
+    scrolled by itself and the countdown never got past a restart."""
+    put_schemas(repo, "MYDB", "AAA", "ZZZ")
+    put_tables(repo, "MYDB", "AAA", *[f"A{i:02d}" for i in range(20)])
+    put_tables(repo, "MYDB", "ZZZ", *[f"Z{i:02d}" for i in range(20)])
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await settle(pilot)
+        screen._select(ObjectRef(ObjectType.TABLE, "MYDB", "ZZZ", "Z10"))
+        await settle(pilot)
+
+        screen._select(ObjectRef(ObjectType.TABLE, "MYDB", "AAA", "A05"))
+        await settle(pilot)
+        restarted_at = screen._last_sweep_at
+        await settle(pilot)
+
+        tree = screen.query_one(ObjectTree)
+        assert tree.cursor_node.data.key == "A05"
+        assert screen.detail.ref.name == "A05"
+        assert screen._last_sweep_at == restarted_at
+
+
+async def test_highlighting_an_object_in_the_tree_does_not_reveal_it_again(
+    repo, monkeypatch
+) -> None:
+    """The cursor is already on it; revealing is for a jump from outside."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS", "PAYMENTS")
+    revealed: list[str] = []
+    original = ObjectTree.reveal
+
+    def spy(self, ref):
+        revealed.append(ref.name)
+        return original(self, ref)
+
+    monkeypatch.setattr(ObjectTree, "reveal", spy)
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        tree, tables = await drill_to_tables(app, pilot, screen)
+        tree.move_cursor(tables.children[1])
+        await settle(pilot)
+
+        assert screen.detail.ref.name == "PAYMENTS"
+    assert revealed == []
