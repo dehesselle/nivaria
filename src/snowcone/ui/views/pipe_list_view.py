@@ -154,32 +154,36 @@ class PipeListView(TabbedView, CategoryView):
         }
 
         status_table = self.query_one("#detail-status", DataTable)
-        status_table.clear()
         history_table = self.query_one(f"#{LIST_TABLE}", DataTable)
-        history_table.clear(columns=True)
-        history_table.add_columns(*_HISTORY_COLUMNS)
-        self._rows = {}
-        for row in self.repo.raw_rows(self.scope):
-            name = row["name"]
-            merged = {**row, **activity_by_name.get(name, {})}
-            self._rows[name] = merged
-            row_count = merged.get("ROW_COUNT")
-            history_table.add_row(
-                Text(name),
-                Text(f"{row_count:,}" if row_count is not None else ""),
-                Text(format_bytes(merged.get("FILE_SIZE"))),
-                Text(format_timestamp_minutes(merged.get("LAST_LOAD_TIME"))),
-                Text(merged.get("STATUS") or ""),
-                Text(merged.get("TABLE_NAME") or ""),
-                Text(merged.get("FILE_NAME") or ""),
-                key=name,
-            )
-            invalid_reason = row.get("invalid_reason") or ""
-            # Derived from invalid_reason, not read from SYSTEM$PIPE_STATUS
-            # -- see the module docstring. Upper case because RUNNING/
-            # STOPPED are Snowflake's own executionState values, even though
-            # only those two of them can ever be reached this way.
-            execution_state = "STOPPED" if invalid_reason else "RUNNING"
-            status_table.add_row(
-                Text(name), Text(execution_state), Text(invalid_reason), key=name
-            )
+        with (
+            self.keeping_cursor(status_table),
+            self.keeping_cursor(history_table),
+        ):
+            status_table.clear()
+            history_table.clear(columns=True)
+            history_table.add_columns(*_HISTORY_COLUMNS)
+            self._rows = {}
+            for row in self.repo.raw_rows(self.scope):
+                name = row["name"]
+                merged = {**row, **activity_by_name.get(name, {})}
+                self._rows[name] = merged
+                row_count = merged.get("ROW_COUNT")
+                history_table.add_row(
+                    Text(name),
+                    Text(f"{row_count:,}" if row_count is not None else ""),
+                    Text(format_bytes(merged.get("FILE_SIZE"))),
+                    Text(format_timestamp_minutes(merged.get("LAST_LOAD_TIME"))),
+                    Text(merged.get("STATUS") or ""),
+                    Text(merged.get("TABLE_NAME") or ""),
+                    Text(merged.get("FILE_NAME") or ""),
+                    key=name,
+                )
+                invalid_reason = row.get("invalid_reason") or ""
+                # Derived from invalid_reason, not read from SYSTEM$PIPE_STATUS
+                # -- see the module docstring. Upper case because RUNNING/
+                # STOPPED are Snowflake's own executionState values, even though
+                # only those two of them can ever be reached this way.
+                execution_state = "STOPPED" if invalid_reason else "RUNNING"
+                status_table.add_row(
+                    Text(name), Text(execution_state), Text(invalid_reason), key=name
+                )

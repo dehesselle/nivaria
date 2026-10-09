@@ -87,18 +87,19 @@ class StageListView(CategoryView):
         )
 
         table = self.query_one(f"#{LIST_TABLE}", DataTable)
-        table.clear(columns=True)
-        table.add_columns(*_COLUMNS)
-        self._rows = {}
-        for row in self.repo.raw_rows(self.scope):
-            name = row["name"]
-            self._rows[name] = row
-            table.add_row(
-                Text(name),
-                Text(row.get("type") or ""),
-                Text(row.get("storage_integration") or ""),
-                Text(row.get("url") or ""),
-                Text(format_date(row.get("created_on"))),
-                Text(row.get("comment") or ""),
-                key=name,
-            )
+        with self.keeping_cursor(table):
+            table.clear(columns=True)
+            table.add_columns(*_COLUMNS)
+            self._rows = {}
+            for row in self.repo.raw_rows(self.scope):
+                name = row["name"]
+                self._rows[name] = row
+                table.add_row(
+                    Text(name),
+                    Text(row.get("type") or ""),
+                    Text(row.get("storage_integration") or ""),
+                    Text(row.get("url") or ""),
+                    Text(format_date(row.get("created_on"))),
+                    Text(row.get("comment") or ""),
+                    key=name,
+                )

@@ -148,38 +148,45 @@ class ColumnsView(ItemDetailView, ObjectView):
         table = self.query_one("#detail-columns", DataTable)
         if not table.columns:
             self._add_columns(table)
-        table.clear()
         if self._reset_sort:
             self._reset_sort = False
-            table.sort_by(_DEFAULT_SORT)
+            sort, reverse = _DEFAULT_SORT, False
+        else:
+            sort, reverse = table.sort_column, table.sort_reverse
 
-        self.detail_rows = {}
-        for column in self.repo.columns(scope).rows:
-            tags = tags_by_column.get(column.column_name, [])
-            key = column.column_name
-            # Rank values, not display values. The table is handed a RowKey
-            # and reads these back, so rows go in in whatever order the cache
-            # had them and the table puts them in order itself.
-            self.detail_rows[key] = {
-                "tags": tags,
-                "ordinal": column.ordinal_position,
-                "name": column.column_name.casefold(),
-                "type": column.desc_type.casefold(),
-                "tag_count": len(tags),
-            }
-            table.add_row(
-                Text(str(column.ordinal_position)),
-                Text(column.column_name),
-                Text(column.desc_type),
-                # YES/NO verbatim, as INFORMATION_SCHEMA.IS_NULLABLE
-                # reports it -- a column headed "Nullable" showing
-                # "NOT NULL" read backwards.
-                Text("YES" if column.is_nullable else "NO"),
-                Text(column.default or ""),
-                Text(str(len(tags)) if tags_confirmed else ""),
-                Text(column.comment or ""),
-                key=key,
-            )
+        with self.keeping_cursor(table):
+            table.clear()
+            self.detail_rows = {}
+            for column in self.repo.columns(scope).rows:
+                tags = tags_by_column.get(column.column_name, [])
+                key = column.column_name
+                # Rank values, not display values. The table is handed a RowKey
+                # and reads these back, so rows go in in whatever order the cache
+                # had them and the table puts them in order itself.
+                self.detail_rows[key] = {
+                    "tags": tags,
+                    "ordinal": column.ordinal_position,
+                    "name": column.column_name.casefold(),
+                    "type": column.desc_type.casefold(),
+                    "tag_count": len(tags),
+                }
+                table.add_row(
+                    Text(str(column.ordinal_position)),
+                    Text(column.column_name),
+                    Text(column.desc_type),
+                    # YES/NO verbatim, as INFORMATION_SCHEMA.IS_NULLABLE
+                    # reports it -- a column headed "Nullable" showing
+                    # "NOT NULL" read backwards.
+                    Text("YES" if column.is_nullable else "NO"),
+                    Text(column.default or ""),
+                    Text(str(len(tags)) if tags_confirmed else ""),
+                    Text(column.comment or ""),
+                    key=key,
+                )
+            # Sorted now rather than left to tcoda's on-idle resort: the
+            # cursor is put back by row index as this block ends, and an
+            # index taken before the sort would point at the wrong column.
+            table.sort_by(sort, reverse=reverse)
         self.sync_item_detail(table.cursor_row)
 
     def detail_text(self, row: dict[str, Any]) -> str | None:

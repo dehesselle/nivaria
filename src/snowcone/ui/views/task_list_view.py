@@ -126,20 +126,21 @@ class TaskListView(CategoryView):
         }
 
         table = self.query_one(f"#{LIST_TABLE}", DataTable)
-        table.clear(columns=True)
-        table.add_columns(*_COLUMNS)
-        self._rows = {}
-        for row in self.repo.raw_rows(self.scope):
-            name = row["name"]
-            merged = {**row, **activity_by_name.get(name, {})}
-            self._rows[name] = merged
-            table.add_row(
-                Text(name),
-                Text(row.get("warehouse") or ""),
-                Text(row.get("schedule") or ""),
-                Text(row.get("state") or ""),
-                Text(format_timestamp_minutes(merged.get("SCHEDULED_TIME"))),
-                Text(merged.get("STATE") or ""),
-                Text(row.get("comment") or ""),
-                key=name,
-            )
+        with self.keeping_cursor(table):
+            table.clear(columns=True)
+            table.add_columns(*_COLUMNS)
+            self._rows = {}
+            for row in self.repo.raw_rows(self.scope):
+                name = row["name"]
+                merged = {**row, **activity_by_name.get(name, {})}
+                self._rows[name] = merged
+                table.add_row(
+                    Text(name),
+                    Text(row.get("warehouse") or ""),
+                    Text(row.get("schedule") or ""),
+                    Text(row.get("state") or ""),
+                    Text(format_timestamp_minutes(merged.get("SCHEDULED_TIME"))),
+                    Text(merged.get("STATE") or ""),
+                    Text(row.get("comment") or ""),
+                    key=name,
+                )

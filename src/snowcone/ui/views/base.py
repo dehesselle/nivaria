@@ -19,9 +19,14 @@ one import.
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import ClassVar
 
+from textual.coordinate import Coordinate
 from textual.widget import Widget
+from textual.widgets import DataTable
+from textual.widgets.data_table import CellDoesNotExist
 
 from snowcone.cache.repository import Repository
 from snowcone.models import ObjectRef, ObjectType, Scope, is_stale
@@ -64,6 +69,36 @@ class _ScopedView(Widget):
     @abstractmethod
     def update_content(self) -> None:
         """Repaint from the cache. Called on mount and on every change."""
+
+    @contextmanager
+    def keeping_cursor(self, table: DataTable) -> Iterator[None]:
+        """Repopulate `table` inside this block without losing the user's row.
+
+        `DataTable.clear()` puts the cursor back on the first row, so every
+        cache update landing on screen used to throw away whatever row the
+        user was reading -- a column's tags, a load's error. Only a repaint
+        answering a cache update keeps the row: that is the same object read
+        again. Shown afresh (mounted, or pointed at another object), the
+        table starts at the top as before.
+
+        The row is found again by key, else by position: a row that went
+        away leaves the cursor on whatever took its place, and a table
+        without stable keys keeps at least its position.
+        """
+        if self._announcing is None:
+            yield
+            return
+        row = table.cursor_row
+        try:
+            key = table.coordinate_to_cell_key(Coordinate(row, 0)).row_key
+        except CellDoesNotExist:
+            key = None
+        yield
+        if not table.row_count:
+            return
+        if key is not None and key in table.rows:
+            row = table.get_row_index(key)
+        table.move_cursor(row=min(row, table.row_count - 1), animate=False)
 
     # ------------------------------------------------------------ freshness
 

@@ -152,19 +152,20 @@ class TaskView(HistoryView, ObjectView):
         )
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
-        table.clear(columns=True)
-        table.add_columns(*_HISTORY_COLUMNS)
-        self.detail_rows = {}
-        for _, r in dated:
-            key = str(r.get("QUERY_ID"))
-            self.detail_rows[key] = r
-            table.add_row(
-                Text(format_timestamp_minutes(r.get("SCHEDULED_TIME"))),
-                Text(format_timestamp_minutes(r.get("QUERY_START_TIME"))),
-                Text(format_timestamp_minutes(r.get("COMPLETED_TIME"))),
-                Text(r.get("STATE") or ""),
-                key=key,
-            )
+        with self.keeping_cursor(table):
+            table.clear(columns=True)
+            table.add_columns(*_HISTORY_COLUMNS)
+            self.detail_rows = {}
+            for _, r in dated:
+                key = str(r.get("QUERY_ID"))
+                self.detail_rows[key] = r
+                table.add_row(
+                    Text(format_timestamp_minutes(r.get("SCHEDULED_TIME"))),
+                    Text(format_timestamp_minutes(r.get("QUERY_START_TIME"))),
+                    Text(format_timestamp_minutes(r.get("COMPLETED_TIME"))),
+                    Text(r.get("STATE") or ""),
+                    key=key,
+                )
         self.sync_item_detail(table.cursor_row)
 
     def _update_definition(self) -> None:

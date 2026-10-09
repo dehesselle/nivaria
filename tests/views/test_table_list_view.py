@@ -143,3 +143,27 @@ async def test_moving_between_two_schemas_tables_reuses_the_list_view(repo) -> N
         await pilot.pause()
         assert view_a is view_b
         assert pane.query_one("#detail-list", DataTable).row_count == 1
+
+
+async def test_a_repaint_keeps_the_highlighted_table(repo) -> None:
+    """A refresh of the schema's tables used to put the cursor back on the
+    first row, even when the table it was on is still there."""
+    put_table(repo, "BBB")
+    put_table(repo, "DDD")
+    put_table(repo, "FFF")
+    scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-list", DataTable)
+        table.move_cursor(row=2)
+        await pilot.pause()
+
+        put_table(repo, "AAA")
+        pane.cache_updated(scope)
+        await pilot.pause()
+
+        key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        assert key.value == "FFF"

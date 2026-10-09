@@ -468,3 +468,55 @@ async def test_a_failed_fetchs_own_announcement_does_not_request_it_again(
         pane.cache_updated(tags)
         await pilot.pause()
     assert tags.key not in app.needed
+
+
+def _cursor_key(table: DataTable) -> str:
+    return table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+
+
+async def test_a_repaint_keeps_the_highlighted_column(repo) -> None:
+    """A tags update landing while the user reads one column's tags used to
+    put the cursor back on the first row."""
+    orders = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("TOTAL", "FLOAT"), ("ID", "NUMBER"), ("AMOUNT", "X"))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(orders)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+        table.post_message(_click_header(table, "Name"))
+        await pilot.pause()
+        table.move_cursor(row=1)
+        await pilot.pause()
+        assert _cursor_key(table) == "ID"
+
+        put_column_tag(repo, "ORDERS", "TOTAL")
+        pane.cache_updated(column_tag_references_scope("MYDB", "PUBLIC", "ORDERS"))
+        await pilot.pause()
+
+        assert _cursor_key(table) == "ID"
+        assert [table.get_cell_at((r, 1)).plain for r in range(3)] == [
+            "AMOUNT",
+            "ID",
+            "TOTAL",
+        ]
+
+
+async def test_moving_to_another_table_starts_at_the_first_column(repo) -> None:
+    orders = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("TOTAL", "FLOAT"), ("ID", "NUMBER"))
+    customers = put_table(repo, "CUSTOMERS")
+    put_columns(repo, "CUSTOMERS", ("NAME", "TEXT"), ("EMAIL", "TEXT"))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(orders)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+        table.move_cursor(row=1)
+        await pilot.pause()
+
+        pane.show(customers)
+        await pilot.pause()
+        assert table.cursor_row == 0

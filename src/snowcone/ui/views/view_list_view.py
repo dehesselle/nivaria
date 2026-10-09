@@ -139,25 +139,28 @@ class ViewListView(CategoryView):
         }
 
         table = self.query_one(f"#{LIST_TABLE}", DataTable)
-        table.clear(columns=True)
-        table.add_columns(*_COLUMNS)
-        self._rows = {}
-        for row in self.repo.raw_rows(self.scope):
-            name = row["name"]
-            merged = {
-                **row,
-                **stats_by_name.get(name, {}),
-                **materialized_by_name.get(name, {}),
-            }
-            self._rows[name] = merged
-            table.add_row(
-                Text(name),
-                Text(f"{merged['rows']:,}" if merged.get("rows") is not None else ""),
-                Text(format_bytes(merged.get("bytes"))),
-                Text(format_date(row.get("created_on"))),
-                Text(format_date(merged.get("LAST_DDL"))),
-                Text(format_timestamp_minutes(merged.get("LAST_ALTERED"))),
-                Text("Yes" if row.get("is_materialized") == "true" else ""),
-                Text(row.get("comment") or ""),
-                key=name,
-            )
+        with self.keeping_cursor(table):
+            table.clear(columns=True)
+            table.add_columns(*_COLUMNS)
+            self._rows = {}
+            for row in self.repo.raw_rows(self.scope):
+                name = row["name"]
+                merged = {
+                    **row,
+                    **stats_by_name.get(name, {}),
+                    **materialized_by_name.get(name, {}),
+                }
+                self._rows[name] = merged
+                table.add_row(
+                    Text(name),
+                    Text(
+                        f"{merged['rows']:,}" if merged.get("rows") is not None else ""
+                    ),
+                    Text(format_bytes(merged.get("bytes"))),
+                    Text(format_date(row.get("created_on"))),
+                    Text(format_date(merged.get("LAST_DDL"))),
+                    Text(format_timestamp_minutes(merged.get("LAST_ALTERED"))),
+                    Text("Yes" if row.get("is_materialized") == "true" else ""),
+                    Text(row.get("comment") or ""),
+                    key=name,
+                )

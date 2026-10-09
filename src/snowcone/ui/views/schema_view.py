@@ -99,28 +99,30 @@ class _GrantsTagsView(TabbedView, _ScopedView):
         self.ensure(tags, ttl)
 
         grants_table = self.query_one("#detail-grants", DataTable)
-        grants_table.clear(columns=True)
-        grants_table.add_columns(*_GRANTS_COLUMNS)
-        for row in self.repo.raw_rows(grants):
-            grants_table.add_row(
-                Text(format_timestamp_minutes(row.get("created_on"))),
-                Text(row.get("privilege") or ""),
-                Text(row.get("granted_on") or ""),
-                Text(row.get("name") or ""),
-                Text(row.get("granted_to") or ""),
-                Text(row.get("grantee_name") or ""),
-                Text(row.get("grant_option") or ""),
-                Text(row.get("granted_by") or ""),
-            )
+        with self.keeping_cursor(grants_table):
+            grants_table.clear(columns=True)
+            grants_table.add_columns(*_GRANTS_COLUMNS)
+            for row in self.repo.raw_rows(grants):
+                grants_table.add_row(
+                    Text(format_timestamp_minutes(row.get("created_on"))),
+                    Text(row.get("privilege") or ""),
+                    Text(row.get("granted_on") or ""),
+                    Text(row.get("name") or ""),
+                    Text(row.get("granted_to") or ""),
+                    Text(row.get("grantee_name") or ""),
+                    Text(row.get("grant_option") or ""),
+                    Text(row.get("granted_by") or ""),
+                )
 
         tags_table = self.query_one("#detail-tags", DataTable)
-        tags_table.clear(columns=True)
-        tags_table.add_columns(*_TAGS_COLUMNS)
-        for row in self.repo.raw_rows(tags):
-            tags_table.add_row(
-                Text(row.get("TAG_NAME") or ""),
-                Text(row.get("TAG_VALUE") or ""),
-            )
+        with self.keeping_cursor(tags_table):
+            tags_table.clear(columns=True)
+            tags_table.add_columns(*_TAGS_COLUMNS)
+            for row in self.repo.raw_rows(tags):
+                tags_table.add_row(
+                    Text(row.get("TAG_NAME") or ""),
+                    Text(row.get("TAG_VALUE") or ""),
+                )
 
 
 class SchemaView(_GrantsTagsView):

@@ -456,3 +456,40 @@ async def test_an_uncapped_history_shows_no_note(repo) -> None:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
         assert not app.query_one("#detail-history-note", Static).display
+
+
+async def test_a_new_load_arriving_keeps_the_highlighted_load(repo) -> None:
+    """Rows used to be keyed by position, so a newer load at the top moved
+    every key along -- and a repaint put the cursor back on the first row
+    regardless, losing the error the user was reading."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    for hours, name in ((3, "old.csv"), (2, "mid.csv"), (1, "new.csv")):
+        put_pipe_activity_history(
+            repo,
+            "LOAD_ORDERS",
+            FILE_NAME=name,
+            LAST_LOAD_TIME=(
+                datetime.now().astimezone() - timedelta(hours=hours)
+            ).isoformat(),
+        )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-history", DataTable)
+        table.move_cursor(row=1)
+        await pilot.pause()
+        assert table.get_cell_at((table.cursor_row, 4)).plain == "mid.csv"
+
+        put_pipe_activity_history(
+            repo,
+            "LOAD_ORDERS",
+            FILE_NAME="newest.csv",
+            LAST_LOAD_TIME=datetime.now().astimezone().isoformat(),
+        )
+        pane.cache_updated(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
+        await pilot.pause()
+
+        assert table.row_count == 4
+        assert table.get_cell_at((table.cursor_row, 4)).plain == "mid.csv"

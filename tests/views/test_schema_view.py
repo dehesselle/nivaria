@@ -233,3 +233,24 @@ async def test_the_database_tab_mnemonic_actions_switch_tabs(repo) -> None:
         assert tabs.active == "tab-grants"
         view.action_show_tab("tags")
         assert tabs.active == "tab-tags"
+
+
+async def test_a_repaint_keeps_the_highlighted_grant_row(repo) -> None:
+    """Grant rows carry no key of their own, so the cursor keeps its
+    position rather than falling back to the first row."""
+    put_grant(repo, "MYDB", "PUBLIC", privilege="USAGE")
+    put_grant(repo, "MYDB", "PUBLIC", privilege="MONITOR")
+    put_grant(repo, "MYDB", "PUBLIC", privilege="CREATE TABLE")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC"))
+        await pilot.pause()
+        table = pane.query_one("#detail-grants", DataTable)
+        table.move_cursor(row=2)
+        await pilot.pause()
+
+        pane.cache_updated(grants_scope("MYDB", "PUBLIC"))
+        await pilot.pause()
+
+        assert table.cursor_row == 2

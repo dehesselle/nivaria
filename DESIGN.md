@@ -1201,6 +1201,17 @@ piece is there because the duplicated version had already drifted:
   five copies it replaced each mapped a *column index*, so reordering a
   view's columns would have silently aimed its tooltips at the wrong one.
 - **`TabbedView`** — the mnemonic tab switch, in one place instead of five.
+- **`_ScopedView.keeping_cursor`** — wraps a table's clear-and-repopulate
+  so a repaint answering a cache update keeps the user's row. Without it,
+  `DataTable.clear()` sends the cursor back to the first row each time an
+  update lands, so a column's tags or a load's error would vanish while
+  being read. The row is found again by key, else by position, so a table
+  whose rows have no stable key (grants, tags) keeps at least its
+  position. That is also why a pipe's load history is keyed by the load's
+  merge key and not by its index. Showing a different object still starts
+  at the top. The column list sorts synchronously inside the block, because
+  tcoda's on-idle re-sort would otherwise move the rows after the cursor
+  was placed.
 - **`ItemDetailView`** — the panel below a table describing whichever row is
   highlighted, hidden when that row has nothing to say. Two consumers:
   `HistoryView` (below), for `PipeView`/`TaskView`'s load/run errors, and

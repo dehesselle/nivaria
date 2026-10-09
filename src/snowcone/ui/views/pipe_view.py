@@ -197,21 +197,25 @@ class PipeView(HistoryView, ObjectView):
         )
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
-        table.clear(columns=True)
-        table.add_columns(*_HISTORY_COLUMNS)
-        self.detail_rows = {}
-        for index, (_, r) in enumerate(dated):
-            key = str(index)
-            self.detail_rows[key] = r
-            row_count = r.get("ROW_COUNT")
-            table.add_row(
-                Text(f"{row_count:,}" if row_count is not None else ""),
-                Text(format_bytes(r.get("FILE_SIZE"))),
-                Text(format_timestamp_minutes(r.get("LAST_LOAD_TIME"))),
-                Text(r.get("STATUS") or ""),
-                Text(r.get("FILE_NAME") or ""),
-                key=key,
-            )
+        with self.keeping_cursor(table):
+            table.clear(columns=True)
+            table.add_columns(*_HISTORY_COLUMNS)
+            self.detail_rows = {}
+            for _, r in dated:
+                # The load's own identity, not its position: a new load arriving
+                # at the top would otherwise shift every row's key, and the
+                # cursor is found again by key after a repaint.
+                key = str(_merge_key(r))
+                self.detail_rows[key] = r
+                row_count = r.get("ROW_COUNT")
+                table.add_row(
+                    Text(f"{row_count:,}" if row_count is not None else ""),
+                    Text(format_bytes(r.get("FILE_SIZE"))),
+                    Text(format_timestamp_minutes(r.get("LAST_LOAD_TIME"))),
+                    Text(r.get("STATUS") or ""),
+                    Text(r.get("FILE_NAME") or ""),
+                    key=key,
+                )
         self.sync_item_detail(table.cursor_row)
 
     def _update_definition(self) -> None:
