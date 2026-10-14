@@ -1,7 +1,7 @@
 """Detail view for pipes: load history and definition.
 
 Deliberately a different shape from the column views: a pipe has no columns,
-so its body is tabbed instead -- Load history (one row per file it has
+so its body is tabbed instead -- History (one row per file it has
 loaded, the same dual-source pattern `pipe_list_view.py` uses, plus a detail
 panel below for whatever the highlighted row wants to say about itself --
 currently its error, if any) and Definition (the pipe's raw COPY INTO SQL,
@@ -86,14 +86,12 @@ class PipeView(HistoryView, ObjectView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.PIPE
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("l", "show_tab('history')", "Load history", show=False),
+        Binding("h", "show_tab('history')", "History", show=False),
         *HistoryView.BINDINGS,
     ]
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
-            with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
-                yield from self.compose_history()
             with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
                 yield TextArea(
                     "",
@@ -102,6 +100,8 @@ class PipeView(HistoryView, ObjectView):
                     soft_wrap=True,
                     show_line_numbers=False,
                 )
+            with TabPane("[$accent bold]H[/]istory", id="tab-history"):
+                yield from self.compose_history()
 
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.ref.database, self.ref.schema)

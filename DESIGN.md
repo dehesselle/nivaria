@@ -407,11 +407,11 @@ the same exception `information_schema_columns` established).
 | `VIEW_STATS` | the same statement, `TABLE_TYPE = 'VIEW'` | Views (n): Last DDL, Last Altered | warehouse |
 | `MATERIALIZED_VIEW_STATS` | `SHOW MATERIALIZED VIEWS` | Views (n): Rows, Size | — |
 | `PIPE_ACTIVITY` | `ACCOUNT_USAGE.COPY_HISTORY`, latest row per pipe | Pipes (n) activity columns; target-table resolution | warehouse, `IMPORTED PRIVILEGES` |
-| `PIPE_ACTIVITY_HISTORY` | the same view, one pipe, unreduced | Pipe view Load history (older half) | warehouse, `IMPORTED PRIVILEGES` |
-| `PIPE_HISTORY` | `INFORMATION_SCHEMA.COPY_HISTORY` | Pipe view Load history (recent half) | warehouse, a resolved target table |
+| `PIPE_ACTIVITY_HISTORY` | the same view, one pipe, unreduced | Pipe view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
+| `PIPE_HISTORY` | `INFORMATION_SCHEMA.COPY_HISTORY` | Pipe view History (recent half) | warehouse, a resolved target table |
 | `TASK_ACTIVITY` | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | Tasks (n): Last Scheduled, Last Run State | warehouse, `IMPORTED PRIVILEGES` |
-| `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view Run history (older half) | warehouse, `IMPORTED PRIVILEGES` |
-| `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view Run history (recent half) | warehouse |
+| `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
+| `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view History (recent half) | warehouse |
 | `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE`/`ON TABLE` | Schema/Database/Table view Grants | — |
 | `TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES` | Schema/Database view Tags | warehouse |
 | `COLUMN_TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` | Columns view Tags column + detail panel | warehouse |
@@ -1242,9 +1242,12 @@ actually returns rather than a style choice:
 - **Tabs** when there are two genuinely different shapes for one node, with
   mnemonic switching (hidden from the footer, the pattern sibling project
   snakecam's `JobDetailsScreen` established): `PipeView` and `TaskView`
-  (history + definition), `ViewView` (columns + definition), `TableView`
-  (columns + grants + data), `PipeListView` (status + history),
-  `SchemaView`/`DatabaseView` (grants + tags). Switching by mnemonic moves
+  (definition + history), `ViewView` (columns + definition), `TableView`
+  (columns + data + grants), `PipeListView` (activity + status),
+  `SchemaView`/`DatabaseView` (grants + tags). Tabs are laid out in
+  alphabetical order; which one opens first is set separately (`initial=`)
+  and does not follow that order -- `PipeListView` opens on Status,
+  `PipeView`/`TaskView` on History. Switching by mnemonic moves
   focus into the tab just shown: a mnemonic only fires while focus is inside
   the view, and Textual drops focus from a widget it hides instead of moving
   it, so the next mnemonic used to go nowhere.

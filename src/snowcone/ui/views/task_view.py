@@ -1,7 +1,7 @@
 """Detail view for tasks: run history and definition.
 
 Deliberately a different shape from the column views: a task has no columns,
-so its body is tabbed instead -- Run history (one row per execution, the same
+so its body is tabbed instead -- History (one row per execution, the same
 dual-source pattern `pipe_view.py` uses, plus a detail panel below for
 whatever the highlighted row wants to say about itself -- currently its
 error, if any) and Definition (the task's raw SQL statement, unformatted).
@@ -63,14 +63,12 @@ class TaskView(HistoryView, ObjectView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TASK
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("r", "show_tab('history')", "Run history", show=False),
+        Binding("h", "show_tab('history')", "History", show=False),
         *HistoryView.BINDINGS,
     ]
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
-            with TabPane("[$accent bold]R[/]un history", id="tab-history"):
-                yield from self.compose_history()
             with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
                 yield TextArea(
                     "",
@@ -79,6 +77,8 @@ class TaskView(HistoryView, ObjectView):
                     soft_wrap=True,
                     show_line_numbers=False,
                 )
+            with TabPane("[$accent bold]H[/]istory", id="tab-history"):
+                yield from self.compose_history()
 
     def activity_history_scope(self) -> Scope:
         return task_activity_history_scope(

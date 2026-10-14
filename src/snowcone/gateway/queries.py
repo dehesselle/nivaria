@@ -372,7 +372,7 @@ def pipe_activity_history(fetch_days: int, max_rows: int) -> str:
 
     The backfill half of a single pipe's detail view -- `pipe_activity`
     above deliberately only keeps the latest row per pipe, so a pipe's own
-    "Load history" tab needs this instead, scoped to just that one pipe and
+    History tab needs this instead, scoped to just that one pipe and
     fetched lazily only once that pipe's view is opened (`PipeView`), never
     eagerly for a whole schema. Unlike `pipe_history` (INFORMATION_SCHEMA's
     table function, which has no PIPE_NAME argument and must resolve a

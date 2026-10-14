@@ -75,8 +75,8 @@ async def test_the_pipe_list_tab_mnemonic_actions_switch_tabs(repo) -> None:
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
         assert tabs.active == "tab-status"
-        view.action_show_tab("history")
-        assert tabs.active == "tab-history"
+        view.action_show_tab("activity")
+        assert tabs.active == "tab-activity"
         view.action_show_tab("status")
         assert tabs.active == "tab-status"
 

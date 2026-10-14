@@ -261,9 +261,6 @@ class TableView(TabbedView, ColumnsView):
         with TabbedContent(initial="tab-columns"):
             with TabPane("[$accent bold]C[/]olumns", id="tab-columns"):
                 yield from super().compose()
-            with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
-                self.grants_panel = compose_grants()
-                yield self.grants_panel
             with TabPane("[$accent bold]D[/]ata", id="tab-data"):
                 yield Static("", id=DATA_NOTE)
                 data: TextualDataTable[Text] = TextualDataTable(
@@ -271,6 +268,9 @@ class TableView(TabbedView, ColumnsView):
                 )
                 data.zebra_stripes = True
                 yield data
+            with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
+                self.grants_panel = compose_grants()
+                yield self.grants_panel
 
     def grants_scope(self) -> Scope:
         return object_grants_scope(self.ref)

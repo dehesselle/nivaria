@@ -217,7 +217,7 @@ def put_pipe_activity(repo: Repository, pipe: str, **extra) -> None:
 
 def put_pipe_activity_history(repo: Repository, pipe: str, **extra) -> None:
     """Seeds a single pipe's ACCOUNT_USAGE backfill scope -- what PipeView's
-    Load History tab actually merges, unlike the schema-wide put_pipe_activity
+    History tab actually merges, unlike the schema-wide put_pipe_activity
     above (which PipeListView reads, and which PipeView only reads for target
     resolution now)."""
     row = {
@@ -344,7 +344,7 @@ def put_task_activity(repo: Repository, task: str, **extra) -> None:
 
 def put_task_activity_history(repo: Repository, task: str, **extra) -> None:
     """Seeds a single task's ACCOUNT_USAGE backfill scope -- what TaskView's
-    Run History tab actually merges, unlike the schema-wide put_task_activity
+    History tab actually merges, unlike the schema-wide put_task_activity
     above (which TaskListView reads)."""
     row = {
         "NAME": task,

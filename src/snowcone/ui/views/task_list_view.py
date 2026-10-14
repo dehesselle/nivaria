@@ -30,7 +30,7 @@ Three columns here are Snowflake's own words, kept rather than smoothed over
 * "Last Scheduled" is `TASK_HISTORY.SCHEDULED_TIME`, not a run's start time.
   A task whose run was scheduled but never started still has one, so calling
   it "Last Run" claimed something the column does not say. A run's actual
-  start and finish are in `TaskView`'s own Run history tab.
+  start and finish are in `TaskView`'s own History tab.
 """
 
 from __future__ import annotations

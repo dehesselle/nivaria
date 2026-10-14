@@ -20,9 +20,9 @@ async def _mounted_table(app: Harness, pilot) -> DataTable:
     pane = app.query_one(DetailPane)
     view = pane.show_category(objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC"))
     await pilot.pause()
-    # The table lives on the "Load history" tab, not the default "Status"
-    # one -- switch there first, same as a user pressing "l".
-    view.action_show_tab("history")
+    # The table lives on the "Activity" tab, not the default "Status"
+    # one -- switch there first, same as a user pressing "a".
+    view.action_show_tab("activity")
     await pilot.pause()
     return pane.query_one("#detail-list", DataTable)
 

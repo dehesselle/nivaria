@@ -2,7 +2,7 @@
 
 Tabbed -- Status (one row per pipe: name, execution state, and
 `invalid_reason` -- a stopped pipe is otherwise indistinguishable from a
-healthy one) opens by default, alongside Load history (last load activity
+healthy one) opens by default, alongside Activity (last load activity
 per pipe). Status needs no new scope: `invalid_reason` is already mirrored
 onto the same `SHOW PIPES` rows this view already reads for the Name column.
 
@@ -57,12 +57,12 @@ from snowcone.ui.views.tables import (
     sync_list_note,
 )
 
-#: The Status tab's own note -- see LIST_NOTE, reused for the Load history
+#: The Status tab's own note -- see LIST_NOTE, reused for the Activity
 #: tab since both go empty/error together (both read `self.scope` alone).
 _STATUS_NOTE = "detail-status-note"
 
 _STATUS_COLUMNS = ("Name", "Execution State", "Invalid Reason")
-_HISTORY_COLUMNS = (
+_ACTIVITY_COLUMNS = (
     "Name",
     "Rows",
     "Size",
@@ -84,7 +84,7 @@ class PipeListView(TabbedView, CategoryView):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("s", "show_tab('status')", "Status", show=False),
-        Binding("l", "show_tab('history')", "Load history", show=False),
+        Binding("a", "show_tab('activity')", "Activity", show=False),
     ]
 
     def __init__(self, repo: Repository, scope: Scope) -> None:
@@ -95,6 +95,13 @@ class PipeListView(TabbedView, CategoryView):
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-status"):
+            with TabPane("[$accent bold]A[/]ctivity", id="tab-activity"):
+                yield Static("", id=LIST_NOTE)
+                activity: DataTable[Text] = HoverTooltipTable(
+                    self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
+                )
+                activity.zebra_stripes = True
+                yield activity
             with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
                 yield Static("", id=_STATUS_NOTE)
                 status: DataTable[Text] = DataTable(
@@ -103,13 +110,6 @@ class PipeListView(TabbedView, CategoryView):
                 status.zebra_stripes = True
                 status.add_columns(*_STATUS_COLUMNS)
                 yield status
-            with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
-                yield Static("", id=LIST_NOTE)
-                history: DataTable[Text] = HoverTooltipTable(
-                    self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
-                )
-                history.zebra_stripes = True
-                yield history
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Enter on a row opens that pipe's detail view, revealed in the tree.
@@ -154,21 +154,21 @@ class PipeListView(TabbedView, CategoryView):
         }
 
         status_table = self.query_one("#detail-status", DataTable)
-        history_table = self.query_one(f"#{LIST_TABLE}", DataTable)
+        activity_table = self.query_one(f"#{LIST_TABLE}", DataTable)
         with (
             self.keeping_cursor(status_table),
-            self.keeping_cursor(history_table),
+            self.keeping_cursor(activity_table),
         ):
             status_table.clear()
-            history_table.clear(columns=True)
-            history_table.add_columns(*_HISTORY_COLUMNS)
+            activity_table.clear(columns=True)
+            activity_table.add_columns(*_ACTIVITY_COLUMNS)
             self._rows = {}
             for row in self.repo.raw_rows(self.scope):
                 name = row["name"]
                 merged = {**row, **activity_by_name.get(name, {})}
                 self._rows[name] = merged
                 row_count = merged.get("ROW_COUNT")
-                history_table.add_row(
+                activity_table.add_row(
                     Text(name),
                     Text(f"{row_count:,}" if row_count is not None else ""),
                     Text(format_bytes(merged.get("FILE_SIZE"))),
