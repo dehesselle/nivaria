@@ -30,7 +30,12 @@ class CustomBuildHook(BuildHookInterface):
         elif tcoda_in_sdist.is_dir():
             source = tcoda_in_sdist
         else:
-            return
+            # Without tcoda the wheel builds fine but fails to import, so
+            # refuse to build rather than ship something broken.
+            raise RuntimeError(
+                f"tcoda sources not found: neither {sibling_tcoda} nor "
+                f"{tcoda_in_sdist} exists"
+            )
 
         # The wheel installs packages flat, same as src/snowcone -> snowcone.
         target = _TCODA_IN_SDIST if self.target_name == "sdist" else "tcoda"
