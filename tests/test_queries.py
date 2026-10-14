@@ -292,3 +292,10 @@ def test_show_grants_on_object_names_the_type_and_quotes_every_part() -> None:
         queries.show_grants_on_object(ObjectType.TABLE, "MyDb", "PUBLIC", "Orders")
         == 'SHOW GRANTS ON TABLE "MyDb"."PUBLIC"."Orders"'
     )
+
+
+def test_a_data_preview_quotes_every_part_and_takes_its_limit() -> None:
+    assert (
+        queries.data_preview("MyDb", "PUBLIC", "Orders", 500)
+        == 'SELECT * FROM "MyDb"."PUBLIC"."Orders" LIMIT 500'
+    )

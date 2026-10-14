@@ -281,6 +281,57 @@ Adding a column to an existing mirror table in place is therefore an ordinary
 change, not an exception (`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` and
 `cache_entry.truncated` were added that way).
 
+### Table data never reaches the disk
+
+Everything above is metadata, with one exception: the Table view's Data tab
+(`DATA_PREVIEW`) is real rows, and they can be personal data. They still go
+through sqlite like any other scope, so the one rule holds and the pass
+protocol, fencing and cursor keeping all apply. But they are kept in an
+in-memory sqlite database (`MemoryDatabase`), one per `Repository`, never in
+the cache file. `Repository` picks the database by scope type, so no caller
+knows the difference. The memory database has its own `cache_entry`, so a
+preview's freshness lives and dies with its rows. Previews are gone when the
+app exits, and a reconnect or role switch starts without them.
+
+Deleting previews from the file instead was the first version, and it was
+not enough. SQLite leaves deleted content in free pages and in the `-wal`
+file until something overwrites it, so the rows stayed recoverable from disk
+after snowcone could no longer read them. The ledger entry had to be deleted
+alongside the rows, too, or it would read as a preview fetched and found
+empty.
+
+The memory database breaks the cache's "a connection per call, never held"
+rule, and has to. An in-memory database belongs to the connection that
+created it and vanishes when that connection closes, so each call would get
+an empty one. `MemoryDatabase` holds one connection for its lifetime, shared
+by the event loop and the fetch workers under a lock, with no WAL. That
+suits a few hundred rows, written once per fetch and read once per repaint.
+A `TEMP` table on a held connection to the cache file was rejected. Temp
+tables live in a temporary file on disk unless `temp_store` is set to
+memory. Their ledger entries would have to go into the file's `cache_entry`,
+which is the wipe problem again, or into a temp `cache_entry` that shadows
+the real one. And a held connection keeps the cache file open, which on
+Windows blocks deleting it on a `SCHEMA_VERSION` bump. Their one advantage,
+joining previews with cached metadata in SQL, is not needed. What the
+operating system does with process memory (swap, crash dumps) is out of
+reach either way.
+
+The preview table lives in `preview.sql`, which only the memory database
+applies, so it is not part of the cache file's `SCHEMA_VERSION`. The memory
+database applies `schema.sql` too, for `cache_entry`: the ledger code reads
+both databases, so both must have the same table. The file's mirror tables
+come along and stay empty.
+
+The mirror cannot follow "Shape: mirror Snowflake", because every table has
+its own columns. `data_preview` is generic instead: one row per table row,
+holding the row as a JSON object keyed by column name in `SELECT *` order.
+Column names are unique within a table, so nothing is lost. The grid's header
+is read from the first row rather than from the cached column list, which can
+be older than the rows and name other columns. JSON has no type for some of
+what the driver returns, so a `Decimal` is stored as a string (a float would
+drop a `NUMBER(38,x)`'s digits), a timestamp as ISO 8601, and a `BINARY` as
+upper-case hex, Snowflake's own default output format.
+
 ---
 
 ## Fetching: what, when, and how
@@ -364,6 +415,7 @@ the same exception `information_schema_columns` established).
 | `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE`/`ON TABLE` | Schema/Database/Table view Grants | — |
 | `TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES` | Schema/Database view Tags | warehouse |
 | `COLUMN_TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` | Columns view Tags column + detail panel | warehouse |
+| `DATA_PREVIEW` | `SELECT * FROM <table> LIMIT n` | Table view Data | warehouse |
 
 Two of these are second sources without being `SELECT`s:
 `MATERIALIZED_VIEW_STATS` and `GRANTS` are additional `SHOW` commands, so
@@ -797,6 +849,15 @@ which rows survive.
 could only drop real pipes out of the "Pipes (n)" list, and layer 3 already
 covers the pathological case.
 
+The **data preview** carries its own cap too (`DATA_PREVIEW_ROWS`, 500), and
+is the one capped statement with no `ORDER BY`. That is the mistake described
+above, made deliberately: ordering would make Snowflake scan and sort the
+whole table to hand back 500 rows of it, and a preview promises no
+particular rows. What the history mistake got wrong was letting an arbitrary
+slice look complete, so the Data tab says so instead: a capped preview reads
+"Showing 500 of n rows, in no particular order", with n from `SHOW TABLES`'
+`rows` when cached.
+
 > **Counts first was considered and rejected.** For a `SHOW` a count needs
 > `RESULT_SCAN(LAST_QUERY_ID())`, an ordinary `SELECT` — so it needs a
 > warehouse, breaking the rule the whole tree rests on, *and* the `SHOW` has
@@ -1182,7 +1243,7 @@ actually returns rather than a style choice:
   mnemonic switching (hidden from the footer, the pattern sibling project
   snakecam's `JobDetailsScreen` established): `PipeView` and `TaskView`
   (history + definition), `ViewView` (columns + definition), `TableView`
-  (columns + grants), `PipeListView` (status + history),
+  (columns + grants + data), `PipeListView` (status + history),
   `SchemaView`/`DatabaseView` (grants + tags). Switching by mnemonic moves
   focus into the tab just shown: a mnemonic only fires while focus is inside
   the view, and Textual drops focus from a widget it hides instead of moving
@@ -1198,13 +1259,14 @@ actually returns rather than a style choice:
 
 A tab whose scope costs one round trip **per object**, and which is not the
 tab a view opens on, is fetched only while it is shown. Today that is the
-Table view's Grants: the tree cursor passes over tables far more often than
-anyone opens that tab, and each pass would otherwise cost a `SHOW GRANTS` on
-top of the two queries a table already makes. The scope is listed in
-`scopes()` only while the tab is up -- the same conditional `PipeView`
-applies to its history -- so the sweep and update routing ignore it
-otherwise. Switching tables while on Grants keeps the tab, and so fetches
-each table's grants, which is what is on screen.
+Table view's Grants and Data: the tree cursor passes over tables far more
+often than anyone opens either tab, and each pass would otherwise cost a
+`SHOW GRANTS` and a `SELECT` on top of the two queries a table already makes.
+The `SELECT` would also wake a warehouse. The scope is listed in `scopes()`
+only while its tab is up -- the same conditional `PipeView` applies to its
+history -- so the sweep and update routing ignore it otherwise. Switching
+tables while on Grants or Data keeps the tab, and so fetches each table's
+grants or rows, which is what is on screen.
 
 Two of those decisions are worth their reasoning:
 
@@ -1581,8 +1643,8 @@ other job, masking credentials, is not reproduced either: it exists for
 statements that can embed cloud storage secrets (`COPY`, `CREATE STAGE
 CREDENTIALS=(...)`, `PUT`/`GET`), and `queries.py` — the only place any SQL
 text is built at all — never constructs one; every statement is a `SHOW`, an
-`INFORMATION_SCHEMA`/`ACCOUNT_USAGE` `SELECT`, or a bare `USE ROLE`/`USE
-WAREHOUSE`. Reaching for that masking would also mean importing
+`INFORMATION_SCHEMA`/`ACCOUNT_USAGE` `SELECT`, a Data tab's `SELECT * ...
+LIMIT`, or a bare `USE ROLE`/`USE WAREHOUSE`. Reaching for that masking would also mean importing
 `snowflake.connector` from a module `gateway.py` and `pool.py` import
 unconditionally — exactly what the fake-gateway seam exists to keep out of
 every test.
@@ -1610,10 +1672,11 @@ first read, so importing the module touches no disk.
 The ones that matter: **cache TTL** (`0` disables background refreshing),
 **pool size**, **fetch page size**.
 
-Four more exist purely so the measures in "Bounding a result" are adjustable
-rather than baked in: **history row cap** (`HISTORY_MAX_ROWS`), **max pages
-per refresh** (`MAX_PAGES_PER_PASS`), **result row ceiling** (`ROW_CEILING`,
-`0` disables) and **prime chunk threshold** (`PRIME_CHUNK_THRESHOLD`). Their
+Five more exist purely so the measures in "Bounding a result" are adjustable
+rather than baked in: **history row cap** (`HISTORY_MAX_ROWS`), **data
+preview rows** (`DATA_PREVIEW_ROWS`), **max pages per refresh**
+(`MAX_PAGES_PER_PASS`), **result row ceiling** (`ROW_CEILING`, `0` disables)
+and **prime chunk threshold** (`PRIME_CHUNK_THRESHOLD`). Their
 defaults are starting points, not measured optima — an account whose shape
 makes one of them wrong should be able to say so without a code change.
 
@@ -1843,6 +1906,12 @@ DATABASE`/`IN SCHEMA` were exercised at real scale (614 tables, 11 511 columns
 on the sandbox; 6655 columns in one schema alone on production) — see "Column
 cache priming".
 
+**`DATA_PREVIEW` is unverified against a live account.** Which Python types
+the driver returns for `VARIANT`, `BINARY`, `TIMESTAMP_TZ`, `VECTOR` and
+`GEOGRAPHY` decides whether the JSON encoding in `jobs.encode_data_preview`
+keeps their meaning. Anything it does not know is stored as `str()`, so a
+surprise degrades a cell's rendering rather than failing the fetch.
+
 **`SHOW TASKS` is still unverified for `LIMIT`/`FROM`**: no probed account has
 had enough tasks to page through one. It is no longer a hang risk either way
 — if it does ignore both clauses, the cursor-progress guard completes the pass
@@ -1898,7 +1967,7 @@ in `schema.sql` and a `SCHEMA_VERSION` bump, 7. a builder in `gateway/queries.py
 `SnowflakeGateway` protocol, 9. the same on `PoolGateway`, 10. a case in
 `jobs.fetch_page`.
 
-That grew from six scopes to twenty without anyone deciding it should. A
+That grew from six scopes to twenty-one without anyone deciding it should. A
 table-driven scope registry would collapse most of it, but it is a large
 change with no bug behind it, so the list above is the checklist until it
 starts hurting.

@@ -157,6 +157,12 @@ class ScopeType(StrEnum):
     #: like COLUMNS. Needs a running warehouse; degrades blank without one,
     #: same as TAG_REFERENCES.
     COLUMN_TAG_REFERENCES = "column_tag_references"
+    #: Some of one table's rows (Snowsight calls this a data preview),
+    #: sourced by `SELECT * ... LIMIT`. Scoped to (database, schema, table)
+    #: like COLUMNS. Needs a running warehouse. The only scope holding table
+    #: data rather than metadata, which is why `Repository` keeps it in a
+    #: `MemoryDatabase` instead of the cache file.
+    DATA_PREVIEW = "data_preview"
     WAREHOUSES = "warehouses"
     ROLES = "roles"
 
@@ -259,6 +265,8 @@ class Scope:
                 return (
                     f"column_tag_references:{self.database}.{self.schema}.{self.table}"
                 )
+            case ScopeType.DATA_PREVIEW:
+                return f"data_preview:{self.database}.{self.schema}.{self.table}"
             case ScopeType.WAREHOUSES:
                 return "warehouses"
             case ScopeType.ROLES:
@@ -371,6 +379,10 @@ def column_tag_references_scope(database: str, schema: str, table: str) -> Scope
     )
 
 
+def data_preview_scope(database: str, schema: str, table: str) -> Scope:
+    return Scope(ScopeType.DATA_PREVIEW, database=database, schema=schema, table=table)
+
+
 def warehouses_scope() -> Scope:
     return Scope(ScopeType.WAREHOUSES)
 
@@ -432,6 +444,10 @@ def containing_scopes(scope: Scope) -> list[Scope]:
             assert scope.database is not None
             assert scope.schema is not None
             return [objects_scope(ObjectType.TASK, scope.database, scope.schema)]
+        case ScopeType.DATA_PREVIEW:
+            assert scope.database is not None
+            assert scope.schema is not None
+            return [objects_scope(ObjectType.TABLE, scope.database, scope.schema)]
 
 
 #: Refresh cadence, in seconds, for a scope whose own data does not change on

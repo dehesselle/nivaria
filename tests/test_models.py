@@ -10,6 +10,7 @@ from snowcone.models import (
     columns_prime_scope,
     columns_scope,
     containing_scopes,
+    data_preview_scope,
     databases_scope,
     grants_scope,
     materialized_view_stats_scope,
@@ -162,6 +163,10 @@ def test_an_object_level_grants_scope_is_keyed_by_its_type_and_name() -> None:
     assert table.key != grants_scope("MYDB", "PUBLIC").key
 
 
+def test_a_data_preview_scope_is_keyed_by_its_table() -> None:
+    assert data_preview_scope("MYDB", "PUBLIC", "X").key == "data_preview:MYDB.PUBLIC.X"
+
+
 def test_a_schema_level_tag_references_scope_and_a_database_level_one_have_different_keys() -> (
     None
 ):
@@ -231,6 +236,10 @@ def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
         (
             task_activity_history_scope("MYDB", "S", "T"),
             [objects_scope(ObjectType.TASK, "MYDB", "S")],
+        ),
+        (
+            data_preview_scope("MYDB", "S", "T"),
+            [objects_scope(ObjectType.TABLE, "MYDB", "S")],
         ),
     ],
     ids=str,

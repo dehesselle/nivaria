@@ -28,7 +28,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from snowcone.cache.db import Database
+from snowcone.cache.db import Database, MemoryDatabase
 from snowcone.models import (
     CacheState,
     Column,
@@ -439,6 +439,13 @@ _COLUMN_TAG_REFERENCES = TableSpec(
     order_by=("COLUMN_NAME", "TAG_NAME", "TAG_VALUE"),
 )
 
+_DATA_PREVIEW = TableSpec(
+    name="data_preview",
+    columns=("_row_number", "_values"),
+    key=("_scope", "_row_number"),
+    order_by=("_row_number",),
+)
+
 
 def spec_for(scope: Scope) -> TableSpec:
     match scope.type:
@@ -475,6 +482,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _TAG_REFERENCES
         case ScopeType.COLUMN_TAG_REFERENCES:
             return _COLUMN_TAG_REFERENCES
+        case ScopeType.DATA_PREVIEW:
+            return _DATA_PREVIEW
         case ScopeType.WAREHOUSES:
             return _WAREHOUSES
         case ScopeType.ROLES:
@@ -550,11 +559,26 @@ def _quote(name: str) -> str:
 class Repository:
     def __init__(self, database: Database) -> None:
         self._db = database
+        #: Where DATA_PREVIEW scopes live instead of the file: table data,
+        #: which must never reach the disk (see `MemoryDatabase`). One per
+        #: repository, so a role switch starts with no previews, the same as
+        #: it starts on another file.
+        self._previews = MemoryDatabase()
+
+    def _store(self, scope: Scope) -> Database | MemoryDatabase:
+        """Which database holds `scope`'s rows and its ledger entry.
+
+        Everything below that takes a scope goes through this, so a caller
+        never needs to know a preview is not in the file.
+        """
+        if scope.type is ScopeType.DATA_PREVIEW:
+            return self._previews
+        return self._db
 
     # ---------------------------------------------------------------- reads
 
     def entry(self, scope: Scope) -> Entry:
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             return self._entry(connection, scope)
 
     @staticmethod
@@ -586,11 +610,11 @@ class Repository:
 
     def raw_rows(self, scope: Scope) -> list[dict[str, Any]]:
         """Every mirrored column of a scope, as stored."""
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             return [dict(row) for row in self._select(connection, scope)]
 
     def _cached(self, scope: Scope, build: Callable[[sqlite3.Row], Any]) -> Cached[Any]:
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             entry = self._entry(connection, scope)
             rows = self._select(connection, scope)
         return Cached(rows=[build(row) for row in rows], entry=entry)
@@ -827,7 +851,7 @@ class Repository:
         """The count behind a collapsed tree label, e.g. `Schemas (40)`."""
         spec = spec_for(scope)
         statement = f"SELECT COUNT(*) AS n FROM {spec.name} WHERE _scope = ?"
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             return int(connection.execute(statement, (scope.key,)).fetchone()["n"])
 
     def stale_scopes(self, ttl: float, among: Iterable[Scope]) -> list[Scope]:
@@ -842,8 +866,10 @@ class Repository:
             return []
         now = time.time()
         stale: list[Scope] = []
-        with self._db.connect() as connection:
+        with self._db.connect() as cached, self._previews.connect() as previews:
             for scope in among:
+                store = self._store(scope)
+                connection = previews if store is self._previews else cached
                 entry = self._entry(connection, scope)
                 # EMPTY short-circuits is_stale: a scope claimed by a pass
                 # that has not finished yet carries the previous pass's
@@ -863,7 +889,7 @@ class Repository:
         this pass finishes, the age the status bar shows is still the age of
         the rows actually on screen.
         """
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             entry = self._entry(connection, scope)
             generation = entry.generation + 1
             connection.execute(
@@ -904,7 +930,7 @@ class Repository:
         """
         spec = spec_for(scope)
         now = time.time()
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             if self._entry(connection, scope).generation != generation:
                 return False
             if rows:
@@ -965,7 +991,7 @@ class Repository:
         now = time.time()
         sweep = f"DELETE FROM {spec.name} WHERE _scope = ? AND _generation < ?"
         count_rows = f"SELECT COUNT(*) AS n FROM {spec.name} WHERE _scope = ?"
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             if self._entry(connection, scope).generation != generation:
                 return False
             connection.execute(sweep, (scope.key, generation))
@@ -1012,7 +1038,7 @@ class Repository:
         Stale rows stay visible: showing yesterday's tables beats showing an
         empty schema because the warehouse happened to be unreachable.
         """
-        with self._db.connect() as connection:
+        with self._store(scope).connect() as connection:
             if self._entry(connection, scope).generation != generation:
                 return False
             connection.execute(

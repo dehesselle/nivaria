@@ -162,6 +162,16 @@ class SnowflakeGateway(Protocol):
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
+    def select_data_preview(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        max_rows: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
+
     def pipe_activity(
         self,
         database: str,
@@ -245,9 +255,9 @@ class PoolGateway:
         # checkout-time is_closed() check cannot see: a session Snowflake
         # dropped server-side, which only surfaces once actually queried.
         # Safe to retry blindly -- every statement here is a read-only SHOW or
-        # INFORMATION_SCHEMA SELECT -- so a genuine (non-staleness) failure
-        # just fails identically the second time, at the cost of one extra
-        # round trip on an already-rare path.
+        # SELECT -- so a genuine (non-staleness) failure just fails
+        # identically the second time, at the cost of one extra round trip on
+        # an already-rare path.
         try:
             return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
         except ResultTooLargeError:
@@ -513,6 +523,20 @@ class PoolGateway:
         return self._fetch(
             queries.tag_references_all_columns(database),
             (f"{database}.{schema}.{table}",),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def select_data_preview(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        max_rows: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        return self._fetch(
+            queries.data_preview(database, schema, table, max_rows),
             allow_reconnect=allow_reconnect,
         )
 

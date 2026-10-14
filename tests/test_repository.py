@@ -10,6 +10,7 @@ from snowcone.models import (
     CacheState,
     ObjectType,
     columns_scope,
+    data_preview_scope,
     databases_scope,
     objects_scope,
     pipe_activity_history_scope,
@@ -1169,3 +1170,88 @@ def test_a_new_pass_clears_a_previous_truncation(repo) -> None:
     repo.write_page(scope, generation, [{"name": "ACME"}], None)
     repo.finish_pass(scope, generation)
     assert not repo.entry(scope).truncated
+
+
+def test_a_data_preview_reads_back_in_row_order_and_a_shorter_pass_sweeps(
+    repo,
+) -> None:
+    """Rows are keyed by position, so a second, shorter pass overwrites the
+    positions it has and the sweep drops the rest."""
+    scope = data_preview_scope("MYDB", "PUBLIC", "ORDERS")
+    load(
+        repo,
+        scope,
+        [{"_row_number": n, "_values": f'{{"ID": {n}}}'} for n in (2, 0, 1)],
+    )
+    assert [r["_values"] for r in repo.raw_rows(scope)] == [
+        '{"ID": 0}',
+        '{"ID": 1}',
+        '{"ID": 2}',
+    ]
+    load(repo, scope, [{"_row_number": 0, "_values": '{"ID": 9}'}])
+    assert [r["_values"] for r in repo.raw_rows(scope)] == ['{"ID": 9}']
+
+
+def _preview_rows(*ids: int) -> list[dict]:
+    return [{"_row_number": n, "_values": f'{{"ID": {i}}}'} for n, i in enumerate(ids)]
+
+
+def test_a_data_preview_never_reaches_the_cache_file(tmp_path) -> None:
+    """Table data, possibly personal data: neither its rows nor its ledger
+    entry may be written to disk, while every other scope still is."""
+    import sqlite3
+
+    path = tmp_path / "cache.db"
+    database = Database(path)
+    assert database.prepare()
+    repo = Repository(database)
+    preview = data_preview_scope("MYDB", "PUBLIC", "ORDERS")
+    load(repo, preview, _preview_rows(1, 2))
+    load(repo, databases_scope(), db_rows("MYDB"))
+    assert len(repo.raw_rows(preview)) == 2
+    assert repo.entry(preview).state is CacheState.COMPLETE
+
+    connection = sqlite3.connect(path)
+    try:
+        tables = [r[0] for r in connection.execute("SELECT name FROM sqlite_master")]
+        scopes = [r[0] for r in connection.execute("SELECT scope FROM cache_entry")]
+    finally:
+        connection.close()
+    assert "data_preview" not in tables
+    assert scopes == ["databases"]
+
+
+def test_a_new_repository_on_the_same_file_starts_with_no_previews(tmp_path) -> None:
+    """What a reconnect or a role switch back to this file opens."""
+    database = Database(tmp_path / "cache.db")
+    assert database.prepare()
+    preview = data_preview_scope("MYDB", "PUBLIC", "ORDERS")
+    load(Repository(database), preview, _preview_rows(1))
+    again = Repository(database)
+    assert again.raw_rows(preview) == []
+    assert again.entry(preview).state is CacheState.EMPTY
+
+
+def test_a_preview_written_on_a_worker_thread_reads_back_on_another(repo) -> None:
+    """The memory store holds one connection, shared by the fetch workers and
+    the event loop -- sqlite refuses that unless told not to check."""
+    import threading
+
+    preview = data_preview_scope("MYDB", "PUBLIC", "ORDERS")
+    worker = threading.Thread(target=load, args=(repo, preview, _preview_rows(7)))
+    worker.start()
+    worker.join()
+    assert [r["_values"] for r in repo.raw_rows(preview)] == ['{"ID": 7}']
+
+
+def test_the_sweep_judges_previews_and_cached_scopes_from_their_own_stores(
+    repo,
+) -> None:
+    preview = data_preview_scope("MYDB", "PUBLIC", "ORDERS")
+    fresh_preview = data_preview_scope("MYDB", "PUBLIC", "CUSTOMERS")
+    load(repo, databases_scope(), db_rows("MYDB"))
+    load(repo, fresh_preview, _preview_rows(1))
+    stale = repo.stale_scopes(
+        3600, [databases_scope(), preview, fresh_preview, schemas_scope("MYDB")]
+    )
+    assert stale == [preview, schemas_scope("MYDB")]

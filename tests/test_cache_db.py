@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 
-from snowcone.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database
+import pytest
+
+from snowcone.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database, MemoryDatabase
 
 #: The SHA-256 of the schema scripts as of SCHEMA_VERSION 1. Change it only
 #: together with a bump of SCHEMA_VERSION.
@@ -144,3 +146,34 @@ def test_every_mirror_table_exists(tmp_path) -> None:
         "information_schema_copy_history",
         "cache_entry",
     } <= names
+
+
+def test_a_memory_database_rolls_back_a_failed_unit_of_work() -> None:
+    """Its one connection outlives every unit of work, so a failure must not
+    leave half a write behind for the next one to commit."""
+
+    database = MemoryDatabase()
+    with pytest.raises(RuntimeError), database.connect() as connection:
+        connection.execute(
+            "INSERT INTO cache_entry (scope, state, generation) VALUES (?, ?, ?)",
+            ("data_preview:MYDB.PUBLIC.ORDERS", "partial", 1),
+        )
+        raise RuntimeError("worker died")
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM cache_entry").fetchone()[0] == 0
+
+
+def test_a_memory_database_keeps_its_rows_between_units_of_work() -> None:
+    """The reason it holds its connection: a closed in-memory connection
+    takes its database with it."""
+
+    database = MemoryDatabase()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO data_preview (_row_number, _values, _scope, _generation,"
+            " _fetched_at) VALUES (0, '{}', 'data_preview:MYDB.PUBLIC.ORDERS', 1, 0)"
+        )
+    with database.connect() as connection:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM data_preview").fetchone()[0] == 1
+        )

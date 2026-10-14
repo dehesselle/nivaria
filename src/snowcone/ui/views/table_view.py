@@ -1,17 +1,19 @@
-"""Detail view for tables: their columns and their grants.
+"""Detail view for tables: their columns, their grants and some of their rows.
 
 Also hosts `ColumnsView`, the shared column-list body -- `view_view.py`
 reuses it directly for its own Columns tab, rather than duplicating this
 DataTable/scope/update_content logic for a view's columns.
 
-The Grants tab is fetched only while it is shown. `SHOW GRANTS ON TABLE`
-has no schema-wide form to prime from, so every table is its own round
-trip, and opening a table already costs two (its columns and their tags).
-Fetching grants on open as well would add a third to every table the tree
-cursor passes over, for a tab most visits never look at."""
+The Grants and Data tabs are fetched only while they are shown. Neither
+`SHOW GRANTS ON TABLE` nor a table's rows have a schema-wide form to prime
+from, so every table is its own round trip, and opening a table already
+costs two (its columns and their tags). Fetching either on open as well
+would add to every table the tree cursor passes over, for tabs most visits
+never look at. Data also needs a warehouse, and wakes it."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any, ClassVar
 
@@ -19,7 +21,8 @@ from rich.text import Text
 from tcoda.widgets import DataTable
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.widgets import TabbedContent, TabPane
+from textual.widgets import DataTable as TextualDataTable
+from textual.widgets import Static, TabbedContent, TabPane
 
 from snowcone.cache.repository import Repository
 from snowcone.models import (
@@ -29,6 +32,7 @@ from snowcone.models import (
     Scope,
     column_tag_references_scope,
     columns_scope,
+    data_preview_scope,
     object_grants_scope,
 )
 from snowcone.settings import CACHE_TTL, config
@@ -39,6 +43,31 @@ from snowcone.ui.views.tables import PanelledTable, TabbedView
 #: Ordering the table falls back to, and returns to whenever this (reused)
 #: view is pointed at a different object -- see `show`.
 _DEFAULT_SORT = "ordinal"
+
+#: The Data tab's grid, and the line above it saying how much of the table
+#: it is.
+DATA_TABLE = "detail-data"
+DATA_NOTE = "detail-data-note"
+
+#: Longest a Data cell is shown, so one long VARCHAR or VARIANT cannot widen
+#: its column past the screen.
+_CELL_WIDTH = 40
+
+
+def _data_cell(value: Any) -> Text:
+    """One value from a cached preview row, as its cell shows it.
+
+    NULL is spelled out and dimmed: a blank cell would read the same as an
+    empty string. Anything that is not a string is shown as JSON, so a
+    BOOLEAN reads `true` rather than Python's `True`.
+    """
+    if value is None:
+        return Text("NULL", style="dim")
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    text = " ".join(text.splitlines())
+    if len(text) > _CELL_WIDTH:
+        text = text[: _CELL_WIDTH - 1] + "\u2026"
+    return Text(text)
 
 
 class ColumnsView(ObjectView):
@@ -213,14 +242,16 @@ class ColumnsView(ObjectView):
 
 @register_view
 class TableView(TabbedView, ColumnsView):
-    """Columns and Grants, mnemonic switchable (`c`/`g`, hidden from the
-    footer), the same pattern `ViewView` uses for Columns and Definition."""
+    """Columns, Grants and Data, mnemonic switchable (`c`/`g`/`d`, hidden
+    from the footer), the same pattern `ViewView` uses for Columns and
+    Definition."""
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TABLE
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("c", "show_tab('columns')", "Columns", show=False),
         Binding("g", "show_tab('grants')", "Grants", show=False),
+        Binding("d", "show_tab('data')", "Data", show=False),
     ]
 
     #: Built in `compose`.
@@ -233,35 +264,95 @@ class TableView(TabbedView, ColumnsView):
             with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
                 self.grants_panel = compose_grants()
                 yield self.grants_panel
+            with TabPane("[$accent bold]D[/]ata", id="tab-data"):
+                yield Static("", id=DATA_NOTE)
+                data: TextualDataTable[Text] = TextualDataTable(
+                    id=DATA_TABLE, cursor_type="row"
+                )
+                data.zebra_stripes = True
+                yield data
 
     def grants_scope(self) -> Scope:
         return object_grants_scope(self.ref)
 
-    def _grants_shown(self) -> bool:
-        return self.is_mounted and self.query_one(TabbedContent).active == "tab-grants"
+    def data_scope(self) -> Scope:
+        return data_preview_scope(self.ref.database, self.ref.schema, self.ref.name)
+
+    def _tab_shown(self, tab: str) -> bool:
+        return self.is_mounted and self.query_one(TabbedContent).active == tab
 
     def scopes(self) -> list[Scope]:
-        # Only while the tab is up -- see the module docstring. Listing it
+        # Only while their tab is up -- see the module docstring. Listing one
         # otherwise would have the staleness sweep (which watches this) fetch
-        # grants for a tab nobody is looking at, and route their updates
-        # into a repaint of it.
+        # it for a tab nobody is looking at, and route its updates into a
+        # repaint of it.
         scopes = super().scopes()
-        if self._grants_shown():
+        if self._tab_shown("tab-grants"):
             scopes.append(self.grants_scope())
+        if self._tab_shown("tab-data"):
+            scopes.append(self.data_scope())
         return scopes
 
     def update_content(self) -> None:
         super().update_content()
-        if self._grants_shown():
+        if self._tab_shown("tab-grants"):
             self._update_grants()
+        if self._tab_shown("tab-data"):
+            self._update_data()
 
     def _update_grants(self) -> None:
         scope = self.grants_scope()
         self.ensure(scope, config.get(CACHE_TTL))
         paint_grants(self, self.grants_panel, self.repo.raw_rows(scope))
 
+    def _update_data(self) -> None:
+        scope = self.data_scope()
+        self.ensure(scope, config.get(CACHE_TTL))
+        rows = [json.loads(r["_values"]) for r in self.repo.raw_rows(scope)]
+        table = self.query_one(f"#{DATA_TABLE}", TextualDataTable)
+        with self.keeping_cursor(table):
+            # Columns too, not only rows: the next table has its own.
+            table.clear(columns=True)
+            # Read off the first row, which keeps SELECT *'s column order. The
+            # column list's cache could give an empty table a header too, but
+            # it can be older than these rows and name other columns.
+            names = list(rows[0]) if rows else []
+            for name in names:
+                table.add_column(Text(name))
+            for number, row in enumerate(rows):
+                table.add_row(
+                    *(_data_cell(row.get(name)) for name in names), key=str(number)
+                )
+        self._sync_data_note(len(rows))
+
+    def _sync_data_note(self, count: int) -> None:
+        """Say how much of the table the grid is, or why it is empty.
+
+        A capped preview is the normal case, not a warning, but it still
+        says so: 500 rows look the same whether they are the whole table or
+        a slice of it, and LIMIT without ORDER BY picks no particular slice.
+        """
+        note = self.query_one(f"#{DATA_NOTE}", Static)
+        entry = self.repo.entry(self.data_scope())
+        error = entry.state is CacheState.ERROR and entry.fetched_at is None
+        empty = entry.state is CacheState.COMPLETE and count == 0
+        capped = entry.truncated and count > 0
+        if error:
+            note.update(Text(f"Could not fetch: {entry.error}"))
+        elif empty:
+            note.update(Text("No rows in this table."))
+        elif capped:
+            detail = self.repo.object_detail(self.ref) or {}
+            total = detail.get("rows")
+            of = f" of {total:,}" if isinstance(total, int) and total > count else ""
+            note.update(Text(f"Showing {count:,}{of} rows, in no particular order."))
+        note.set_class(error, "-error")
+        note.display = error or empty or capped
+
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
     ) -> None:
         if event.pane.id == "tab-grants":
             self._update_grants()
+        elif event.pane.id == "tab-data":
+            self._update_data()

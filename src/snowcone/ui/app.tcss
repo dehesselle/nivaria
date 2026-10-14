@@ -167,7 +167,8 @@ ClosingDialog > #dialog {
 }
 
 #detail-history,
-#detail-grants {
+#detail-grants,
+#detail-data {
     height: 1fr;
 }
 
@@ -211,7 +212,8 @@ ClosingDialog > #dialog {
    #connect-status already use. */
 #detail-list-note,
 #detail-status-note,
-#detail-history-note {
+#detail-history-note,
+#detail-data-note {
     height: auto;
     margin-bottom: 1;
     background: $foreground 8%;
@@ -225,7 +227,8 @@ ClosingDialog > #dialog {
 
 #detail-list-note.-error,
 #detail-status-note.-error,
-#detail-history-note.-error {
+#detail-history-note.-error,
+#detail-data-note.-error {
     color: $text-error;
 }
 

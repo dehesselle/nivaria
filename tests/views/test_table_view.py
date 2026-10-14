@@ -1,4 +1,4 @@
-"""TableView: a table's column list and its grants."""
+"""TableView: a table's column list, its grants and its Data tab."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from textual.widgets import DataTable, Static, TabbedContent
 from snowcone.models import (
     column_tag_references_scope,
     columns_scope,
+    data_preview_scope,
     object_grants_scope,
 )
 from snowcone.ui.widgets.detail_pane import DetailPane
@@ -16,6 +17,7 @@ from tests.views.harness import (
     load,
     put_column_tag,
     put_columns,
+    put_data_preview,
     put_object_grant,
     put_table,
 )
@@ -671,3 +673,148 @@ async def test_a_grants_update_repaints_only_while_the_tab_is_shown(repo) -> Non
         pane.cache_updated(object_grants_scope(ref))
         await pilot.pause()
         assert grants.row_count == 2
+
+
+_DATA_KEY = "data_preview:MYDB.PUBLIC.ORDERS"
+
+
+async def _show_data(app: Harness, pilot, ref):
+    pane = app.query_one(DetailPane)
+    view = pane.show(ref)
+    await pilot.pause()
+    view.action_show_tab("data")
+    await pilot.pause()
+    return pane, view
+
+
+def _header(table: DataTable) -> list[str]:
+    return [column.label.plain for column in table.ordered_columns]
+
+
+async def test_the_data_tab_is_not_fetched_until_it_is_shown(repo) -> None:
+    """A SELECT per table, on a warehouse -- passing over tables in the tree
+    must not pay it for a tab nobody opened."""
+    ref = put_table(repo, "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        assert _DATA_KEY not in app.needed
+        assert data_preview_scope("MYDB", "PUBLIC", "ORDERS") not in view.scopes()
+
+
+async def test_the_d_mnemonic_shows_the_data_tab_and_asks_for_its_rows(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        pane.query_one("#detail-columns", DataTable).focus()
+        await pilot.press("d")
+        await pilot.pause()
+        assert view.query_one(TabbedContent).active == "tab-data"
+        assert _DATA_KEY in app.needed
+        assert data_preview_scope("MYDB", "PUBLIC", "ORDERS") in view.scopes()
+
+
+async def test_the_data_tab_takes_its_header_from_the_rows_in_select_order(
+    repo,
+) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_data_preview(
+        repo,
+        "ORDERS",
+        {"ZED": 1, "ALPHA": "a", "OK": True},
+        {"ZED": 2, "ALPHA": None, "OK": False},
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, _ = await _show_data(app, pilot, ref)
+        table = pane.query_one("#detail-data", DataTable)
+        assert _header(table) == ["ZED", "ALPHA", "OK"]
+        assert table.row_count == 2
+        assert [cell.plain for cell in table.get_row_at(0)] == ["1", "a", "true"]
+        null = table.get_cell_at((1, 1))
+        assert null.plain == "NULL"
+        assert "dim" in str(null.style)
+
+
+async def test_a_long_or_multiline_value_is_cut_to_one_short_line(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_data_preview(repo, "ORDERS", {"NOTE": "first\nsecond " + "x" * 100})
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, _ = await _show_data(app, pilot, ref)
+        cell = pane.query_one("#detail-data", DataTable).get_cell_at((0, 0)).plain
+        assert cell.startswith("first second x")
+        assert cell.endswith("…")
+        assert len(cell) == 40
+
+
+async def test_a_capped_preview_says_it_is_some_of_the_tables_rows(repo) -> None:
+    """500 rows look the same whether they are the whole table or a slice of
+    it, and LIMIT without ORDER BY picks no particular slice."""
+    ref = put_table(repo, "ORDERS", rows=1234)
+    put_data_preview(repo, "ORDERS", {"ID": 1}, {"ID": 2}, truncated=True)
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, _ = await _show_data(app, pilot, ref)
+        note = pane.query_one("#detail-data-note", Static)
+        assert note.display
+        assert str(note.render()) == "Showing 2 of 1,234 rows, in no particular order."
+
+
+async def test_a_whole_table_preview_needs_no_note(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_data_preview(repo, "ORDERS", {"ID": 1})
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, _ = await _show_data(app, pilot, ref)
+        assert not pane.query_one("#detail-data-note", Static).display
+
+
+async def test_an_empty_table_says_so(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_data_preview(repo, "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, _ = await _show_data(app, pilot, ref)
+        note = pane.query_one("#detail-data-note", Static)
+        assert note.display
+        assert str(note.render()) == "No rows in this table."
+        assert pane.query_one("#detail-data", DataTable).columns == {}
+
+
+async def test_a_preview_that_could_not_be_fetched_says_why(repo) -> None:
+    """A SELECT needs a warehouse, unlike everything else the view shows."""
+    ref = put_table(repo, "ORDERS")
+    scope = data_preview_scope("MYDB", "PUBLIC", "ORDERS")
+    generation = repo.begin_pass(scope)
+    repo.fail_pass(scope, generation, "No active warehouse selected")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, _ = await _show_data(app, pilot, ref)
+        note = pane.query_one("#detail-data-note", Static)
+        assert note.display
+        assert note.has_class("-error")
+        assert "No active warehouse selected" in str(note.render())
+
+
+async def test_moving_to_another_table_on_the_data_tab_shows_its_own_columns(
+    repo,
+) -> None:
+    ref = put_table(repo, "ORDERS")
+    other = put_table(repo, "CUSTOMERS")
+    put_data_preview(repo, "ORDERS", {"ID": 1, "TOTAL": 2})
+    put_data_preview(repo, "CUSTOMERS", {"NAME": "Ada"})
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, view = await _show_data(app, pilot, ref)
+        table = pane.query_one("#detail-data", DataTable)
+        assert _header(table) == ["ID", "TOTAL"]
+        pane.show(other)
+        await pilot.pause()
+        assert view.query_one(TabbedContent).active == "tab-data"
+        assert _header(table) == ["NAME"]

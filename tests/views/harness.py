@@ -13,6 +13,7 @@ from snowcone.models import (
     ObjectType,
     column_tag_references_scope,
     columns_scope,
+    data_preview_scope,
     grants_scope,
     materialized_view_stats_scope,
     object_grants_scope,
@@ -27,6 +28,7 @@ from snowcone.models import (
     task_history_scope,
     view_stats_scope,
 )
+from snowcone.service.jobs import encode_data_preview
 from snowcone.ui.messages import ObjectSelected, ScopeNeeded
 from snowcone.ui.widgets.detail_pane import DetailPane
 
@@ -481,4 +483,17 @@ def put_column_tag(repo: Repository, table: str, column: str, **extra) -> None:
             *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
             row,
         ],
+    )
+
+
+def put_data_preview(
+    repo: Repository, table: str, *rows: dict, truncated: bool = False
+) -> None:
+    """Seeds a table's Data tab in MYDB.PUBLIC, encoded the way the fetch
+    layer stores it -- one JSON object per row."""
+    load(
+        repo,
+        data_preview_scope("MYDB", "PUBLIC", table),
+        encode_data_preview(list(rows)),
+        truncated=truncated,
     )

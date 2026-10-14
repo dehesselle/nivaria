@@ -19,6 +19,7 @@ configure(APP_NAME)
 
 __all__ = [
     "CACHE_TTL",
+    "DATA_PREVIEW_ROWS",
     "HISTORY_MAX_ROWS",
     "MAX_PAGES_PER_PASS",
     "PAGE_SIZE",
@@ -136,6 +137,18 @@ HISTORY_MAX_ROWS = Setting(
     ),
     group="Cache",
     default=5000,
+)
+
+DATA_PREVIEW_ROWS = Setting(
+    key="data_preview_rows",
+    label="data preview rows",
+    description=(
+        "How many rows a table's Data tab fetches. They are whichever rows "
+        "Snowflake returns first, in no particular order: sorting the whole "
+        "table to choose them would cost a full scan. Needs a warehouse."
+    ),
+    group="Cache",
+    default=500,
 )
 
 MAX_PAGES_PER_PASS = Setting(

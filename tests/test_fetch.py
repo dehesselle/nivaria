@@ -1896,3 +1896,66 @@ def test_the_history_row_cap_reaches_the_statement(repo) -> None:
     assert gateway.calls == [
         ("task_activity_history", ("MYDB", "PUBLIC", "MY_TASK", 90, 42))
     ]
+
+
+def test_a_data_preview_is_folded_into_one_json_object_per_row() -> None:
+    """Every table has its own columns, so each row is stored whole, keyed by
+    column name in SELECT * order. What JSON has no type for keeps its
+    meaning: a NUMBER(38,x) its digits, a BINARY Snowflake's hex."""
+    import datetime
+    import json
+    from decimal import Decimal
+
+    from snowcone.models import data_preview_scope
+
+    gateway = FakeGateway(
+        data_preview={
+            ("MYDB", "PUBLIC", "ORDERS"): [
+                {
+                    "ID": 1,
+                    "TOTAL": Decimal("12345678901234567890.0123456789"),
+                    "AT": datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC),
+                    "RAW": b"\x01\xab",
+                    "NOTE": None,
+                },
+            ]
+        }
+    )
+    page = fetch_page(gateway, data_preview_scope("MYDB", "PUBLIC", "ORDERS"), None, 1)
+    assert [row["_row_number"] for row in page.rows] == [0]
+    values = json.loads(page.rows[0]["_values"])
+    assert list(values) == ["ID", "TOTAL", "AT", "RAW", "NOTE"]
+    assert values == {
+        "ID": 1,
+        "TOTAL": "12345678901234567890.0123456789",
+        "AT": "2026-01-02T03:04:05+00:00",
+        "RAW": "01AB",
+        "NOTE": None,
+    }
+
+
+def test_a_data_preview_at_its_row_limit_is_truncated() -> None:
+    from snowcone.models import data_preview_scope
+    from snowcone.settings import DATA_PREVIEW_ROWS, config
+
+    config.set(DATA_PREVIEW_ROWS, 3)
+    gateway = FakeGateway(
+        data_preview={("MYDB", "PUBLIC", "ORDERS"): [{"ID": i} for i in range(10)]}
+    )
+    page = fetch_page(gateway, data_preview_scope("MYDB", "PUBLIC", "ORDERS"), None, 1)
+    assert len(page.rows) == 3
+    assert page.truncated
+    assert gateway.calls == [("select_data_preview", ("MYDB", "PUBLIC", "ORDERS", 3))]
+
+
+def test_a_data_preview_inside_its_row_limit_is_the_whole_table() -> None:
+    from snowcone.models import data_preview_scope
+    from snowcone.settings import DATA_PREVIEW_ROWS, config
+
+    config.set(DATA_PREVIEW_ROWS, 3)
+    gateway = FakeGateway(
+        data_preview={("MYDB", "PUBLIC", "ORDERS"): [{"ID": 1}, {"ID": 2}]}
+    )
+    page = fetch_page(gateway, data_preview_scope("MYDB", "PUBLIC", "ORDERS"), None, 1)
+    assert len(page.rows) == 2
+    assert not page.truncated

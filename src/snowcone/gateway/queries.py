@@ -262,6 +262,19 @@ def show_grants_on_object(
     return f"SHOW GRANTS ON {object_type.value} {target}"
 
 
+def data_preview(database: str, schema: str, table: str, max_rows: int) -> str:
+    """Some of one table's rows, for its Data tab.
+
+    No ORDER BY, so which rows come back is up to Snowflake. That is the
+    mistake `task_history` documents for a history, where an arbitrary slice
+    passes for the newest rows. Here no order is promised, and the Data tab
+    says so. Ordering would make Snowflake scan and sort the whole table to
+    hand back `max_rows` of it.
+    """
+    target = ".".join(quote_identifier(part) for part in (database, schema, table))
+    return f"SELECT * FROM {target} LIMIT {int(max_rows)}"
+
+
 def tag_references(database: str) -> str:
     """Tags applied to one schema or one database.
 

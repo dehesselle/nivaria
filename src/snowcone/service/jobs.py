@@ -14,14 +14,18 @@ single decision buys four properties at once:
 
 from __future__ import annotations
 
+import datetime
 import itertools
+import json
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import IntEnum
 from typing import Any
 
 from snowcone.gateway.gateway import SnowflakeGateway
 from snowcone.models import Scope, ScopeType
 from snowcone.settings import (
+    DATA_PREVIEW_ROWS,
     HISTORY_MAX_ROWS,
     PIPE_HISTORY_FETCH_DAYS,
     PRIME_CHUNK_THRESHOLD,
@@ -370,6 +374,19 @@ def fetch_page(
                     allow_reconnect=allow_reconnect,
                 ),
             )
+        case ScopeType.DATA_PREVIEW:
+            assert scope.database is not None
+            assert scope.schema is not None
+            assert scope.table is not None
+            max_rows = config.get(DATA_PREVIEW_ROWS)
+            rows = gateway.select_data_preview(
+                scope.database,
+                scope.schema,
+                scope.table,
+                max_rows,
+                allow_reconnect=allow_reconnect,
+            )
+            return _capped(encode_data_preview(rows), max_rows)
         case ScopeType.WAREHOUSES:
             # Small, flat, unpaged lists -- see queries.show_warehouses.
             return Page(gateway.show_warehouses(allow_reconnect=allow_reconnect))
@@ -401,6 +418,38 @@ def _capped(rows: list[dict[str, Any]], max_rows: int) -> Page:
     length; understating it silently presents a partial history as whole.
     """
     return Page(rows, truncated=len(rows) >= max_rows)
+
+
+def encode_data_preview(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fold each table row into the generic `data_preview` mirror shape.
+
+    Every table has its own columns, so there is no mirror table to map them
+    onto. Each row becomes one JSON object instead, and a dict keeps
+    `SELECT *`'s column order, which the Data tab's header is read from.
+    """
+    return [
+        {
+            "_row_number": number,
+            "_values": json.dumps(row, default=_jsonable, ensure_ascii=False),
+        }
+        for number, row in enumerate(rows)
+    ]
+
+
+def _jsonable(value: Any) -> Any:
+    """What the driver returns that JSON has no type for.
+
+    A Decimal becomes a string rather than a float, which would lose a
+    NUMBER(38,x)'s digits. Bytes become upper-case hex, Snowflake's own
+    default BINARY_OUTPUT_FORMAT.
+    """
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return value.hex().upper()
+    return str(value)
 
 
 #: Pushed once per worker to end its loop. seq=-1 with the lowest priority

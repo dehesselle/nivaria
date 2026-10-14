@@ -141,6 +141,7 @@ class FakeGateway:
         tag_references_schema: dict[tuple[str, str], list[Row]] | None = None,
         tag_references_database: dict[str, list[Row]] | None = None,
         tag_references_all_columns: dict[tuple[str, str, str], list[Row]] | None = None,
+        data_preview: dict[tuple[str, str, str], list[Row]] | None = None,
     ) -> None:
         self.databases = databases or []
         self.schemas = schemas or {}
@@ -173,6 +174,8 @@ class FakeGateway:
         self._tag_references_database = tag_references_database or {}
         #: Keyed by (database, schema, table).
         self._tag_references_all_columns = tag_references_all_columns or {}
+        #: Keyed by (database, schema, table).
+        self._data_preview = data_preview or {}
         #: Flip to simulate a warehouse-dependent query failing, e.g. "no
         #: active warehouse" -- table_stats is the first fetch that needs one.
         self.raise_on_table_stats = False
@@ -203,6 +206,9 @@ class FakeGateway:
         #: Flip to simulate tag_references_all_columns' SELECT failing, same
         #: as raise_on_tag_references above.
         self.raise_on_tag_references_all_columns = False
+        #: Flip to simulate select_data_preview failing for lack of an active
+        #: warehouse, same as raise_on_tag_references above.
+        self.raise_on_data_preview = False
         #: Object types for which this fake reproduces Snowflake's own
         #: LIMIT/FROM no-op: SHOW returns every row in the schema or
         #: database whatever the caller asked for. Empty by default, so
@@ -598,3 +604,18 @@ class FakeGateway:
         if self.raise_on_tag_references_all_columns:
             raise RuntimeError("No active warehouse selected in the current session")
         return list(self._tag_references_all_columns.get((database, schema, table), []))
+
+    def select_data_preview(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        max_rows: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        self.calls.append(("select_data_preview", (database, schema, table, max_rows)))
+        self._check_schema(database, schema)
+        if self.raise_on_data_preview:
+            raise RuntimeError("No active warehouse selected in the current session")
+        return list(self._data_preview.get((database, schema, table), []))[:max_rows]
