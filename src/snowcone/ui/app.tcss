@@ -196,37 +196,37 @@ ClosingDialog > #dialog {
     color: $error;
 }
 
-#detail-list-note,
-#detail-status-note {
-    height: auto;
-    padding: 0 1;
-    color: $text-muted;
-}
+/* A banner about the fetch behind the table below it -- capped, empty or
+   errored. A tinted strip rather than inverted, which would read as the
+   table's row cursor one line below. A share of $foreground rather than a
+   panel colour, so it lifts off the background in light and dark themes
+   alike -- $boost, the stock version of this, is too faint to see on a
+   light one. The gap below keeps it from running into the table header's
+   own tint. No padding, so the text starts in the same column as the
+   header's first label.
 
-/* Only the error case departs from the neutral default: a category that
+   The unmarked default is the empty case: a category or history window that
    was fetched and came back empty is a settled, unremarkable fact, not a
    warning -- same $text-muted reasoning .detail-placeholder and
    #connect-status already use. */
-#detail-list-note.-error,
-#detail-status-note.-error {
-    color: $error;
-}
-
-/* Unmarked default: a history window that came back empty is a settled,
-   unremarkable fact, same $text-muted reasoning as #detail-list-note. */
+#detail-list-note,
+#detail-status-note,
 #detail-history-note {
     height: auto;
-    padding: 0 1;
+    margin-bottom: 1;
+    background: $foreground 8%;
     color: $text-muted;
 }
 
 /* Not $error: a capped history is correct data, just not all of it. */
 #detail-history-note.-capped {
-    color: $warning;
+    color: $text-warning;
 }
 
+#detail-list-note.-error,
+#detail-status-note.-error,
 #detail-history-note.-error {
-    color: $error;
+    color: $text-error;
 }
 
 #detail-definition {
