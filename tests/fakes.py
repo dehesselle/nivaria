@@ -26,6 +26,14 @@ class MissingObjectError(Exception):
     errno = 2003
 
 
+class CancelledError(Exception):
+    """Stands in for the driver's error for a statement its timeout
+    cancelled: Snowflake reports it as errno 604, "SQL execution canceled",
+    and that number is all `is_cancelled` reads."""
+
+    errno = 604
+
+
 class FakeCursor:
     def __init__(self, owner: FakeConnection) -> None:
         self._owner = owner
@@ -611,10 +619,13 @@ class FakeGateway:
         schema: str,
         table: str,
         max_rows: int,
+        timeout: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
-        self.calls.append(("select_data_preview", (database, schema, table, max_rows)))
+        self.calls.append(
+            ("select_data_preview", (database, schema, table, max_rows, timeout))
+        )
         self._check_schema(database, schema)
         if self.raise_on_data_preview:
             raise RuntimeError("No active warehouse selected in the current session")

@@ -1,10 +1,10 @@
-"""Detail view for tasks: run history and definition.
+"""Detail view for tasks: run history and SQL.
 
 Deliberately a different shape from the column views: a task has no columns,
 so its body is tabbed instead -- History (one row per execution, the same
 dual-source pattern `pipe_view.py` uses, plus a detail panel below for
 whatever the highlighted row wants to say about itself -- currently its
-error, if any) and Definition (the task's raw SQL statement, unformatted).
+error, if any) and SQL (the task's raw definition, unformatted).
 
 The history merges two sources: `task_activity_history_scope` (SNOWFLAKE.
 ACCOUNT_USAGE.TASK_HISTORY, this one task's full backfill within the "task
@@ -50,8 +50,8 @@ from snowcone.models import (
 from snowcone.settings import CACHE_TTL, TASK_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import (
-    DEFINITION,
     HISTORY_TABLE,
+    SQL,
     HistoryView,
 )
 
@@ -69,16 +69,16 @@ class TaskView(HistoryView, ObjectView):
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
-            with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
+            with TabPane("[$accent bold]H[/]istory", id="tab-history"):
+                yield from self.compose_history()
+            with TabPane("[$accent bold]S[/]QL", id="tab-sql"):
                 yield TextArea(
                     "",
-                    id=DEFINITION,
+                    id=SQL,
                     read_only=True,
                     soft_wrap=True,
                     show_line_numbers=False,
                 )
-            with TabPane("[$accent bold]H[/]istory", id="tab-history"):
-                yield from self.compose_history()
 
     def activity_history_scope(self) -> Scope:
         return task_activity_history_scope(
@@ -157,7 +157,7 @@ class TaskView(HistoryView, ObjectView):
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)
         text = (row or {}).get("definition") or "-- not cached"
-        self.query_one(f"#{DEFINITION}", TextArea).text = text
+        self.query_one(f"#{SQL}", TextArea).text = text
 
     def detail_text(self, row: dict[str, Any]) -> str | None:
         """A failed run's own error, for the panel under the history table."""

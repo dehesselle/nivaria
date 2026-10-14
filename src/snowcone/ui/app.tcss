@@ -232,7 +232,7 @@ ClosingDialog > #dialog {
     color: $text-error;
 }
 
-#detail-definition {
+#detail-sql {
     height: 1fr;
 }
 

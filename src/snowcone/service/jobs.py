@@ -26,6 +26,7 @@ from snowcone.gateway.gateway import SnowflakeGateway
 from snowcone.models import Scope, ScopeType
 from snowcone.settings import (
     DATA_PREVIEW_ROWS,
+    DATA_PREVIEW_TIMEOUT,
     HISTORY_MAX_ROWS,
     PIPE_HISTORY_FETCH_DAYS,
     PRIME_CHUNK_THRESHOLD,
@@ -384,6 +385,7 @@ def fetch_page(
                 scope.schema,
                 scope.table,
                 max_rows,
+                config.get(DATA_PREVIEW_TIMEOUT),
                 allow_reconnect=allow_reconnect,
             )
             return _capped(encode_data_preview(rows), max_rows)

@@ -239,7 +239,10 @@ def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
         ),
         (
             data_preview_scope("MYDB", "S", "T"),
-            [objects_scope(ObjectType.TABLE, "MYDB", "S")],
+            [
+                objects_scope(ObjectType.TABLE, "MYDB", "S"),
+                objects_scope(ObjectType.VIEW, "MYDB", "S"),
+            ],
         ),
     ],
     ids=str,

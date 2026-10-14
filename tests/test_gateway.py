@@ -8,7 +8,7 @@ import pytest
 from snowcone.gateway.gateway import PoolGateway
 from snowcone.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
 from snowcone.models import ObjectType
-from tests.fakes import MissingObjectError
+from tests.fakes import CancelledError, MissingObjectError
 
 
 class RecordingCursor:
@@ -18,8 +18,15 @@ class RecordingCursor:
         self._rows: list[tuple[Any, ...]] = []
         self.closed = False
 
-    def execute(self, statement: str, params: tuple[Any, ...] | None = None) -> None:
+    def execute(
+        self,
+        statement: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        timeout: int | None = None,
+    ) -> None:
         self._owner.attempts += 1
+        self._owner.timeouts.append(timeout)
         if self._owner.fail_times > 0:
             self._owner.fail_times -= 1
             raise self._owner.error
@@ -58,6 +65,8 @@ class RecordingConnection:
         #: test prove there was exactly one retry, not a loop.
         self.fail_times = 0
         self.attempts = 0
+        #: The `timeout` each attempt was executed with.
+        self.timeouts: list[int | None] = []
         #: What each of those failures raises.
         self.error: Exception = RuntimeError("session expired")
 
@@ -206,6 +215,50 @@ def test_a_missing_object_keeps_its_healthy_connection() -> None:
     connection.fail_times = 1
     with pytest.raises(MissingObjectError):
         gateway.show_grants_on_schema("MYDB", "GONE")
+    assert len(connects) == 1
+    assert pool.size == 1
+    assert pool.in_use == 0
+    assert gateway.show_databases() == [{"name": "ACME"}]
+    assert len(connects) == 1
+
+
+def test_only_the_data_preview_is_executed_with_a_timeout() -> None:
+    """The driver cancels a statement past its timeout server-side. Only the
+    preview needs one: a view's LIMIT does not bound the work behind it."""
+    gateway, connection, _ = make_gateway()
+    gateway.show_databases()
+    gateway.select_data_preview("MYDB", "PUBLIC", "V", 100, 15)
+    assert connection.timeouts == [None, 15]
+
+
+def test_a_cancelled_query_is_not_retried() -> None:
+    """A statement that ran out its timeout would run it out again, so a
+    retry would only double the wait."""
+    gateway, connection, _ = make_gateway()
+    connection.error = CancelledError("SQL execution canceled")
+    connection.fail_times = 5
+    with pytest.raises(CancelledError):
+        gateway.select_data_preview("MYDB", "PUBLIC", "V", 100, 15)
+    assert connection.attempts == 1
+
+
+def test_a_cancelled_query_keeps_its_healthy_connection() -> None:
+    """Cancelling one query leaves its session fine; replacing it would open
+    a new one, which can mean an MFA prompt."""
+    connection = RecordingConnection()
+    connects: list[dict[str, Any]] = []
+
+    def connector(**kwargs: Any) -> RecordingConnection:
+        connects.append(kwargs)
+        return connection
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    gateway = PoolGateway(pool)
+    connection.error = CancelledError("SQL execution canceled")
+    connection.fail_times = 1
+    with pytest.raises(CancelledError):
+        gateway.select_data_preview("MYDB", "PUBLIC", "V", 100, 15)
     assert len(connects) == 1
     assert pool.size == 1
     assert pool.in_use == 0

@@ -20,6 +20,7 @@ configure(APP_NAME)
 __all__ = [
     "CACHE_TTL",
     "DATA_PREVIEW_ROWS",
+    "DATA_PREVIEW_TIMEOUT",
     "HISTORY_MAX_ROWS",
     "MAX_PAGES_PER_PASS",
     "PAGE_SIZE",
@@ -143,12 +144,26 @@ DATA_PREVIEW_ROWS = Setting(
     key="data_preview_rows",
     label="data preview rows",
     description=(
-        "How many rows a table's Data tab fetches. They are whichever rows "
-        "Snowflake returns first, in no particular order: sorting the whole "
-        "table to choose them would cost a full scan. Needs a warehouse."
+        "How many rows a table's or view's Data tab fetches. They are "
+        "whichever rows Snowflake returns first, in no particular order: "
+        "sorting the whole table to choose them would cost a full scan. "
+        "Needs a warehouse."
     ),
     group="Cache",
-    default=500,
+    default=100,
+)
+
+DATA_PREVIEW_TIMEOUT = Setting(
+    key="data_preview_timeout",
+    label="data preview timeout (seconds)",
+    description=(
+        "How long a Data tab's query may run before snowcone asks Snowflake "
+        "to cancel it. A view's preview runs the view's own query, and the "
+        "row limit above does not shorten one that aggregates or sorts. "
+        "0 means no limit."
+    ),
+    group="Cache",
+    default=15,
 )
 
 MAX_PAGES_PER_PASS = Setting(

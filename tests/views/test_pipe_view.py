@@ -1,4 +1,4 @@
-"""PipeView: one pipe's load history and definition."""
+"""PipeView: one pipe's load history and SQL."""
 
 from __future__ import annotations
 
@@ -362,26 +362,24 @@ async def test_a_repaint_does_not_leave_a_stale_error_showing(repo) -> None:
         assert not pane.query_one("#detail-history-item", Static).display
 
 
-async def test_the_definition_tab_shows_the_pipes_raw_sql(repo) -> None:
+async def test_the_sql_tab_shows_the_pipes_raw_sql(repo) -> None:
     ref = put_pipe(repo, "LOAD_ORDERS", definition="COPY INTO t FROM @s")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        assert (
-            pane.query_one("#detail-definition", TextArea).text == "COPY INTO t FROM @s"
-        )
+        assert pane.query_one("#detail-sql", TextArea).text == "COPY INTO t FROM @s"
 
 
-async def test_the_definition_tab_falls_back_when_uncached(repo) -> None:
+async def test_the_sql_tab_falls_back_when_uncached(repo) -> None:
     ref = ObjectRef(ObjectType.PIPE, "MYDB", "PUBLIC", "GHOST")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        assert pane.query_one("#detail-definition", TextArea).text == "-- not cached"
+        assert pane.query_one("#detail-sql", TextArea).text == "-- not cached"
 
 
 async def test_the_tab_mnemonic_actions_switch_tabs(repo) -> None:
@@ -393,8 +391,8 @@ async def test_the_tab_mnemonic_actions_switch_tabs(repo) -> None:
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
         assert tabs.active == "tab-history"
-        view.action_show_tab("definition")
-        assert tabs.active == "tab-definition"
+        view.action_show_tab("sql")
+        assert tabs.active == "tab-sql"
         view.action_show_tab("history")
         assert tabs.active == "tab-history"
 
@@ -493,3 +491,20 @@ async def test_a_new_load_arriving_keeps_the_highlighted_load(repo) -> None:
 
         assert table.row_count == 4
         assert table.get_cell_at((table.cursor_row, 4)).plain == "mid.csv"
+
+
+async def test_the_s_key_shows_the_pipes_sql(repo) -> None:
+    """`d` means Data on tables and views, so a pipe's SQL is `s` too."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        tabs = view.query_one(TabbedContent)
+        # Bindings reach the view only through the focus chain.
+        pane.query_one("#detail-history", DataTable).focus()
+        await pilot.press("s")
+        assert tabs.active == "tab-sql"
+        await pilot.press("h")
+        assert tabs.active == "tab-history"

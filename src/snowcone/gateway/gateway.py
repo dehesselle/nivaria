@@ -55,6 +55,33 @@ def is_missing_object(error: BaseException) -> bool:
     return getattr(error, "errno", None) == _MISSING_OBJECT_ERRNO
 
 
+#: Snowflake's error number for "SQL execution canceled", printed as
+#: `000604 (57014)`. The driver has no constant for it; it matches the
+#: message text itself.
+_CANCELLED_ERRNO = 604
+
+
+def is_cancelled(error: BaseException) -> bool:
+    """Whether a statement failed because its timeout cancelled it.
+
+    The driver's own timer thread asks Snowflake to cancel the query once
+    the `timeout` passed to `execute` runs out, and the cancellation comes
+    back as an ordinary error. Read off `errno` for the same reasons as
+    `is_missing_object`.
+    """
+    return getattr(error, "errno", None) == _CANCELLED_ERRNO
+
+
+def _keeps_connection(error: BaseException) -> bool:
+    """Whether an error came back over a session that is still healthy.
+
+    Such an error is neither retried nor allowed to cost its connection:
+    repeating it would fail the same way, and replacing the connection
+    can mean an MFA prompt.
+    """
+    return is_missing_object(error) or is_cancelled(error)
+
+
 class SnowflakeGateway(Protocol):
     def show_databases(
         self,
@@ -168,6 +195,7 @@ class SnowflakeGateway(Protocol):
         schema: str,
         table: str,
         max_rows: int,
+        timeout: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -249,6 +277,7 @@ class PoolGateway:
         statement: str,
         params: tuple[Any, ...] | None = None,
         *,
+        timeout: int | None = None,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         # One retry, against a freshly-acquired connection, covers what a
@@ -259,50 +288,61 @@ class PoolGateway:
         # identically the second time, at the cost of one extra round trip on
         # an already-rare path.
         try:
-            return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
+            return self._fetch_once(
+                statement, params, timeout=timeout, allow_reconnect=allow_reconnect
+            )
         except ResultTooLargeError:
             # A failure the retry above must not repeat: it is a property of
             # the statement, not of the connection.
             raise
         except Exception as error:  # see pool.acquire, same boundary
-            if is_missing_object(error):
-                # Same: a dropped object stays dropped on a fresh connection.
+            if _keeps_connection(error):
+                # Same: a dropped object stays dropped on a fresh connection,
+                # and a statement that ran out its timeout would run it out
+                # again.
                 raise
-            return self._fetch_once(statement, params, allow_reconnect=allow_reconnect)
+            return self._fetch_once(
+                statement, params, timeout=timeout, allow_reconnect=allow_reconnect
+            )
 
     def _fetch_once(
         self,
         statement: str,
         params: tuple[Any, ...] | None,
         *,
+        timeout: int | None,
         allow_reconnect: bool,
     ) -> list[Row]:
-        missing: Exception | None = None
+        healthy: Exception | None = None
         with self._pool.acquire(allow_reconnect=allow_reconnect) as connection:
             cursor = connection.cursor()
             try:
                 sql_log.log_statement(cursor, statement, params)
+                # The worker thread running this cannot be interrupted, but
+                # the driver can: with a timeout it starts a timer thread of
+                # its own that asks Snowflake to cancel the query, and this
+                # call then raises. None or 0 starts no timer.
                 if params:
-                    cursor.execute(statement, params)
+                    cursor.execute(statement, params, timeout=timeout)
                 else:
-                    cursor.execute(statement)
+                    cursor.execute(statement, timeout=timeout)
                 columns = [description[0] for description in cursor.description]
                 return self._collect(cursor, columns, statement)
             except Exception as error:
                 # Anything escaping this block makes the pool discard the
                 # connection and open a replacement -- right for a dead
-                # session, but a "does not exist" came back over a perfectly
-                # healthy one, and a reconnect can mean an MFA prompt. So that
-                # one error leaves the block normally and is raised outside.
-                # Kept this narrow on purpose: an expired session is a
-                # ProgrammingError too, and that one must still be discarded.
-                if not is_missing_object(error):
+                # session, but a "does not exist" or a cancellation came back
+                # over a perfectly healthy one, and a reconnect can mean an MFA
+                # prompt. So those leave the block normally and are raised
+                # outside. Kept this narrow on purpose: an expired session is
+                # a ProgrammingError too, and that one must still be discarded.
+                if not _keeps_connection(error):
                     raise
-                missing = error
+                healthy = error
             finally:
                 cursor.close()
-        assert missing is not None
-        raise missing
+        assert healthy is not None
+        raise healthy
 
     @staticmethod
     def _collect(cursor: Any, columns: list[str], statement: str) -> list[Row]:
@@ -532,11 +572,16 @@ class PoolGateway:
         schema: str,
         table: str,
         max_rows: int,
+        timeout: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
+        # The only statement with a timeout. LIMIT bounds what a view's
+        # preview returns, not the work behind it: one that aggregates or
+        # sorts computes all of its input first.
         return self._fetch(
             queries.data_preview(database, schema, table, max_rows),
+            timeout=timeout,
             allow_reconnect=allow_reconnect,
         )
 

@@ -283,8 +283,8 @@ change, not an exception (`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` and
 
 ### Table data never reaches the disk
 
-Everything above is metadata, with one exception: the Table view's Data tab
-(`DATA_PREVIEW`) is real rows, and they can be personal data. They still go
+Everything above is metadata, with one exception: the Table and View views'
+Data tab (`DATA_PREVIEW`) is real rows, and they can be personal data. They still go
 through sqlite like any other scope, so the one rule holds and the pass
 protocol, fencing and cursor keeping all apply. But they are kept in an
 in-memory sqlite database (`MemoryDatabase`), one per `Repository`, never in
@@ -412,10 +412,10 @@ the same exception `information_schema_columns` established).
 | `TASK_ACTIVITY` | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | Tasks (n): Last Scheduled, Last Run State | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view History (recent half) | warehouse |
-| `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE`/`ON TABLE` | Schema/Database/Table view Grants | — |
+| `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE`/`ON TABLE`/`ON VIEW` | Schema/Database/Table/View view Grants | — |
 | `TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES` | Schema/Database view Tags | warehouse |
 | `COLUMN_TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` | Columns view Tags column + detail panel | warehouse |
-| `DATA_PREVIEW` | `SELECT * FROM <table> LIMIT n` | Table view Data | warehouse |
+| `DATA_PREVIEW` | `SELECT * FROM <table or view> LIMIT n` | Table/View view Data | warehouse |
 
 Two of these are second sources without being `SELECT`s:
 `MATERIALIZED_VIEW_STATS` and `GRANTS` are additional `SHOW` commands, so
@@ -452,16 +452,20 @@ grants only: a role that holds a privilege because another role was granted
 to it does not appear. The Grants tab answers "who was granted what on this
 object", not "can role X read it".
 
-A table's grants are the same `GRANTS` scope narrowed to one object (`table`
-holds its name and `object_type` its kind, since the statement needs the
-noun), written to the same `show_grants` mirror under its own `_scope`.
-Unlike everything else a table shows, there is **no batch form**: `SHOW
-GRANTS ON TABLE` takes one table, and neither alternative fits -- `SHOW
-GRANTS TO ROLE` is grouped by role, not by schema, and
-`ACCOUNT_USAGE.GRANTS_TO_ROLES` is rejected for the same reasons as
-`ACCOUNT_USAGE.TAG_REFERENCES` above. So every table is its own round trip,
-and the Table view asks for it only while its Grants tab is shown (see
-"What decides a view's shape").
+A table's or view's grants are the same `GRANTS` scope narrowed to one
+object (`table` holds its name and `object_type` its kind, since the
+statement needs the noun -- `ON TABLE` or `ON VIEW`), written to the same
+`show_grants` mirror under its own `_scope`. Unlike everything else a table
+shows, there is **no batch form**: `SHOW GRANTS ON TABLE` takes one table,
+and neither alternative fits -- `SHOW GRANTS TO ROLE` is grouped by role,
+not by schema, and `ACCOUNT_USAGE.GRANTS_TO_ROLES` is rejected for the same
+reasons as `ACCOUNT_USAGE.TAG_REFERENCES` above. So every table or view is
+its own round trip, and the Table and View views ask for it only while
+their Grants tab is shown (see "What decides a view's shape"). A
+materialized view is listed by `SHOW VIEWS` (`is_materialized = true`) and
+so opens as a view, and `ON VIEW` covers it: verified on the sandbox on
+2026-10-14, `SHOW GRANTS ON VIEW` and `ON MATERIALIZED VIEW` returned the
+same rows for one, with `granted_on` reading `MATERIALIZED_VIEW`.
 
 #### One row per pipe, in SQL — a real incident
 
@@ -849,14 +853,39 @@ which rows survive.
 could only drop real pipes out of the "Pipes (n)" list, and layer 3 already
 covers the pathological case.
 
-The **data preview** carries its own cap too (`DATA_PREVIEW_ROWS`, 500), and
-is the one capped statement with no `ORDER BY`. That is the mistake described
+The **data preview** carries its own cap too (`DATA_PREVIEW_ROWS`, 100 --
+Snowsight's own Data Preview limit for both tables and views), and is the
+one capped statement with no `ORDER BY`. That is the mistake described
 above, made deliberately: ordering would make Snowflake scan and sort the
-whole table to hand back 500 rows of it, and a preview promises no
+whole table to hand back 100 rows of it, and a preview promises no
 particular rows. What the history mistake got wrong was letting an arbitrary
 slice look complete, so the Data tab says so instead: a capped preview reads
-"Showing 500 of n rows, in no particular order", with n from `SHOW TABLES`'
-`rows` when cached.
+"Showing 100 of n rows, in no particular order", with n from `SHOW TABLES`'
+`rows` when cached. A view has no such count in `SHOW VIEWS`, so its note
+just says "Showing 100 rows".
+
+The preview is also the one statement with a **timeout**
+(`DATA_PREVIEW_TIMEOUT`, 15 s), because its `LIMIT` bounds what a *view*'s
+preview returns, not the work behind it. A view's query runs each time the
+view is read -- its results are not stored -- and when that query
+aggregates, deduplicates, uses a window function or sorts, Snowflake has to
+see all of its input before the outer `LIMIT` can apply. Snowflake documents
+the sorting case: with `ORDER BY` and `LIMIT` it "ordinarily scans all
+eligible rows", short of narrow top-K pruning conditions. Snowsight bounds
+its own view preview the same way, with a 300 s cancel, and warns that a
+complex view may show none; 15 s was chosen deliberately shorter, since the
+Data tab follows the tree cursor and each preview holds a pool worker while
+it runs. The worker thread still cannot be interrupted (see "The fetch
+scheduler"). The driver can: `cursor.execute(..., timeout=n)` starts a timer
+thread of its own that asks Snowflake to cancel the query, and `execute`
+then raises errno 604 ("SQL execution canceled"). Verified on the sandbox
+on 2026-10-14: a 1 s timeout on `SELECT SYSTEM$WAIT(5)` raised `000604
+(57014): SQL execution was cancelled by the client due to a timeout`, once,
+and the connection stayed in the pool and answered the next query. That is
+an ordinary failed pass, shown in the Data tab's note. Like any scope whose first fetch
+failed, a view that always times out is tried again once per sweep while
+its Data tab stays open. The timeout applies to tables too: one statement,
+one setting, and a table preview that runs that long is just as stuck.
 
 > **Counts first was considered and rejected.** For a `SHOW` a count needs
 > `RESULT_SCAN(LAST_QUERY_ID())`, an ordinary `SELECT` — so it needs a
@@ -932,9 +961,12 @@ prompt**. The pool exists to make that a one-time event.
   reported it is healthy, so `PoolGateway._fetch_once` hands it back to the
   pool and only then raises, and `_fetch` does not retry it. Before this,
   every visit to an object dropped elsewhere closed two working connections
-  and opened two new ones, each a possible MFA prompt. Kept to that one error
-  number on purpose: an expired session is the same driver exception type,
-  and that one must still be discarded.
+  and opened two new ones, each a possible MFA prompt. A data preview
+  cancelled by its timeout (errno 604, see "Bounding a result") is treated
+  the same: cancelling one query leaves its session fine, and a retry would
+  only run out the timeout again. Kept to those two error numbers on purpose:
+  an expired session is the same driver exception type, and that one must
+  still be discarded.
 
 `ConnectionPool.close()` -- called on quit and at the start of a reconnect,
 right after `FetchService.stop()` -- only closes connections that are
@@ -1242,12 +1274,14 @@ actually returns rather than a style choice:
 - **Tabs** when there are two genuinely different shapes for one node, with
   mnemonic switching (hidden from the footer, the pattern sibling project
   snakecam's `JobDetailsScreen` established): `PipeView` and `TaskView`
-  (definition + history), `ViewView` (columns + definition), `TableView`
-  (columns + data + grants), `PipeListView` (activity + status),
+  (history + SQL), `TableView` (columns + data + grants), `ViewView`
+  (columns + data + grants + SQL), `PipeListView` (activity + status),
   `SchemaView`/`DatabaseView` (grants + tags). Tabs are laid out in
   alphabetical order; which one opens first is set separately (`initial=`)
   and does not follow that order -- `PipeListView` opens on Status,
-  `PipeView`/`TaskView` on History. Switching by mnemonic moves
+  `PipeView`/`TaskView` on History. A mnemonic means the same tab on every
+  view: `d` is Data, so an object's defining statement is SQL (`s`) rather
+  than Definition. Switching by mnemonic moves
   focus into the tab just shown: a mnemonic only fires while focus is inside
   the view, and Textual drops focus from a widget it hides instead of moving
   it, so the next mnemonic used to go nowhere.
@@ -1262,14 +1296,15 @@ actually returns rather than a style choice:
 
 A tab whose scope costs one round trip **per object**, and which is not the
 tab a view opens on, is fetched only while it is shown. Today that is the
-Table view's Grants and Data: the tree cursor passes over tables far more
-often than anyone opens either tab, and each pass would otherwise cost a
-`SHOW GRANTS` and a `SELECT` on top of the two queries a table already makes.
-The `SELECT` would also wake a warehouse. The scope is listed in `scopes()`
-only while its tab is up -- the same conditional `PipeView` applies to its
-history -- so the sweep and update routing ignore it otherwise. Switching
-tables while on Grants or Data keeps the tab, and so fetches each table's
-grants or rows, which is what is on screen.
+Table and View views' Grants and Data: the tree cursor passes over tables
+and views far more often than anyone opens either tab, and each pass would
+otherwise cost a `SHOW GRANTS` and a `SELECT` on top of the two queries an
+object already makes. The `SELECT` would also wake a warehouse, and for a
+view run the view's whole query (see "Bounding a result"). The scope is
+listed in `scopes()` only while its tab is up -- the same conditional
+`PipeView` applies to its history -- so the sweep and update routing ignore
+it otherwise. Switching objects while on Grants or Data keeps the tab, and
+so fetches each one's grants or rows, which is what is on screen.
 
 Two of those decisions are worth their reasoning:
 
@@ -1280,12 +1315,15 @@ single pipe's view — and it costs no new scope, since `invalid_reason` is
 already on the `SHOW PIPES` rows the list reads anyway. A schema's tasks have
 only the one thing to show today, so a single table is enough.
 
-`ViewView` is tabbed because a view is the first type that is genuinely
-**both** shapes the registry already had: a real column list, like a table
-(`ColumnsView` from `table_view.py`, reused directly rather than duplicated),
-*and* one defining SQL statement, like a pipe or task (`show_views.text`,
-read through `Repository.object_detail` with no scope of its own — the same
-way `show_pipes.definition` and `show_tasks.definition` are).
+`ViewView` is a view's whole Table view plus one tab, because a view is
+the one type that is genuinely **both** shapes the registry already had:
+everything a table shows -- columns, data, grants -- (`ColumnsView` from
+`table_view.py`, which holds all three tabs and is reused whole rather than
+duplicated), *and* one defining SQL statement, like a pipe or task
+(`show_views.text`, read through `Repository.object_detail` with no scope of
+its own — the same way `show_pipes.definition` and `show_tasks.definition`
+are). The SQL tab sorts after the others, so `ColumnsView.compose_extra_tabs`
+is all a subclass needs.
 
 A **stage** is the one type with a category view and no per-object view, and
 that is deliberate rather than a gap: a `SHOW STAGES` row is the whole
@@ -1332,14 +1370,14 @@ piece is there because the duplicated version had already drifted:
   table views alike (see "Column headers mirror Snowflake" for its shape).
 
 The widget ids are shared too (`detail-list`, `detail-history`,
-`detail-grants`, `detail-definition`, ...), and deliberately: exactly one
+`detail-grants`, `detail-sql`, ...), and deliberately: exactly one
 view is mounted at a time, so `#detail-history` means "whichever history
 table is on screen". The panel is the exception, because one view can hold
 two: it is styled by the class `detail-item`, and each panel's id is its
 table's plus `-item` (`detail-columns-item`, `detail-grants-item`). The
 per-view ids these replaced had already cost
 something real — `app.tcss` styled the pipe view's history table, detail
-panel and definition pane, and the task view, a later copy of all three under
+panel and SQL pane, and the task view, a later copy of all three under
 its own ids, silently picked up none of it.
 
 ### Column headers mirror Snowflake
@@ -1675,9 +1713,10 @@ first read, so importing the module touches no disk.
 The ones that matter: **cache TTL** (`0` disables background refreshing),
 **pool size**, **fetch page size**.
 
-Five more exist purely so the measures in "Bounding a result" are adjustable
+Six more exist purely so the measures in "Bounding a result" are adjustable
 rather than baked in: **history row cap** (`HISTORY_MAX_ROWS`), **data
-preview rows** (`DATA_PREVIEW_ROWS`), **max pages per refresh**
+preview rows** (`DATA_PREVIEW_ROWS`), **data preview timeout**
+(`DATA_PREVIEW_TIMEOUT`, `0` disables), **max pages per refresh**
 (`MAX_PAGES_PER_PASS`), **result row ceiling** (`ROW_CEILING`, `0` disables)
 and **prime chunk threshold** (`PRIME_CHUNK_THRESHOLD`). Their
 defaults are starting points, not measured optima — an account whose shape

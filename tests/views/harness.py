@@ -415,13 +415,19 @@ def put_grant(repo: Repository, database: str, schema: str | None, **extra) -> N
     )
 
 
-def put_object_grant(repo: Repository, table: str, **extra) -> None:
-    """Seeds one grant on one table in MYDB.PUBLIC -- what the Table view's
-    Grants tab reads, analogous to put_grant above."""
+def put_object_grant(
+    repo: Repository,
+    table: str,
+    *,
+    object_type: ObjectType = ObjectType.TABLE,
+    **extra,
+) -> None:
+    """Seeds one grant on one table (or view) in MYDB.PUBLIC -- what the
+    Table and View views' Grants tab reads, analogous to put_grant above."""
     row = {
         "created_on": "2026-01-01 00:00:00",
         "privilege": "SELECT",
-        "granted_on": "TABLE",
+        "granted_on": object_type.value,
         "name": f"MYDB.PUBLIC.{table}",
         "granted_to": "ROLE",
         "grantee_name": "ANALYST",
@@ -429,7 +435,7 @@ def put_object_grant(repo: Repository, table: str, **extra) -> None:
         "granted_by": "SYSADMIN",
     }
     row.update(extra)
-    scope = object_grants_scope(ObjectRef(ObjectType.TABLE, "MYDB", "PUBLIC", table))
+    scope = object_grants_scope(ObjectRef(object_type, "MYDB", "PUBLIC", table))
     existing = repo.raw_rows(scope)
     load(
         repo,
@@ -489,7 +495,7 @@ def put_column_tag(repo: Repository, table: str, column: str, **extra) -> None:
 def put_data_preview(
     repo: Repository, table: str, *rows: dict, truncated: bool = False
 ) -> None:
-    """Seeds a table's Data tab in MYDB.PUBLIC, encoded the way the fetch
+    """Seeds a table's (or view's) Data tab in MYDB.PUBLIC, encoded the way the fetch
     layer stores it -- one JSON object per row."""
     load(
         repo,

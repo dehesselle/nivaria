@@ -1,10 +1,10 @@
-"""Detail view for pipes: load history and definition.
+"""Detail view for pipes: load history and SQL.
 
 Deliberately a different shape from the column views: a pipe has no columns,
 so its body is tabbed instead -- History (one row per file it has
 loaded, the same dual-source pattern `pipe_list_view.py` uses, plus a detail
 panel below for whatever the highlighted row wants to say about itself --
-currently its error, if any) and Definition (the pipe's raw COPY INTO SQL,
+currently its error, if any) and SQL (the pipe's raw COPY INTO definition,
 unformatted).
 
 Status (pipe/status/invalid_reason) lives in `pipe_list_view.py` instead of
@@ -64,8 +64,8 @@ from snowcone.models import (
 from snowcone.settings import CACHE_TTL, PIPE_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import (
-    DEFINITION,
     HISTORY_TABLE,
+    SQL,
     HistoryView,
 )
 
@@ -92,16 +92,16 @@ class PipeView(HistoryView, ObjectView):
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
-            with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
+            with TabPane("[$accent bold]H[/]istory", id="tab-history"):
+                yield from self.compose_history()
+            with TabPane("[$accent bold]S[/]QL", id="tab-sql"):
                 yield TextArea(
                     "",
-                    id=DEFINITION,
+                    id=SQL,
                     read_only=True,
                     soft_wrap=True,
                     show_line_numbers=False,
                 )
-            with TabPane("[$accent bold]H[/]istory", id="tab-history"):
-                yield from self.compose_history()
 
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.ref.database, self.ref.schema)
@@ -207,7 +207,7 @@ class PipeView(HistoryView, ObjectView):
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)
         text = (row or {}).get("definition") or "-- not cached"
-        self.query_one(f"#{DEFINITION}", TextArea).text = text
+        self.query_one(f"#{SQL}", TextArea).text = text
 
     def detail_text(self, row: dict[str, Any]) -> str | None:
         """A failed load's own error, for the panel under the history table."""

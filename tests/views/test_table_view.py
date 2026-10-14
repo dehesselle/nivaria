@@ -754,7 +754,7 @@ async def test_a_long_or_multiline_value_is_cut_to_one_short_line(repo) -> None:
 
 
 async def test_a_capped_preview_says_it_is_some_of_the_tables_rows(repo) -> None:
-    """500 rows look the same whether they are the whole table or a slice of
+    """100 rows look the same whether they are the whole table or a slice of
     it, and LIMIT without ORDER BY picks no particular slice."""
     ref = put_table(repo, "ORDERS", rows=1234)
     put_data_preview(repo, "ORDERS", {"ID": 1}, {"ID": 2}, truncated=True)

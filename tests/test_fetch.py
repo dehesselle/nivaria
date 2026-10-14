@@ -1945,7 +1945,19 @@ def test_a_data_preview_at_its_row_limit_is_truncated() -> None:
     page = fetch_page(gateway, data_preview_scope("MYDB", "PUBLIC", "ORDERS"), None, 1)
     assert len(page.rows) == 3
     assert page.truncated
-    assert gateway.calls == [("select_data_preview", ("MYDB", "PUBLIC", "ORDERS", 3))]
+    assert gateway.calls[0][1][:4] == ("MYDB", "PUBLIC", "ORDERS", 3)
+
+
+def test_a_data_preview_is_asked_for_with_the_configured_timeout() -> None:
+    """A view's preview runs the view's own query, so the gateway is told
+    how long it may take before Snowflake is asked to cancel it."""
+    from snowcone.models import data_preview_scope
+    from snowcone.settings import DATA_PREVIEW_TIMEOUT, config
+
+    config.set(DATA_PREVIEW_TIMEOUT, 7)
+    gateway = FakeGateway(data_preview={("MYDB", "PUBLIC", "V"): [{"ID": 1}]})
+    fetch_page(gateway, data_preview_scope("MYDB", "PUBLIC", "V"), None, 1)
+    assert gateway.calls == [("select_data_preview", ("MYDB", "PUBLIC", "V", 100, 7))]
 
 
 def test_a_data_preview_inside_its_row_limit_is_the_whole_table() -> None:

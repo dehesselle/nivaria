@@ -1,4 +1,4 @@
-"""TaskView: one task's run history and definition."""
+"""TaskView: one task's run history and SQL."""
 
 from __future__ import annotations
 
@@ -234,7 +234,7 @@ async def test_highlighting_a_different_task_history_row_updates_the_detail_pane
         assert panel.display
 
 
-async def test_the_definition_tab_shows_the_tasks_raw_sql(repo) -> None:
+async def test_the_sql_tab_shows_the_tasks_raw_sql(repo) -> None:
     ref = put_task(repo, "REFRESH_ORDERS", definition="INSERT INTO t SELECT * FROM s")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
@@ -242,19 +242,19 @@ async def test_the_definition_tab_shows_the_tasks_raw_sql(repo) -> None:
         pane.show(ref)
         await pilot.pause()
         assert (
-            pane.query_one("#detail-definition", TextArea).text
+            pane.query_one("#detail-sql", TextArea).text
             == "INSERT INTO t SELECT * FROM s"
         )
 
 
-async def test_the_task_definition_tab_falls_back_when_uncached(repo) -> None:
+async def test_the_task_sql_tab_falls_back_when_uncached(repo) -> None:
     ref = ObjectRef(ObjectType.TASK, "MYDB", "PUBLIC", "GHOST")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        assert pane.query_one("#detail-definition", TextArea).text == "-- not cached"
+        assert pane.query_one("#detail-sql", TextArea).text == "-- not cached"
 
 
 async def test_the_task_tab_mnemonic_actions_switch_tabs(repo) -> None:
@@ -266,8 +266,8 @@ async def test_the_task_tab_mnemonic_actions_switch_tabs(repo) -> None:
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
         assert tabs.active == "tab-history"
-        view.action_show_tab("definition")
-        assert tabs.active == "tab-definition"
+        view.action_show_tab("sql")
+        assert tabs.active == "tab-sql"
         view.action_show_tab("history")
         assert tabs.active == "tab-history"
 

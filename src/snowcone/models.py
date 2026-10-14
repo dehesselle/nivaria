@@ -157,7 +157,7 @@ class ScopeType(StrEnum):
     #: like COLUMNS. Needs a running warehouse; degrades blank without one,
     #: same as TAG_REFERENCES.
     COLUMN_TAG_REFERENCES = "column_tag_references"
-    #: Some of one table's rows (Snowsight calls this a data preview),
+    #: Some of one table's (or view's) rows (Snowsight calls this a data preview),
     #: sourced by `SELECT * ... LIMIT`. Scoped to (database, schema, table)
     #: like COLUMNS. Needs a running warehouse. The only scope holding table
     #: data rather than metadata, which is why `Repository` keeps it in a
@@ -447,7 +447,11 @@ def containing_scopes(scope: Scope) -> list[Scope]:
         case ScopeType.DATA_PREVIEW:
             assert scope.database is not None
             assert scope.schema is not None
-            return [objects_scope(ObjectType.TABLE, scope.database, scope.schema)]
+            # The same: a preview is of a table or a view.
+            return [
+                objects_scope(ObjectType.TABLE, scope.database, scope.schema),
+                objects_scope(ObjectType.VIEW, scope.database, scope.schema),
+            ]
 
 
 #: Refresh cadence, in seconds, for a scope whose own data does not change on

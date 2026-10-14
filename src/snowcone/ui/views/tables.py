@@ -28,7 +28,7 @@ The widget ids are shared too, and deliberately: exactly one detail view is
 mounted at a time (see `DetailPane`), so `#detail-history` means "whichever
 history table is on screen". The per-view ids these replaced had already
 cost something real: `app.tcss` styled the pipe view's own history table,
-detail panel and definition pane, and the task view -- a later copy of all
+detail panel and SQL pane, and the task view -- a later copy of all
 three, under its own ids -- silently picked up none of it.
 """
 
@@ -67,7 +67,7 @@ ITEM_DETAIL = "detail-item"
 #: history -- see `HistoryView.sync_history_note`.
 HISTORY_NOTE = "detail-history-note"
 #: A single object's defining SQL.
-DEFINITION = "detail-definition"
+SQL = "detail-sql"
 
 
 def sync_list_note(note: Static, entry: Entry, noun: str) -> None:
@@ -237,7 +237,7 @@ class HistoryView(TabbedView):
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("d", "show_tab('definition')", "Definition", show=False),
+        Binding("s", "show_tab('sql')", "SQL", show=False),
     ]
 
     #: Built in `compose_history`, repainted by the subclass.

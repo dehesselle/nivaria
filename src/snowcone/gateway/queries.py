@@ -263,7 +263,7 @@ def show_grants_on_object(
 
 
 def data_preview(database: str, schema: str, table: str, max_rows: int) -> str:
-    """Some of one table's rows, for its Data tab.
+    """Some of one table's or view's rows, for its Data tab.
 
     No ORDER BY, so which rows come back is up to Snowflake. That is the
     mistake `task_history` documents for a history, where an arbitrary slice
