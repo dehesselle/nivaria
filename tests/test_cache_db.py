@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 
-from snowcone.cache.db import Database
+from snowcone.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database
+
+#: The SHA-256 of the schema scripts as of SCHEMA_VERSION 1. Change it only
+#: together with a bump of SCHEMA_VERSION.
+SCHEMA_DIGEST = "135b7c69049bd1374c059dda18b703ab1b03c002dee8205a5ca2329cd7b68581"
 
 
 def test_prepare_creates_the_file_and_its_parent_directory(tmp_path) -> None:
@@ -34,6 +39,47 @@ def test_existing_rows_survive_a_reopen(tmp_path) -> None:
     with second.connect() as connection:
         row = connection.execute("SELECT * FROM cache_entry").fetchone()
     assert row["scope"] == "databases"
+
+
+def test_a_fresh_cache_is_stamped_with_the_current_schema_version(tmp_path) -> None:
+    database = Database(tmp_path / "cache.db")
+    assert database.prepare()
+    with database.connect() as connection:
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+    assert version == SCHEMA_VERSION
+
+
+def test_a_cache_from_another_schema_version_is_replaced_not_migrated(
+    tmp_path,
+) -> None:
+    path = tmp_path / "cache.db"
+    old = Database(path)
+    old.prepare()
+    with old.connect() as connection:
+        connection.execute(
+            "INSERT INTO cache_entry (scope, state, generation) VALUES (?, ?, ?)",
+            ("databases", "complete", 1),
+        )
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION - 1}")
+
+    new = Database(path)
+    assert new.prepare()
+    with new.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM cache_entry").fetchone()[0] == 0
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+    assert version == SCHEMA_VERSION
+
+
+def test_a_schema_change_comes_with_a_version_bump() -> None:
+    """IF NOT EXISTS keeps an edited script from ever reaching an existing
+    cache file; only a SCHEMA_VERSION bump replaces it. Editing schema.sql or
+    search.sql therefore fails here until both the version and the digest
+    above are updated."""
+    digest = hashlib.sha256("".join(_SCHEMA_SCRIPTS).encode()).hexdigest()
+    assert (SCHEMA_VERSION, digest) == (1, SCHEMA_DIGEST), (
+        "the schema scripts changed: bump SCHEMA_VERSION in cache/db.py, then "
+        "update the version and SCHEMA_DIGEST in this test"
+    )
 
 
 def test_wal_is_enabled_so_a_writer_never_blocks_the_ui(tmp_path) -> None:

@@ -13,13 +13,11 @@
 -- so Snowflake adding a column is a non-event.
 --
 -- There is no migration system here: every statement is CREATE TABLE IF NOT
--- EXISTS, so a column added to an existing table never appears in a cache
--- file that already exists, and the first write to it fails. snowcone is
--- pre-1.0 with no backward-compatibility policy, so the answer is to edit
--- this file in place and delete the cache file. Two columns have been added
--- that way so far: FIRST_ERROR_MESSAGE/FIRST_ERROR_LINE_NUMBER on the
--- copy-history tables, and cache_entry.truncated. A brand-new table is still
--- the right move whenever "delete your cache" is not an acceptable answer.
+-- EXISTS, so a change never reaches a cache file that already exists. Any
+-- edit to this file or search.sql bumps SCHEMA_VERSION in db.py instead, and
+-- a file stamped with another version is deleted and rebuilt on open.
+-- snowcone is pre-1.0 with no backward-compatibility policy, so nothing is
+-- carried over.
 --
 -- Bookkeeping columns are underscore-prefixed so they can never collide with
 -- a Snowflake column name:

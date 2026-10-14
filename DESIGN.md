@@ -238,9 +238,7 @@ one is indistinguishable from a complete one by looking at it, and presenting
 a partial answer as a whole one is the thing this design does not allow.
 `HistoryView` renders a note above the table when it is set, and `begin_pass`
 clears it, so raising the cap (or a pipe going quiet) retires the note on its
-own. Adding the column meant editing `schema.sql` in place, which means
-deleting an existing cache file — the second time that trade has been taken,
-after `FIRST_ERROR_MESSAGE`.
+own. The column was added to `schema.sql` in place.
 
 Refreshing a scope is a **pass**:
 
@@ -266,6 +264,22 @@ app still runs, it just has nothing cached. It uses WAL journalling so a
 writing worker never blocks the reading UI, and opens a connection per call
 rather than holding one, so the same code is usable from the event loop and
 from worker threads.
+
+### A schema version, and no migrations
+
+`schema.sql` and `search.sql` are all `CREATE ... IF NOT EXISTS`, so an edit to
+either never reaches a cache file that already exists — the first write to an
+added column would simply fail. Every edit therefore bumps `SCHEMA_VERSION` in
+`cache/db.py`, which is stamped into the file as sqlite's `user_version`. On
+open, a file carrying any other version is deleted together with its `-wal`
+and `-shm` and rebuilt empty. snowcone is pre-1.0 with no
+backward-compatibility policy, so nothing is migrated; the cache refills
+itself like a first start. A test pins a digest of both scripts to the
+version, so changing a script without the bump fails the suite.
+
+Adding a column to an existing mirror table in place is therefore an ordinary
+change, not an exception (`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` and
+`cache_entry.truncated` were added that way).
 
 ---
 
@@ -311,7 +325,7 @@ keeps that output (51 declared types) as the test that holds them. The
 `INFORMATION_SCHEMA` fields stay faithful next to it: BINARY's length goes
 only into `_desc_type`, never into `CHARACTER_MAXIMUM_LENGTH`.
 
-### A second source: one new mirror table per SELECT, never a retrofit
+### A second source: one new mirror table per SELECT
 
 `SHOW` remains the strong default above: it needs no warehouse and covers
 almost everything the tree and detail pane show. But some facts genuinely do
@@ -330,21 +344,9 @@ keeps showing yesterday's data. It gets no special treatment from the sweep
 either: a scope on screen is refreshed on the same TTL as everything else,
 warehouse or not.
 
-**The shape rule: never retrofit a column onto an existing mirror table.**
-`schema.sql` is all `CREATE TABLE IF NOT EXISTS` with no migration system, so
-an added column silently never appears in an existing cache file and the
-first write to it fails. Each new source instead gets a brand-new mirror
-table, named and shaped like the view it reads (upper-case columns for an
-`INFORMATION_SCHEMA`/`ACCOUNT_USAGE` source — the same exception
-`information_schema_columns` established).
-
-There is one deliberate exception on record, and it is not a counterexample:
-`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` were added straight onto both
-copy-history tables. snowcone is pre-1.0 with no migration system and no
-backward-compatibility policy, so the usual objection was answered the
-cheaper way — `schema.sql` was edited in place and anyone with an existing
-cache file deletes it. A new table stays the right move whenever "delete your
-cache" is not an acceptable answer.
+Each new source has its own mirror table, named and shaped like the view it
+reads (upper-case columns for an `INFORMATION_SCHEMA`/`ACCOUNT_USAGE` source —
+the same exception `information_schema_columns` established).
 
 #### The second-source scopes
 
@@ -1828,7 +1830,7 @@ Adding one scope currently touches ten places, and there is no shortcut:
 
 1. a `ScopeType` member, 2. a `*_scope()` constructor, 3. a case in
 `Scope.key`, 4. a `TableSpec`, 5. a case in `Repository.spec_for`, 6. a table
-in `schema.sql`, 7. a builder in `gateway/queries.py`, 8. a method on the
+in `schema.sql` and a `SCHEMA_VERSION` bump, 7. a builder in `gateway/queries.py`, 8. a method on the
 `SnowflakeGateway` protocol, 9. the same on `PoolGateway`, 10. a case in
 `jobs.fetch_page`.
 

@@ -69,9 +69,7 @@ class ScopeType(StrEnum):
     #: A schema's tables' LAST_DDL/LAST_ALTERED, sourced by a real SELECT
     #: against INFORMATION_SCHEMA.TABLES rather than SHOW -- the first
     #: deliberate exception to SHOW-only (see DESIGN.md). Scoped to
-    #: (database, schema) like OBJECTS, but backed by its own mirror table
-    #: rather than a retrofit onto show_tables, since schema.sql has no
-    #: migration system.
+    #: (database, schema) like OBJECTS, but backed by its own mirror table.
     TABLE_STATS = "table_stats"
     #: A schema's views' LAST_DDL/LAST_ALTERED, the same INFORMATION_SCHEMA.
     #: TABLES statement TABLE_STATS uses, just bound to TABLE_TYPE = 'VIEW'
