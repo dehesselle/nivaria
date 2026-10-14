@@ -166,11 +166,19 @@ ClosingDialog > #dialog {
     color: $text-muted;
 }
 
-#detail-history {
+#detail-history,
+#detail-grants {
     height: 1fr;
 }
 
-#detail-item {
+/* A table plus the panel under it (tables.PanelledTable): the table takes
+   whatever the panel leaves. */
+.panelled-table {
+    height: 1fr;
+}
+
+/* A class, not an id: the Table view holds two panels, one per tab. */
+.detail-item {
     height: auto;
     max-height: 8;
     padding: 0 1;
@@ -182,9 +190,9 @@ ClosingDialog > #dialog {
 }
 
 /* Only PipeView/TaskView's panel carries this -- it only ever shows a load/
-   run error. ColumnsView's own instance (tags, not errors) stays the
-   default text color. */
-#detail-item.-error {
+   run error. The column-tags and grants panels stay the default text
+   color. */
+.detail-item.-error {
     color: $error;
 }
 

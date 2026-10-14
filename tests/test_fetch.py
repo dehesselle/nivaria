@@ -182,6 +182,27 @@ def test_schema_level_grants_are_fetched_in_one_shot() -> None:
     assert [c[0] for c in gateway.calls] == ["show_grants_on_schema"]
 
 
+def test_an_objects_grants_are_fetched_in_one_shot() -> None:
+    """A scope naming one object dispatches to show_grants_on_object, with
+    that object's type."""
+    from snowcone.models import ObjectRef, ObjectType, object_grants_scope
+
+    gateway = FakeGateway(
+        grants_object={
+            (ObjectType.TABLE, "MYDB", "PUBLIC", "ORDERS"): [
+                {"privilege": "SELECT", "granted_to": "ROLE", "grantee_name": "ANALYST"}
+            ]
+        }
+    )
+    ref = ObjectRef(ObjectType.TABLE, "MYDB", "PUBLIC", "ORDERS")
+    page = fetch_page(gateway, object_grants_scope(ref), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
+    assert gateway.calls == [
+        ("show_grants_on_object", (ObjectType.TABLE, "MYDB", "PUBLIC", "ORDERS"))
+    ]
+
+
 def test_database_level_grants_are_fetched_in_one_shot() -> None:
     """schema=None on the scope means database-level -- dispatches to
     show_grants_on_database instead."""

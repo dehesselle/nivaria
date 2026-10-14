@@ -137,6 +137,7 @@ class FakeGateway:
         task_history: dict[tuple[str, str, str], list[Row]] | None = None,
         grants_schema: dict[tuple[str, str], list[Row]] | None = None,
         grants_database: dict[str, list[Row]] | None = None,
+        grants_object: dict[tuple[ObjectType, str, str, str], list[Row]] | None = None,
         tag_references_schema: dict[tuple[str, str], list[Row]] | None = None,
         tag_references_database: dict[str, list[Row]] | None = None,
         tag_references_all_columns: dict[tuple[str, str, str], list[Row]] | None = None,
@@ -166,6 +167,8 @@ class FakeGateway:
         self._task_history = task_history or {}
         self._grants_schema = grants_schema or {}
         self._grants_database = grants_database or {}
+        #: Keyed by (object_type, database, schema, name).
+        self._grants_object = grants_object or {}
         self._tag_references_schema = tag_references_schema or {}
         self._tag_references_database = tag_references_database or {}
         #: Keyed by (database, schema, table).
@@ -551,6 +554,20 @@ class FakeGateway:
     ) -> list[Row]:
         self.calls.append(("show_grants_on_database", (database,)))
         return list(self._grants_database.get(database, []))
+
+    def show_grants_on_object(
+        self,
+        object_type: ObjectType,
+        database: str,
+        schema: str,
+        name: str,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        key = (object_type, database, schema, name)
+        self.calls.append(("show_grants_on_object", key))
+        self._check_schema(database, schema)
+        return list(self._grants_object.get(key, []))
 
     def tag_references_schema(
         self, database: str, schema: str, *, allow_reconnect: bool = True

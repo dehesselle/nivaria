@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from textual.widgets import DataTable, TabbedContent
+from textual.widgets import DataTable, Static, TabbedContent
 
 from snowcone.models import (
     SchemaRef,
@@ -94,7 +94,7 @@ async def test_cached_grants_and_tags_are_not_re_requested(repo) -> None:
     assert app.needed == []
 
 
-async def test_the_grants_table_lists_every_cached_grant(repo) -> None:
+async def test_the_grants_table_lists_every_cached_grantee(repo) -> None:
     """granted_to isn't filtered down to roles -- a DATABASE ROLE grant shows
     up right alongside a ROLE grant."""
     ref = SchemaRef(database="MYDB", name="PUBLIC")
@@ -121,8 +121,65 @@ async def test_the_grants_table_lists_every_cached_grant(repo) -> None:
         await pilot.pause()
         table = pane.query_one("#detail-grants", DataTable)
         assert table.row_count == 2
-        granted_to = {table.get_cell_at((0, 4)).plain, table.get_cell_at((1, 4)).plain}
+        granted_to = {table.get_cell_at((0, 1)).plain, table.get_cell_at((1, 1)).plain}
         assert granted_to == {"ROLE", "DATABASE ROLE"}
+
+
+async def test_a_grantees_privileges_share_one_row(repo) -> None:
+    """OWNERSHIP first, the rest alphabetical, `+` marking grant option."""
+    put_grant(repo, "MYDB", "PUBLIC", grantee_name="ETL", privilege="USAGE")
+    put_grant(
+        repo,
+        "MYDB",
+        "PUBLIC",
+        grantee_name="ETL",
+        privilege="CREATE TABLE",
+        grant_option="true",
+    )
+    put_grant(repo, "MYDB", "PUBLIC", grantee_name="ETL", privilege="OWNERSHIP")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC"))
+        await pilot.pause()
+        table = pane.query_one("#detail-grants", DataTable)
+        assert table.row_count == 1
+        assert table.get_cell_at((0, 0)).plain == "ETL"
+        assert table.get_cell_at((0, 2)).plain == "OWNERSHIP, CREATE TABLE+, USAGE"
+
+
+async def test_the_panel_lists_the_highlighted_grantees_raw_grants(repo) -> None:
+    """What the grouped row cannot hold -- who granted each privilege, when,
+    and with grant option -- is in the panel, not lost."""
+    put_grant(
+        repo,
+        "MYDB",
+        "PUBLIC",
+        grantee_name="ETL",
+        privilege="USAGE",
+        granted_by="SYSADMIN",
+    )
+    put_grant(
+        repo,
+        "MYDB",
+        "PUBLIC",
+        grantee_name="ETL",
+        privilege="MONITOR",
+        granted_by="SECURITYADMIN",
+        grant_option="true",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC"))
+        await pilot.pause()
+        panel = pane.query_one("#detail-grants-item", Static)
+        assert panel.display
+        lines = str(panel.render()).splitlines()
+        assert lines[0].startswith("MONITOR  granted by SECURITYADMIN")
+        assert lines[0].endswith("grant option")
+        assert lines[1].startswith("USAGE    granted by SYSADMIN")
+        assert not lines[1].endswith("grant option")
 
 
 async def test_the_tags_table_lists_name_and_value_pairs(repo) -> None:
@@ -250,12 +307,12 @@ async def test_the_database_tab_mnemonic_actions_switch_tabs(repo) -> None:
         assert tabs.active == "tab-tags"
 
 
-async def test_a_repaint_keeps_the_highlighted_grant_row(repo) -> None:
-    """Grant rows carry no key of their own, so the cursor keeps its
-    position rather than falling back to the first row."""
-    put_grant(repo, "MYDB", "PUBLIC", privilege="USAGE")
-    put_grant(repo, "MYDB", "PUBLIC", privilege="MONITOR")
-    put_grant(repo, "MYDB", "PUBLIC", privilege="CREATE TABLE")
+async def test_a_repaint_keeps_the_highlighted_grantee(repo) -> None:
+    """A grantee row is keyed by its grantee, so the cursor stays on it
+    rather than falling back to the first row."""
+    put_grant(repo, "MYDB", "PUBLIC", grantee_name="A")
+    put_grant(repo, "MYDB", "PUBLIC", grantee_name="B")
+    put_grant(repo, "MYDB", "PUBLIC", grantee_name="C")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)

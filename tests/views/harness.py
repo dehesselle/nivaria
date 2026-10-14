@@ -15,6 +15,7 @@ from snowcone.models import (
     columns_scope,
     grants_scope,
     materialized_view_stats_scope,
+    object_grants_scope,
     objects_scope,
     pipe_activity_history_scope,
     pipe_activity_scope,
@@ -401,6 +402,32 @@ def put_grant(repo: Repository, database: str, schema: str | None, **extra) -> N
     }
     row.update(extra)
     scope = grants_scope(database, schema)
+    existing = repo.raw_rows(scope)
+    load(
+        repo,
+        scope,
+        [
+            *[{k: v for k, v in e.items() if not k.startswith("_")} for e in existing],
+            row,
+        ],
+    )
+
+
+def put_object_grant(repo: Repository, table: str, **extra) -> None:
+    """Seeds one grant on one table in MYDB.PUBLIC -- what the Table view's
+    Grants tab reads, analogous to put_grant above."""
+    row = {
+        "created_on": "2026-01-01 00:00:00",
+        "privilege": "SELECT",
+        "granted_on": "TABLE",
+        "name": f"MYDB.PUBLIC.{table}",
+        "granted_to": "ROLE",
+        "grantee_name": "ANALYST",
+        "grant_option": "false",
+        "granted_by": "SYSADMIN",
+    }
+    row.update(extra)
+    scope = object_grants_scope(ObjectRef(ObjectType.TABLE, "MYDB", "PUBLIC", table))
     existing = repo.raw_rows(scope)
     load(
         repo,

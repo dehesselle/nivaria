@@ -717,6 +717,43 @@ def test_a_schema_level_and_a_database_level_grants_scope_do_not_collide(repo) -
     ]
 
 
+def test_an_object_level_and_a_schema_level_grants_scope_do_not_collide(repo) -> None:
+    from snowcone.models import ObjectRef, ObjectType, grants_scope, object_grants_scope
+
+    schema_level = grants_scope("MYDB", "PUBLIC")
+    object_level = object_grants_scope(
+        ObjectRef(ObjectType.TABLE, "MYDB", "PUBLIC", "ORDERS")
+    )
+    load(
+        repo,
+        schema_level,
+        [
+            {
+                "privilege": "USAGE",
+                "granted_on": "SCHEMA",
+                "name": "MYDB.PUBLIC",
+                "granted_to": "ROLE",
+                "grantee_name": "SCHEMA_ROLE",
+            }
+        ],
+    )
+    load(
+        repo,
+        object_level,
+        [
+            {
+                "privilege": "SELECT",
+                "granted_on": "TABLE",
+                "name": "MYDB.PUBLIC.ORDERS",
+                "granted_to": "ROLE",
+                "grantee_name": "TABLE_ROLE",
+            }
+        ],
+    )
+    assert [r["grantee_name"] for r in repo.raw_rows(schema_level)] == ["SCHEMA_ROLE"]
+    assert [r["grantee_name"] for r in repo.raw_rows(object_level)] == ["TABLE_ROLE"]
+
+
 def test_tag_references_columns_round_trip_but_are_unverified(repo) -> None:
     """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
     this shape comes from Snowflake's published INFORMATION_SCHEMA.

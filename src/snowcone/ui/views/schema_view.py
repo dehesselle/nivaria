@@ -7,7 +7,8 @@ sharing a lookup, so DetailPane constructs SchemaView/DatabaseView directly
 rather than through a registry with a single entry.
 
 Both share the same two tabs and the same rendering: **Grants** (`SHOW GRANTS
-ON SCHEMA`/`SHOW GRANTS ON DATABASE`, metadata-layer, no warehouse needed) and
+ON SCHEMA`/`SHOW GRANTS ON DATABASE`, metadata-layer, no warehouse needed,
+rendered one row per grantee by `grants.py`, the same as the Table view's) and
 **Tags** (INFORMATION_SCHEMA.TAG_REFERENCES, an ordinary SELECT that needs a
 running warehouse and so degrades to blank without one, the same dual-source
 pattern table_stats/information_schema_tables established -- see DESIGN.md's
@@ -39,22 +40,12 @@ from textual.binding import Binding
 from textual.widgets import DataTable, TabbedContent, TabPane
 
 from snowcone.cache.repository import Repository
-from snowcone.format import format_timestamp_minutes
 from snowcone.models import SchemaRef, Scope, grants_scope, tag_references_scope
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.views.base import _ScopedView
+from snowcone.ui.views.grants import compose_grants, paint_grants
 from snowcone.ui.views.tables import TabbedView
 
-_GRANTS_COLUMNS = (
-    "Created",
-    "Privilege",
-    "Granted On",
-    "Name",
-    "Granted To",
-    "Grantee",
-    "Grant Option",
-    "Granted By",
-)
 _TAGS_COLUMNS = ("Tag", "Value")
 
 
@@ -69,11 +60,8 @@ class _GrantsTagsView(TabbedView, _ScopedView):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-grants"):
             with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
-                grants: DataTable[Text] = DataTable(
-                    id="detail-grants", cursor_type="row"
-                )
-                grants.zebra_stripes = True
-                yield grants
+                self.grants_panel = compose_grants()
+                yield self.grants_panel
             with TabPane("[$accent bold]T[/]ags", id="tab-tags"):
                 tags: DataTable[Text] = DataTable(id="detail-tags", cursor_type="row")
                 tags.zebra_stripes = True
@@ -98,21 +86,7 @@ class _GrantsTagsView(TabbedView, _ScopedView):
         self.ensure(grants, ttl)
         self.ensure(tags, ttl)
 
-        grants_table = self.query_one("#detail-grants", DataTable)
-        with self.keeping_cursor(grants_table):
-            grants_table.clear(columns=True)
-            grants_table.add_columns(*_GRANTS_COLUMNS)
-            for row in self.repo.raw_rows(grants):
-                grants_table.add_row(
-                    Text(format_timestamp_minutes(row.get("created_on"))),
-                    Text(row.get("privilege") or ""),
-                    Text(row.get("granted_on") or ""),
-                    Text(row.get("name") or ""),
-                    Text(row.get("granted_to") or ""),
-                    Text(row.get("grantee_name") or ""),
-                    Text(row.get("grant_option") or ""),
-                    Text(row.get("granted_by") or ""),
-                )
+        paint_grants(self, self.grants_panel, self.repo.raw_rows(grants))
 
         tags_table = self.query_one("#detail-tags", DataTable)
         with self.keeping_cursor(tags_table):

@@ -51,12 +51,10 @@ from typing import Any, ClassVar
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Static, TabbedContent, TabPane, TextArea
+from textual.widgets import DataTable, TabbedContent, TabPane, TextArea
 
-from snowcone.cache.repository import Repository
 from snowcone.format import format_bytes, format_timestamp_minutes, parse_timestamp
 from snowcone.models import (
-    ObjectRef,
     ObjectType,
     Scope,
     pipe_activity_history_scope,
@@ -67,9 +65,7 @@ from snowcone.settings import CACHE_TTL, PIPE_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import (
     DEFINITION,
-    HISTORY_NOTE,
     HISTORY_TABLE,
-    ITEM_DETAIL,
     HistoryView,
 )
 
@@ -94,20 +90,10 @@ class PipeView(HistoryView, ObjectView):
         *HistoryView.BINDINGS,
     ]
 
-    def __init__(self, repo: Repository, ref: ObjectRef) -> None:
-        super().__init__(repo, ref)
-        self.detail_rows: dict[str, dict[str, Any]] = {}
-
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
             with TabPane("[$accent bold]L[/]oad history", id="tab-history"):
-                yield Static("", id=HISTORY_NOTE)
-                history: DataTable[Text] = DataTable(
-                    id=HISTORY_TABLE, cursor_type="row"
-                )
-                history.zebra_stripes = True
-                yield history
-                yield Static("", id=ITEM_DETAIL, classes="-error")
+                yield from self.compose_history()
             with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
                 yield TextArea(
                     "",
@@ -200,13 +186,13 @@ class PipeView(HistoryView, ObjectView):
         with self.keeping_cursor(table):
             table.clear(columns=True)
             table.add_columns(*_HISTORY_COLUMNS)
-            self.detail_rows = {}
+            rows = self.history_panel.rows = {}
             for _, r in dated:
                 # The load's own identity, not its position: a new load arriving
                 # at the top would otherwise shift every row's key, and the
                 # cursor is found again by key after a repaint.
                 key = str(_merge_key(r))
-                self.detail_rows[key] = r
+                rows[key] = r
                 row_count = r.get("ROW_COUNT")
                 table.add_row(
                     Text(f"{row_count:,}" if row_count is not None else ""),
@@ -216,7 +202,7 @@ class PipeView(HistoryView, ObjectView):
                     Text(r.get("FILE_NAME") or ""),
                     key=key,
                 )
-        self.sync_item_detail(table.cursor_row)
+        self.history_panel.sync()
 
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)

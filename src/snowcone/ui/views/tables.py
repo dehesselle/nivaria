@@ -9,18 +9,17 @@ already drifted:
   silently pointed its tooltips at the wrong column. This one maps *column
   headers* to fields and resolves the index from the live table, so there is
   no ordering to keep in step.
-* **`TabbedView`** -- the two-line `action_show_tab`, once repeated in five
+* **`TabbedView`** -- the mnemonic `action_show_tab`, once repeated in five
   views.
-* **`ItemDetailView`** -- a panel below a table that describes whichever row
-  is highlighted, hidden when that row has nothing to say. `HistoryView`
-  (below) is its first consumer, for `PipeView`/`TaskView`'s load/run
-  errors; `ColumnsView` (`table_view.py`) is its second, for a column's
-  tags. Only `detail_text` and which table to watch differ per view --
-  this used to be baked into `HistoryView` alone, under names
-  (`HISTORY_DETAIL`, `history_rows`) that made it look error-specific when
-  it never actually was.
-* **`HistoryView`** -- adds a two-source history table on top of
-  `ItemDetailView`, plus the "capped/empty/errored" note above it.
+* **`PanelledTable`** -- a table plus the panel below it that describes
+  whichever row is highlighted, hidden when that row has nothing to say.
+  Used for `PipeView`/`TaskView`'s load/run errors, a column's tags
+  (`ColumnsView`, `table_view.py`) and a grantee's raw grants
+  (`grants.py`). A widget rather than the view mixin it used to be: the
+  Table view holds two of them (columns and grants), and a mixin had one
+  panel per view and answered every table's highlight.
+* **`HistoryView`** -- a history table in a `PanelledTable`, plus the
+  "capped/empty/errored" note above it.
   `PipeView` and `TaskView` had ~40 identical lines each; only the message
   a row wants to show actually differs, which is the one method a
   subclass supplies.
@@ -36,12 +35,14 @@ three, under its own ids -- silently picked up none of it.
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, ClassVar, Protocol
 
 from rich.text import Text
 from tcoda.widgets import DataTable
+from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Vertical
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable as TextualDataTable
 from textual.widgets import Static, TabbedContent
@@ -59,11 +60,8 @@ LIST_TABLE = "detail-list"
 LIST_NOTE = "detail-list-note"
 #: A single object's history table, and the panel describing its cursor row.
 HISTORY_TABLE = "detail-history"
-#: The panel describing whichever row is highlighted in whichever table an
-#: `ItemDetailView` is watching -- a history table's load/run error, or (see
-#: `ColumnsView`) a column's tags. Shared across mutually-exclusive views the
-#: same way HISTORY_TABLE/LIST_TABLE/DEFINITION are -- see the module
-#: docstring.
+#: The class of every `PanelledTable`'s panel, which `app.tcss` styles. A
+#: class, not a shared id: one view can hold two panels (see `PanelledTable`).
 ITEM_DETAIL = "detail-item"
 #: The line above a history table admitting that it is not the whole
 #: history -- see `HistoryView.sync_history_note`.
@@ -148,83 +146,117 @@ class TabbedView:
     """
 
     def action_show_tab(self, tab: str) -> None:
-        self.query_one(TabbedContent).active = f"tab-{tab}"  # type: ignore[attr-defined]
+        tabs = self.query_one(TabbedContent)  # type: ignore[attr-defined]
+        tabs.active = f"tab-{tab}"
+        # Focus follows into the tab just shown. A mnemonic only fires while
+        # focus is inside the view, usually on the table of the tab being
+        # left, and Textual drops focus from a widget it hides rather than
+        # moving it -- so the next mnemonic would go nowhere.
+        pane = tabs.get_pane(f"tab-{tab}")
+        target = next((w for w in pane.query("*") if w.focusable), None)
+        if target is not None:
+            target.focus()
 
 
-class ItemDetailView:
-    """A panel below a table, describing whichever row is highlighted.
+class PanelledTable(Vertical):
+    """A table, and below it a panel describing whichever row is highlighted.
 
-    `HistoryView` (for `PipeView`/`TaskView`'s load/run errors) and
-    `ColumnsView` (for a column's tags) both merge/list rows into one table
-    and then want to say something about the cursor row that does not fit in
-    a cell. Everything about *that* is the same across both; only
-    `detail_text` and which table to watch (`detail_table_id`) differ.
+    The owning view repaints the table, stores this paint's rows in `rows`
+    under the keys it stamped into the table, then calls `sync`. `describe`
+    turns one of those rows into the panel's text, or None to hide it.
+
+    Only its own table's highlights are answered. A view with two of these
+    (the Table view's columns and grants) would otherwise describe a
+    grantee with the column-tags text, looked up under the wrong key.
     """
 
-    #: The id of the DataTable this panel watches -- set by the subclass,
-    #: since each view's own table has its own id (HISTORY_TABLE,
-    #: "detail-columns", ...).
-    detail_table_id: ClassVar[str]
+    def __init__(
+        self,
+        table: TextualDataTable,
+        describe: Callable[[dict[str, Any]], str | None],
+        *,
+        error: bool = False,
+    ) -> None:
+        super().__init__(classes="panelled-table")
+        self.table = table
+        self.describe = describe
+        #: This paint's rows, keyed by the row key stamped into the table.
+        self.rows: dict[str, dict[str, Any]] = {}
+        # Its own id, derived from the table's, so a view with two panels can
+        # still name each one.
+        self.panel = Static(
+            "",
+            id=f"{table.id}-item",
+            classes=f"{ITEM_DETAIL} -error" if error else ITEM_DETAIL,
+        )
 
-    #: This paint's rows, keyed by the row key stamped into the table --
-    #: looked back up when a row is highlighted. Set by the subclass on
-    #: every repaint.
-    detail_rows: dict[str, dict[str, Any]]
-
-    @abstractmethod
-    def detail_text(self, row: dict[str, Any]) -> str | None:
-        """What the panel should say about `row`, or None to hide it."""
+    def compose(self) -> ComposeResult:
+        yield self.table
+        yield self.panel
 
     def on_data_table_row_highlighted(
         self, event: TextualDataTable.RowHighlighted
     ) -> None:
-        self._sync_item_detail_from_key(
-            event.row_key.value if event.row_key is not None else None
-        )
+        if event.data_table is not self.table:
+            return
+        self._sync_from_key(event.row_key.value if event.row_key is not None else None)
 
-    def sync_item_detail(self, cursor_row: int) -> None:
+    def sync(self) -> None:
         """Resync against whatever the cursor is actually on after a repaint
         -- not left to RowHighlighted alone, since it's not guaranteed to
         re-fire on a table.clear()-and-repopulate while a row is already
         highlighted."""
-        # Textual's type, not tcoda's: this panel watches whichever table a
-        # view points it at, and a plain history table has no reason to be
-        # sortable or to carry tooltips.
-        table = self.query_one(f"#{self.detail_table_id}", TextualDataTable)  # type: ignore[attr-defined]
         try:
-            row_key, _ = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
+            row_key, _ = self.table.coordinate_to_cell_key(
+                Coordinate(self.table.cursor_row, 0)
+            )
         except CellDoesNotExist:
-            self._show_item_detail(None)
+            self._show(None)
             return
-        self._sync_item_detail_from_key(row_key.value)
+        self._sync_from_key(row_key.value)
 
-    def _sync_item_detail_from_key(self, key: str | None) -> None:
-        row = self.detail_rows.get(key) if key is not None else None
-        self._show_item_detail(self.detail_text(row) if row else None)
+    def _sync_from_key(self, key: str | None) -> None:
+        row = self.rows.get(key) if key is not None else None
+        self._show(self.describe(row) if row else None)
 
-    def _show_item_detail(self, text: str | None) -> None:
-        panel = self.query_one(f"#{ITEM_DETAIL}", Static)  # type: ignore[attr-defined]
+    def _show(self, text: str | None) -> None:
         if text:
-            panel.update(Text(text))
-            panel.display = True
+            self.panel.update(Text(text))
+            self.panel.display = True
         else:
-            panel.display = False
+            self.panel.display = False
 
 
-class HistoryView(TabbedView, ItemDetailView):
-    """A history table plus its `ItemDetailView` panel, and the note above
-    the table admitting when it was capped, empty, or errored.
+class HistoryView(TabbedView):
+    """A history table in a `PanelledTable`, and the note above the table
+    admitting when it was capped, empty, or errored.
 
     `PipeView` and `TaskView` both merge two sources into one table --
     everything about that (and about the panel below it) is the same; only
-    `detail_text` differs, per `ItemDetailView`.
+    `detail_text` differs.
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("d", "show_tab('definition')", "Definition", show=False),
     ]
 
-    detail_table_id = HISTORY_TABLE
+    #: Built in `compose_history`, repainted by the subclass.
+    history_panel: PanelledTable
+
+    @abstractmethod
+    def detail_text(self, row: dict[str, Any]) -> str | None:
+        """What the panel should say about a history row, or None to hide
+        it."""
+
+    def compose_history(self) -> ComposeResult:
+        """The note, the history table and the panel describing its row."""
+        yield Static("", id=HISTORY_NOTE)
+        history: TextualDataTable[Text] = TextualDataTable(
+            id=HISTORY_TABLE, cursor_type="row"
+        )
+        history.zebra_stripes = True
+        self.history_panel = PanelledTable(history, self.detail_text, error=True)
+        yield self.history_panel
 
     def sync_history_note(
         self,

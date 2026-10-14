@@ -322,6 +322,18 @@ def fetch_page(
             assert scope.database is not None
             # A schema or database's grant list is bounded, same reasoning
             # as show_columns/table_stats being deliberately unpaged.
+            if scope.table is not None:
+                assert scope.schema is not None
+                assert scope.object_type is not None
+                return Page(
+                    gateway.show_grants_on_object(
+                        scope.object_type,
+                        scope.database,
+                        scope.schema,
+                        scope.table,
+                        allow_reconnect=allow_reconnect,
+                    ),
+                )
             if scope.schema is not None:
                 return Page(
                     gateway.show_grants_on_schema(

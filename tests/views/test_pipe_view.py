@@ -281,7 +281,7 @@ async def test_the_highlighted_rows_error_shows_in_the_history_detail_panel(
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        panel = pane.query_one("#detail-item", Static)
+        panel = pane.query_one("#detail-history-item", Static)
         assert panel.display
         assert "Line 42" in str(panel.render())
         assert "Numeric value 'x' is not recognized" in str(panel.render())
@@ -297,7 +297,7 @@ async def test_a_row_with_no_error_leaves_the_history_detail_panel_hidden(
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        panel = pane.query_one("#detail-item", Static)
+        panel = pane.query_one("#detail-history-item", Static)
         assert not panel.display
 
 
@@ -325,7 +325,7 @@ async def test_highlighting_a_different_history_row_updates_the_detail_panel(
         pane.show(ref)
         await pilot.pause()
         table = pane.query_one("#detail-history", DataTable)
-        panel = pane.query_one("#detail-item", Static)
+        panel = pane.query_one("#detail-history-item", Static)
         # Newest first: row 0 is "bad.csv.gz", the errored one.
         assert panel.display
         table.move_cursor(row=1)
@@ -353,13 +353,13 @@ async def test_a_repaint_does_not_leave_a_stale_error_showing(repo) -> None:
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        assert pane.query_one("#detail-item", Static).display
+        assert pane.query_one("#detail-history-item", Static).display
 
         # Same file/time key, now with no error -- overwrites the row.
         put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=when)
         pane.cache_updated(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
         await pilot.pause()
-        assert not pane.query_one("#detail-item", Static).display
+        assert not pane.query_one("#detail-history-item", Static).display
 
 
 async def test_the_definition_tab_shows_the_pipes_raw_sql(repo) -> None:

@@ -248,6 +248,20 @@ def show_grants_on_database(database: str) -> str:
     return f"SHOW GRANTS ON DATABASE {quote_identifier(database)}"
 
 
+def show_grants_on_object(
+    object_type: ObjectType, database: str, schema: str, name: str
+) -> str:
+    """Every grant on one object, e.g. `SHOW GRANTS ON TABLE`.
+
+    There is no `IN SCHEMA` form to batch this the way the object lists are
+    primed, so it is one round trip per object -- which is why the Table
+    view only asks for it while its Grants tab is shown. Unpaged, see
+    `show_grants_on_schema`.
+    """
+    target = ".".join(quote_identifier(part) for part in (database, schema, name))
+    return f"SHOW GRANTS ON {object_type.value} {target}"
+
+
 def tag_references(database: str) -> str:
     """Tags applied to one schema or one database.
 

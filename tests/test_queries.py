@@ -285,3 +285,10 @@ def test_show_columns_in_a_database_or_schema_asks_for_no_page() -> None:
         queries.show_columns_in_schema("MYDB", "PUBLIC")
         == 'SHOW COLUMNS IN SCHEMA "MYDB"."PUBLIC"'
     )
+
+
+def test_show_grants_on_object_names_the_type_and_quotes_every_part() -> None:
+    assert (
+        queries.show_grants_on_object(ObjectType.TABLE, "MyDb", "PUBLIC", "Orders")
+        == 'SHOW GRANTS ON TABLE "MyDb"."PUBLIC"."Orders"'
+    )

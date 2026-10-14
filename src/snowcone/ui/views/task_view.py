@@ -38,12 +38,10 @@ from typing import Any, ClassVar
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Static, TabbedContent, TabPane, TextArea
+from textual.widgets import DataTable, TabbedContent, TabPane, TextArea
 
-from snowcone.cache.repository import Repository
 from snowcone.format import format_timestamp_minutes, parse_timestamp
 from snowcone.models import (
-    ObjectRef,
     ObjectType,
     Scope,
     task_activity_history_scope,
@@ -53,9 +51,7 @@ from snowcone.settings import CACHE_TTL, TASK_HISTORY_SHOW_DAYS, config
 from snowcone.ui.views.base import ObjectView, register_view
 from snowcone.ui.views.tables import (
     DEFINITION,
-    HISTORY_NOTE,
     HISTORY_TABLE,
-    ITEM_DETAIL,
     HistoryView,
 )
 
@@ -71,22 +67,10 @@ class TaskView(HistoryView, ObjectView):
         *HistoryView.BINDINGS,
     ]
 
-    def __init__(self, repo: Repository, ref: ObjectRef) -> None:
-        super().__init__(repo, ref)
-        #: Keyed by QUERY_ID here, unlike PipeView's positional key: a task
-        #: run has Snowflake's own identifier, a pipe's file load does not.
-        self.detail_rows: dict[str, dict[str, Any]] = {}
-
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
             with TabPane("[$accent bold]R[/]un history", id="tab-history"):
-                yield Static("", id=HISTORY_NOTE)
-                history: DataTable[Text] = DataTable(
-                    id=HISTORY_TABLE, cursor_type="row"
-                )
-                history.zebra_stripes = True
-                yield history
-                yield Static("", id=ITEM_DETAIL, classes="-error")
+                yield from self.compose_history()
             with TabPane("[$accent bold]D[/]efinition", id="tab-definition"):
                 yield TextArea(
                     "",
@@ -155,10 +139,12 @@ class TaskView(HistoryView, ObjectView):
         with self.keeping_cursor(table):
             table.clear(columns=True)
             table.add_columns(*_HISTORY_COLUMNS)
-            self.detail_rows = {}
+            rows = self.history_panel.rows = {}
             for _, r in dated:
+                # Keyed by QUERY_ID, unlike PipeView's merge key: a task run
+                # has Snowflake's own identifier, a pipe's file load does not.
                 key = str(r.get("QUERY_ID"))
-                self.detail_rows[key] = r
+                rows[key] = r
                 table.add_row(
                     Text(format_timestamp_minutes(r.get("SCHEDULED_TIME"))),
                     Text(format_timestamp_minutes(r.get("QUERY_START_TIME"))),
@@ -166,7 +152,7 @@ class TaskView(HistoryView, ObjectView):
                     Text(r.get("STATE") or ""),
                     key=key,
                 )
-        self.sync_item_detail(table.cursor_row)
+        self.history_panel.sync()
 
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)

@@ -13,6 +13,7 @@ from snowcone.models import (
     databases_scope,
     grants_scope,
     materialized_view_stats_scope,
+    object_grants_scope,
     objects_scope,
     pipe_activity_history_scope,
     pipe_activity_scope,
@@ -152,6 +153,15 @@ def test_a_schema_level_grants_scope_and_a_database_level_grants_scope_have_diff
     assert schema_level != database_level
 
 
+def test_an_object_level_grants_scope_is_keyed_by_its_type_and_name() -> None:
+    """A pipe may share a table's name, and each has grants of its own."""
+    table = object_grants_scope(ObjectRef(ObjectType.TABLE, "MYDB", "PUBLIC", "X"))
+    pipe = object_grants_scope(ObjectRef(ObjectType.PIPE, "MYDB", "PUBLIC", "X"))
+    assert table.key == "grants:tables:MYDB.PUBLIC.X"
+    assert pipe.key != table.key
+    assert table.key != grants_scope("MYDB", "PUBLIC").key
+
+
 def test_a_schema_level_tag_references_scope_and_a_database_level_one_have_different_keys() -> (
     None
 ):
@@ -182,9 +192,10 @@ def test_a_schema_level_tag_references_scope_and_a_database_level_one_have_diffe
     ids=lambda scope: scope.key,
 )
 def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
-    """object_type says "this is a SHOW listing of one object type", which
-    only OBJECTS and DATABASE_PRIME are. Every scope here narrows by
-    database/schema/table instead, so it stays unset."""
+    """object_type says which object type an OBJECTS listing or
+    DATABASE_PRIME is for, or which kind of object an object-level GRANTS
+    scope names. Every scope here narrows by database/schema/table instead,
+    so it stays unset."""
     assert scope.object_type is None
 
 
@@ -212,6 +223,10 @@ def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
         (
             pipe_history_scope("MYDB", "S", "P"),
             [objects_scope(ObjectType.PIPE, "MYDB", "S")],
+        ),
+        (
+            object_grants_scope(ObjectRef(ObjectType.TABLE, "MYDB", "S", "T")),
+            [objects_scope(ObjectType.TABLE, "MYDB", "S")],
         ),
         (
             task_activity_history_scope("MYDB", "S", "T"),

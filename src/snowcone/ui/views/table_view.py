@@ -1,8 +1,14 @@
-"""Detail view for tables: their columns.
+"""Detail view for tables: their columns and their grants.
 
 Also hosts `ColumnsView`, the shared column-list body -- `view_view.py`
 reuses it directly for its own Columns tab, rather than duplicating this
-DataTable/scope/update_content logic for a view's columns."""
+DataTable/scope/update_content logic for a view's columns.
+
+The Grants tab is fetched only while it is shown. `SHOW GRANTS ON TABLE`
+has no schema-wide form to prime from, so every table is its own round
+trip, and opening a table already costs two (its columns and their tags).
+Fetching grants on open as well would add a third to every table the tree
+cursor passes over, for a tab most visits never look at."""
 
 from __future__ import annotations
 
@@ -12,7 +18,8 @@ from typing import Any, ClassVar
 from rich.text import Text
 from tcoda.widgets import DataTable
 from textual.app import ComposeResult
-from textual.widgets import Static
+from textual.binding import Binding
+from textual.widgets import TabbedContent, TabPane
 
 from snowcone.cache.repository import Repository
 from snowcone.models import (
@@ -22,38 +29,39 @@ from snowcone.models import (
     Scope,
     column_tag_references_scope,
     columns_scope,
+    object_grants_scope,
 )
 from snowcone.settings import CACHE_TTL, config
 from snowcone.ui.views.base import ObjectView, register_view
-from snowcone.ui.views.tables import ITEM_DETAIL, ItemDetailView
+from snowcone.ui.views.grants import compose_grants, paint_grants
+from snowcone.ui.views.tables import PanelledTable, TabbedView
 
 #: Ordering the table falls back to, and returns to whenever this (reused)
 #: view is pointed at a different object -- see `show`.
 _DEFAULT_SORT = "ordinal"
 
 
-class ColumnsView(ItemDetailView, ObjectView):
+class ColumnsView(ObjectView):
     """Shared body for the types whose detail is a column list.
 
     Rows and size and comment for the table itself (not its columns) are
     not shown here -- they're already visible one step earlier, as columns
     in TableListView's own list of every table in the schema.
 
-    Also an `ItemDetailView`: the panel below the table shows the highlighted
-    column's tags, one `TAG = VALUE` per line (a multi-value tag's values
-    joined on that one line), the same mechanism `PipeView`/
+    The table sits in a `PanelledTable`: the panel below it shows the
+    highlighted column's tags, one `TAG = VALUE` per line (a multi-value
+    tag's values joined on that one line), the same mechanism `PipeView`/
     `TaskView` use for a history row's error.
     """
 
-    detail_table_id = "detail-columns"
+    #: Built in `compose`. Its `rows` double as the values the sort keys
+    #: rank by: the table is handed a RowKey and looks the row up there, so
+    #: a column sorts by what it means rather than by the text it renders
+    #: -- Tags by its count, Ordinal as a number.
+    columns_panel: PanelledTable
 
     def __init__(self, repo: Repository, ref: ObjectRef) -> None:
         super().__init__(repo, ref)
-        #: Per-row values the sort keys rank by, keyed the same way the table
-        #: keys its rows. The table is handed a RowKey and looks the row up
-        #: here, so a column sorts by what it means rather than by the text
-        #: it renders -- Tags by its count, Ordinal as a number.
-        self.detail_rows: dict[str, dict[str, Any]] = {}
         #: The table sorts itself and keeps doing so; only being pointed at a
         #: different object puts it back to the default.
         self._reset_sort = True
@@ -65,8 +73,8 @@ class ColumnsView(ItemDetailView, ObjectView):
     def compose(self) -> ComposeResult:
         table = DataTable(id="detail-columns", cursor_type="row")
         table.zebra_stripes = True
-        yield table
-        yield Static("", id=ITEM_DETAIL)
+        self.columns_panel = PanelledTable(table, self.detail_text)
+        yield self.columns_panel
 
     def columns_scope(self) -> Scope:
         return columns_scope(self.ref.database, self.ref.schema, self.ref.name)
@@ -80,8 +88,8 @@ class ColumnsView(ItemDetailView, ObjectView):
         return [self.columns_scope(), self.column_tags_scope()]
 
     def _rank(self, field: str, default: Any) -> Callable[[Any], Any]:
-        """Rank a row by one of the values stashed in `detail_rows`."""
-        return lambda row_key: self.detail_rows.get(row_key.value, {}).get(
+        """Rank a row by one of the values stashed in the panel's rows."""
+        return lambda row_key: self.columns_panel.rows.get(row_key.value, {}).get(
             field, default
         )
 
@@ -160,14 +168,14 @@ class ColumnsView(ItemDetailView, ObjectView):
 
         with self.keeping_cursor(table):
             table.clear()
-            self.detail_rows = {}
+            rows = self.columns_panel.rows = {}
             for column in self.repo.columns(scope).rows:
                 tags = tags_by_column.get(column.column_name, {})
                 key = column.column_name
                 # Rank values, not display values. The table is handed a RowKey
                 # and reads these back, so rows go in in whatever order the cache
                 # had them and the table puts them in order itself.
-                self.detail_rows[key] = {
+                rows[key] = {
                     "tags": tags,
                     "ordinal": column.ordinal_position,
                     "name": column.column_name.casefold(),
@@ -191,7 +199,7 @@ class ColumnsView(ItemDetailView, ObjectView):
             # cursor is put back by row index as this block ends, and an
             # index taken before the sort would point at the wrong column.
             table.sort_by(sort, reverse=reverse)
-        self.sync_item_detail(table.cursor_row)
+        self.columns_panel.sync()
 
     def detail_text(self, row: dict[str, Any]) -> str | None:
         """A column's own tags, for the panel under the table."""
@@ -204,5 +212,56 @@ class ColumnsView(ItemDetailView, ObjectView):
 
 
 @register_view
-class TableView(ColumnsView):
+class TableView(TabbedView, ColumnsView):
+    """Columns and Grants, mnemonic switchable (`c`/`g`, hidden from the
+    footer), the same pattern `ViewView` uses for Columns and Definition."""
+
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TABLE
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("c", "show_tab('columns')", "Columns", show=False),
+        Binding("g", "show_tab('grants')", "Grants", show=False),
+    ]
+
+    #: Built in `compose`.
+    grants_panel: PanelledTable
+
+    def compose(self) -> ComposeResult:
+        with TabbedContent(initial="tab-columns"):
+            with TabPane("[$accent bold]C[/]olumns", id="tab-columns"):
+                yield from super().compose()
+            with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
+                self.grants_panel = compose_grants()
+                yield self.grants_panel
+
+    def grants_scope(self) -> Scope:
+        return object_grants_scope(self.ref)
+
+    def _grants_shown(self) -> bool:
+        return self.is_mounted and self.query_one(TabbedContent).active == "tab-grants"
+
+    def scopes(self) -> list[Scope]:
+        # Only while the tab is up -- see the module docstring. Listing it
+        # otherwise would have the staleness sweep (which watches this) fetch
+        # grants for a tab nobody is looking at, and route their updates
+        # into a repaint of it.
+        scopes = super().scopes()
+        if self._grants_shown():
+            scopes.append(self.grants_scope())
+        return scopes
+
+    def update_content(self) -> None:
+        super().update_content()
+        if self._grants_shown():
+            self._update_grants()
+
+    def _update_grants(self) -> None:
+        scope = self.grants_scope()
+        self.ensure(scope, config.get(CACHE_TTL))
+        paint_grants(self, self.grants_panel, self.repo.raw_rows(scope))
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        if event.pane.id == "tab-grants":
+            self._update_grants()

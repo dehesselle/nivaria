@@ -361,7 +361,7 @@ the same exception `information_schema_columns` established).
 | `TASK_ACTIVITY` | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | Tasks (n): Last Scheduled, Last Run State | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view Run history (older half) | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view Run history (recent half) | warehouse |
-| `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE` | Schema/Database view Grants | — |
+| `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE`/`ON TABLE` | Schema/Database/Table view Grants | — |
 | `TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES` | Schema/Database view Tags | warehouse |
 | `COLUMN_TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` | Columns view Tags column + detail panel | warehouse |
 
@@ -395,7 +395,21 @@ detail panel joins one tag's values onto a single `TAG = a, b` line.
 Snowflake's own visibility rules still apply on top: `SHOW GRANTS ON <object>`
 only returns what the active role owns, has `MANAGE GRANTS` on, or reaches
 via `ACCOUNTADMIN`/`SECURITYADMIN`, so a short or empty Grants tab under a
-lesser role is correct, not an incomplete fetch.
+lesser role is correct, not an incomplete fetch. It also lists **direct**
+grants only: a role that holds a privilege because another role was granted
+to it does not appear. The Grants tab answers "who was granted what on this
+object", not "can role X read it".
+
+A table's grants are the same `GRANTS` scope narrowed to one object (`table`
+holds its name and `object_type` its kind, since the statement needs the
+noun), written to the same `show_grants` mirror under its own `_scope`.
+Unlike everything else a table shows, there is **no batch form**: `SHOW
+GRANTS ON TABLE` takes one table, and neither alternative fits -- `SHOW
+GRANTS TO ROLE` is grouped by role, not by schema, and
+`ACCOUNT_USAGE.GRANTS_TO_ROLES` is rejected for the same reasons as
+`ACCOUNT_USAGE.TAG_REFERENCES` above. So every table is its own round trip,
+and the Table view asks for it only while its Grants tab is shown (see
+"What decides a view's shape").
 
 #### One row per pipe, in SQL — a real incident
 
@@ -541,7 +555,8 @@ but it's worth revisiting on its own if the list turns out to need fresher
 data than that.
 
 `object_type` on a `Scope` means "this is a `SHOW` listing of one object
-type", and nothing else keys off it: `MainScreen.on_scope_needed` upgrades a
+type" -- or, on an object-level `GRANTS` scope, which kind of object it names
+-- and nothing keys off it being set: `MainScreen.on_scope_needed` upgrades a
 scope to a whole-database `SHOW`-prime when its *type* is `OBJECTS`, not when
 it happens to carry both a database and an object type. That distinction used
 to be a live landmine — the check was structural, so any new SELECT-backed
@@ -1162,15 +1177,34 @@ Views vary in exactly three ways, and each is a consequence of what Snowflake
 actually returns rather than a style choice:
 
 - **A single `DataTable`** when there is one thing to show: `TableListView`,
-  `ViewListView`, `StageListView`, `TaskListView`, `TableView`.
+  `ViewListView`, `StageListView`, `TaskListView`.
 - **Tabs** when there are two genuinely different shapes for one node, with
   mnemonic switching (hidden from the footer, the pattern sibling project
   snakecam's `JobDetailsScreen` established): `PipeView` and `TaskView`
-  (history + definition), `ViewView` (columns + definition), `PipeListView`
-  (status + history), `SchemaView`/`DatabaseView` (grants + tags).
+  (history + definition), `ViewView` (columns + definition), `TableView`
+  (columns + grants), `PipeListView` (status + history),
+  `SchemaView`/`DatabaseView` (grants + tags). Switching by mnemonic moves
+  focus into the tab just shown: a mnemonic only fires while focus is inside
+  the view, and Textual drops focus from a widget it hides instead of moving
+  it, so the next mnemonic used to go nowhere.
 - **A detail panel under a table**, for what does not fit in a cell: the
-  history views' error message for the highlighted row, or (`ColumnsView`)
-  a column's tags.
+  history views' error message for the highlighted row, a column's tags
+  (`ColumnsView`), or a grantee's individual grants. It describes the
+  highlighted *row*, never the object itself -- which is why a table's grants
+  are a tab of their own and not a second panel under its column list: one
+  would follow the cursor and the other never move. It shows itself when the
+  row has something to say, rather than behind a toggle, because appearing
+  is the signal: a load error showing up is the point.
+
+A tab whose scope costs one round trip **per object**, and which is not the
+tab a view opens on, is fetched only while it is shown. Today that is the
+Table view's Grants: the tree cursor passes over tables far more often than
+anyone opens that tab, and each pass would otherwise cost a `SHOW GRANTS` on
+top of the two queries a table already makes. The scope is listed in
+`scopes()` only while the tab is up -- the same conditional `PipeView`
+applies to its history -- so the sweep and update routing ignore it
+otherwise. Switching tables while on Grants keeps the tab, and so fetches
+each table's grants, which is what is on screen.
 
 Two of those decisions are worth their reasoning:
 
@@ -1219,20 +1253,26 @@ piece is there because the duplicated version had already drifted:
   at the top. The column list sorts synchronously inside the block, because
   tcoda's on-idle re-sort would otherwise move the rows after the cursor
   was placed.
-- **`ItemDetailView`** — the panel below a table describing whichever row is
-  highlighted, hidden when that row has nothing to say. Two consumers:
-  `HistoryView` (below), for `PipeView`/`TaskView`'s load/run errors, and
-  `ColumnsView` (`table_view.py`), for a column's tags. Only `detail_text`
-  and which table to watch differ per view.
-- **`HistoryView`** — adds the two-source history table and its
-  capped/empty/errored note on top of `ItemDetailView`, shared by `PipeView`
-  and `TaskView`.
+- **`PanelledTable`** — a table plus the panel below it describing
+  whichever row is highlighted, hidden when that row has nothing to say. Its
+  consumers: `HistoryView` (below), for `PipeView`/`TaskView`'s load/run
+  errors; `ColumnsView` (`table_view.py`), for a column's tags; and the
+  grants table (`grants.py`). Only the describing function differs. It is a
+  widget, not the view mixin it started as: the Table view holds two (columns
+  and grants), and the mixin had one panel per view and answered every
+  table's highlight with it.
+- **`HistoryView`** — the two-source history table in a `PanelledTable`, and
+  its capped/empty/errored note, shared by `PipeView` and `TaskView`.
+- **`grants.py`** — the one Grants rendering, for the schema, database and
+  table views alike (see "Column headers mirror Snowflake" for its shape).
 
-The widget ids are shared too (`detail-list`, `detail-history`, `detail-item`,
-`detail-definition`, ...), and deliberately: exactly one view is mounted at a
-time, so `#detail-history` means "whichever history table is on screen", and
-`#detail-item` means "whichever row's detail is on screen" whether that's an
-error or a column's tags. The per-view ids these replaced had already cost
+The widget ids are shared too (`detail-list`, `detail-history`,
+`detail-grants`, `detail-definition`, ...), and deliberately: exactly one
+view is mounted at a time, so `#detail-history` means "whichever history
+table is on screen". The panel is the exception, because one view can hold
+two: it is styled by the class `detail-item`, and each panel's id is its
+table's plus `-item` (`detail-columns-item`, `detail-grants-item`). The
+per-view ids these replaced had already cost
 something real — `app.tcss` styled the pipe view's history table, detail
 panel and definition pane, and the task view, a later copy of all three under
 its own ids, silently picked up none of it.
@@ -1274,6 +1314,20 @@ schema with it would cost one round trip per pipe. The column earns its place
 because an empty `invalid_reason` cell alone reads as "nothing fetched"
 rather than "this pipe is fine", but only two of `executionState`'s values
 are reachable this way.
+
+**Grants are one row per grantee**, not one per `SHOW GRANTS` row: Grantee,
+Granted To and Privileges, with OWNERSHIP first and `+` marking a privilege
+held with grant option. The cache keeps every raw row regardless; this is
+only how the tab shows them. The tab exists to answer "what may this role do
+here?", and one row per privilege answers that only by scanning rows that
+differ in a single cell. Grouping restates rather than invents -- every
+value shown is Snowflake's, and each header tooltips the field it reads --
+and it loses nothing: what cannot share one row (each privilege's
+`granted_by`, `created_on`, `grant_option`) is listed in the panel under
+the table for the highlighted grantee. `granted_on` and `name` are dropped
+outright, since they are the same on every row of one object's grants. The
+raw layout would serve an audit of who granted what and when better; the
+panel covers that case one grantee at a time.
 
 
 ---
@@ -1747,6 +1801,16 @@ which turned out not to be worth chasing — see the last bullet below:
 - `granted_by_role_type` on `SHOW GRANTS` is **no longer speculative**: it
   exists and reads `'ROLE'` on real `SHOW GRANTS ON SCHEMA`/`ON DATABASE`
   output.
+- `SHOW GRANTS ON TABLE` (object-level `GRANTS`) was checked on 2026-10-14
+  against the sandbox account, through `PoolGateway` and a throwaway cache:
+  it returns **exactly the same nine columns** as `ON SCHEMA`, with
+  `granted_on = 'TABLE'` and `name` the table's fully qualified name, and its
+  rows sit next to the schema's in `show_grants` without touching them.
+  `grant_option` arrives as the strings `'true'`/`'false'`, which is what
+  `grants.py` tests for. Exercised by granting `SELECT ... WITH GRANT OPTION`
+  and `INSERT` on `RENETEST1.BLUE_THORN.CAPABLE_OPTION` to `PUBLIC`, then
+  revoking both -- nothing left behind. The owner's `OWNERSHIP` row also
+  reads `grant_option = 'true'`. **Confirmed.**
 - `information_schema_copy_history`'s `PIPE_NAME` output column being
   bare/unqualified, and its `TABLE_NAME` argument accepting a
   fully-qualified `catalog.schema.table` string, are **both confirmed** —

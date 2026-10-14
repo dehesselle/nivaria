@@ -1,13 +1,14 @@
-"""TableView: a table's column list."""
+"""TableView: a table's column list and its grants."""
 
 from __future__ import annotations
 
 from tcoda.widgets import DataTable as TcodaDataTable
-from textual.widgets import DataTable, Static
+from textual.widgets import DataTable, Static, TabbedContent
 
 from snowcone.models import (
     column_tag_references_scope,
     columns_scope,
+    object_grants_scope,
 )
 from snowcone.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
@@ -15,6 +16,7 @@ from tests.views.harness import (
     load,
     put_column_tag,
     put_columns,
+    put_object_grant,
     put_table,
 )
 
@@ -355,7 +357,7 @@ async def test_a_tagged_columns_tags_show_in_the_detail_panel(repo) -> None:
         pane.show(ref)
         await pilot.pause()
         table = pane.query_one("#detail-columns", DataTable)
-        panel = pane.query_one("#detail-item", Static)
+        panel = pane.query_one("#detail-columns-item", Static)
 
         # Row 0 is ID, untagged.
         assert not panel.display
@@ -380,7 +382,7 @@ async def test_a_multi_value_tag_shows_its_values_on_one_line(repo) -> None:
         pane = app.query_one(DetailPane)
         pane.show(ref)
         await pilot.pause()
-        panel = pane.query_one("#detail-item", Static)
+        panel = pane.query_one("#detail-columns-item", Static)
         assert panel.display
         assert "PII = email, phone" in str(panel.render())
 
@@ -552,3 +554,120 @@ async def test_moving_to_another_table_starts_at_the_first_column(repo) -> None:
         pane.show(customers)
         await pilot.pause()
         assert table.cursor_row == 0
+
+
+_GRANTS_KEY = "grants:tables:MYDB.PUBLIC.ORDERS"
+
+
+async def test_the_columns_tab_is_shown_first_and_asks_for_no_grants(repo) -> None:
+    """SHOW GRANTS ON TABLE is a round trip per table -- passing over tables
+    in the tree must not pay it for a tab nobody opened."""
+    ref = put_table(repo, "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        assert view.query_one(TabbedContent).active == "tab-columns"
+        assert _GRANTS_KEY not in app.needed
+        assert object_grants_scope(ref) not in view.scopes()
+
+
+async def test_showing_the_grants_tab_asks_for_the_tables_grants(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        view.action_show_tab("grants")
+        await pilot.pause()
+        assert _GRANTS_KEY in app.needed
+        assert object_grants_scope(ref) in view.scopes()
+
+
+async def test_the_table_tab_mnemonics_switch_tabs(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        tabs = view.query_one(TabbedContent)
+        # Bindings reach the view only through the focus chain.
+        pane.query_one("#detail-columns", DataTable).focus()
+        await pilot.press("g")
+        assert tabs.active == "tab-grants"
+        await pilot.press("c")
+        assert tabs.active == "tab-columns"
+
+
+async def test_the_grants_tab_lists_one_row_per_grantee(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_object_grant(repo, "ORDERS", grantee_name="ANALYST", privilege="SELECT")
+    put_object_grant(repo, "ORDERS", grantee_name="ETL", privilege="INSERT")
+    put_object_grant(
+        repo, "ORDERS", grantee_name="ETL", privilege="UPDATE", grant_option="true"
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        view.action_show_tab("grants")
+        await pilot.pause()
+        table = pane.query_one("#detail-grants", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((1, 0)).plain == "ETL"
+        assert table.get_cell_at((1, 2)).plain == "INSERT, UPDATE+"
+
+
+async def test_a_grantee_and_a_column_each_drive_only_their_own_panel(repo) -> None:
+    """Both tabs are mounted at once, so each panel must answer only its own
+    table's highlight -- a grantee looked up among the columns would hide
+    the tags panel, and the other way round."""
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("EMAIL", "TEXT"))
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII", TAG_VALUE="true")
+    put_object_grant(repo, "ORDERS", grantee_name="ANALYST")
+    put_object_grant(repo, "ORDERS", grantee_name="ETL")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        tags_panel = pane.query_one("#detail-columns-item", Static)
+        assert "PII = true" in str(tags_panel.render())
+
+        view.action_show_tab("grants")
+        await pilot.pause()
+        grants = pane.query_one("#detail-grants", DataTable)
+        grants_panel = pane.query_one("#detail-grants-item", Static)
+        grants.move_cursor(row=1)
+        await pilot.pause()
+        assert str(grants_panel.render()).startswith("SELECT")
+        assert "PII = true" in str(tags_panel.render())
+
+
+async def test_a_grants_update_repaints_only_while_the_tab_is_shown(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show(ref)
+        await pilot.pause()
+        grants = pane.query_one("#detail-grants", DataTable)
+
+        put_object_grant(repo, "ORDERS")
+        pane.cache_updated(object_grants_scope(ref))
+        await pilot.pause()
+        assert grants.row_count == 0
+
+        view.action_show_tab("grants")
+        await pilot.pause()
+        assert grants.row_count == 1
+
+        put_object_grant(repo, "ORDERS", grantee_name="ETL")
+        pane.cache_updated(object_grants_scope(ref))
+        await pilot.pause()
+        assert grants.row_count == 2

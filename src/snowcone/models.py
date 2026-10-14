@@ -137,7 +137,9 @@ class ScopeType(StrEnum):
     TASK_HISTORY = "task_history"
     #: Every grant on one schema or one database (schema is None), sourced by
     #: SHOW GRANTS ON SCHEMA/DATABASE -- metadata layer, needs no warehouse,
-    #: same as every plain SHOW scope.
+    #: same as every plain SHOW scope. With `table` set it is one object's
+    #: grants instead (SHOW GRANTS ON <object_type>), which has no schema-wide
+    #: form and so costs one round trip per object.
     #: granted_to can be ROLE, DATABASE ROLE, USER, SHARE or APPLICATION
     #: ROLE -- deliberately not filtered down to roles only.
     GRANTS = "grants"
@@ -179,9 +181,11 @@ class Scope:
     type: ScopeType
     database: str | None = None
     schema: str | None = None
-    #: Which object type an OBJECTS listing or a DATABASE_PRIME is for. Every
-    #: other scope type leaves it unset -- they narrow by database/schema/
-    #: table instead, and nothing keys off this field except those two.
+    #: Which object type an OBJECTS listing or a DATABASE_PRIME is for, or
+    #: which kind of object an object-level GRANTS scope names (its statement
+    #: says `SHOW GRANTS ON TABLE`, not just `ON`). Every other scope type
+    #: leaves it unset. Routing keys off the scope *type*, never off this
+    #: field being set -- see `MainScreen.on_scope_needed`.
     object_type: ObjectType | None = None
     #: The single object a scope narrows to, whatever it is called for that
     #: scope type: a table for COLUMNS, a pipe for PIPE_HISTORY, a task for
@@ -236,6 +240,14 @@ class Scope:
             case ScopeType.TASK_HISTORY:
                 return f"task_history:{self.database}.{self.schema}.{self.table}"
             case ScopeType.GRANTS:
+                if self.table is not None:
+                    # The type is part of the key: a pipe may share a
+                    # table's name, and each has its own grants.
+                    assert self.object_type is not None
+                    return (
+                        f"grants:{self.object_type.plural}:"
+                        f"{self.database}.{self.schema}.{self.table}"
+                    )
                 if self.schema is None:
                     return f"grants:{self.database}"
                 return f"grants:{self.database}.{self.schema}"
@@ -336,6 +348,19 @@ def grants_scope(database: str, schema: str | None = None) -> Scope:
     return Scope(ScopeType.GRANTS, database=database, schema=schema)
 
 
+def object_grants_scope(ref: ObjectRef) -> Scope:
+    # `table` holds the object's name -- the same reuse `pipe_history_scope`
+    # makes -- and `object_type` which kind it is, since SHOW GRANTS ON needs
+    # the noun.
+    return Scope(
+        ScopeType.GRANTS,
+        database=ref.database,
+        schema=ref.schema,
+        object_type=ref.type,
+        table=ref.name,
+    )
+
+
 def tag_references_scope(database: str, schema: str | None = None) -> Scope:
     return Scope(ScopeType.TAG_REFERENCES, database=database, schema=schema)
 
@@ -369,6 +394,11 @@ def containing_scopes(scope: Scope) -> list[Scope]:
             return []
         case ScopeType.SCHEMAS | ScopeType.DATABASE_PRIME:
             return [databases_scope()]
+        case ScopeType.GRANTS if scope.table is not None:
+            assert scope.database is not None
+            assert scope.schema is not None
+            assert scope.object_type is not None
+            return [objects_scope(scope.object_type, scope.database, scope.schema)]
         case ScopeType.GRANTS | ScopeType.TAG_REFERENCES | ScopeType.COLUMNS_PRIME if (
             scope.schema is None
         ):
