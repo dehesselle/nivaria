@@ -247,6 +247,23 @@ async def test_the_tags_column_counts_a_columns_tags(repo) -> None:
         assert table.get_cell_at((1, 5)).plain == "2"
 
 
+async def test_the_tags_column_counts_a_multi_value_tag_once(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(
+        repo,
+        "ORDERS",
+        ("EMAIL", "TEXT"),
+    )
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII", TAG_VALUE="email")
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII", TAG_VALUE="phone")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        table = app.query_one("#detail-columns", DataTable)
+        assert table.get_cell_at((0, 5)).plain == "1"
+
+
 async def test_clicking_the_type_header_sorts_by_formatted_type_then_reverses(
     repo,
 ) -> None:
@@ -351,6 +368,21 @@ async def test_a_tagged_columns_tags_show_in_the_detail_panel(repo) -> None:
         table.move_cursor(row=0)
         await pilot.pause()
         assert not panel.display
+
+
+async def test_a_multi_value_tag_shows_its_values_on_one_line(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_columns(repo, "ORDERS", ("EMAIL", "TEXT"))
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII", TAG_VALUE="phone")
+    put_column_tag(repo, "ORDERS", "EMAIL", TAG_NAME="PII", TAG_VALUE="email")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        panel = pane.query_one("#detail-item", Static)
+        assert panel.display
+        assert "PII = email, phone" in str(panel.render())
 
 
 #: What hovering each header of the column list shows. Type and Tags have no

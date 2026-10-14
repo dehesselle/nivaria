@@ -385,6 +385,11 @@ single call, so the Columns view's Tags column costs one query per table
 regardless of how many columns it has — the same "no query whose cost scales
 with row count" rule the rest of this app already holds `SHOW` to.
 
+Both functions report a multi-value tag (`MULTI_VALUE = TRUE`) as one row
+per value, so `TAG_VALUE` is part of both mirrors' keys. Without it, the
+cache's upsert kept only the last value of each tag. The Columns view's
+detail panel joins one tag's values onto a single `TAG = a, b` line.
+
 Snowflake's own visibility rules still apply on top: `SHOW GRANTS ON <object>`
 only returns what the active role owns, has `MANAGE GRANTS` on, or reaches
 via `ACCOUNTADMIN`/`SECURITYADMIN`, so a short or empty Grants tab under a
@@ -1251,8 +1256,9 @@ single Snowflake name would be true of them. Type is `DESC TABLE`'s full
 rendering (see "`SHOW`, because it needs no warehouse"), which is more than
 `DATA_TYPE` alone. `DATA_TYPE_ALIAS` was rejected: it is
 the alias written in the DDL, such as `INT`, which SHOW COLUMNS does not
-return and the cache does not hold. Tags is a count of the
-`TAG_REFERENCES_ALL_COLUMNS` rows. A test holds every tooltip to a column the
+return and the cache does not hold. Tags is a count of the distinct tag
+names in the `TAG_REFERENCES_ALL_COLUMNS` rows, not of the rows themselves,
+since a multi-value tag has one row per value. A test holds every tooltip to a column the
 cache actually has.
 
 Type and Tags are computed, but only restate what the cache holds. There is

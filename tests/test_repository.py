@@ -743,6 +743,34 @@ def test_tag_references_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["TAG_VALUE"] == "ENG"
 
 
+def test_a_multi_value_tag_keeps_every_value(repo) -> None:
+    from snowcone.models import tag_references_scope
+
+    scope = tag_references_scope("MYDB", "PUBLIC")
+    tag = {
+        "TAG_DATABASE": "MYDB",
+        "TAG_SCHEMA": "TAGS",
+        "TAG_NAME": "COST_CENTER",
+        "DOMAIN": "SCHEMA",
+    }
+    load(repo, scope, [{**tag, "TAG_VALUE": "ENG"}, {**tag, "TAG_VALUE": "OPS"}])
+    assert [r["TAG_VALUE"] for r in repo.raw_rows(scope)] == ["ENG", "OPS"]
+
+
+def test_a_multi_value_column_tag_keeps_every_value(repo) -> None:
+    from snowcone.models import column_tag_references_scope
+
+    scope = column_tag_references_scope("MYDB", "PUBLIC", "ORDERS")
+    tag = {
+        "TAG_DATABASE": "MYDB",
+        "TAG_SCHEMA": "TAGS",
+        "TAG_NAME": "PII",
+        "COLUMN_NAME": "EMAIL",
+    }
+    load(repo, scope, [{**tag, "TAG_VALUE": "phone"}, {**tag, "TAG_VALUE": "email"}])
+    assert [r["TAG_VALUE"] for r in repo.raw_rows(scope)] == ["email", "phone"]
+
+
 def test_pipe_activity_table_can_hold_more_than_one_row_per_pipe(repo) -> None:
     """The mirror table's PK is (pipe, FILE_NAME, LAST_LOAD_TIME), not just
     (pipe) -- queries.pipe_activity's QUALIFY means only one row per pipe is

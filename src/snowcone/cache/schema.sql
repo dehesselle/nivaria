@@ -523,7 +523,9 @@ CREATE INDEX IF NOT EXISTS show_grants_scope ON show_grants(_scope);
 -- (or ACCOUNTADMIN) and can lag ~2 hours, both unnecessary here since
 -- INFORMATION_SCHEMA.TAG_REFERENCES already covers a single object with no
 -- extra privilege and near-real-time data. Column set is documentation-only,
--- unverified against a live account.
+-- unverified against a live account. TAG_VALUE is part of the key because a
+-- multi-value tag (MULTI_VALUE = TRUE) comes back as one row per value; keyed
+-- on TAG_NAME alone, each value would overwrite the one before it.
 CREATE TABLE IF NOT EXISTS information_schema_tag_references (
     TAG_DATABASE TEXT,
     TAG_SCHEMA   TEXT,
@@ -533,13 +535,13 @@ CREATE TABLE IF NOT EXISTS information_schema_tag_references (
     _scope       TEXT    NOT NULL,
     _generation  INTEGER NOT NULL,
     _fetched_at  REAL    NOT NULL,
-    PRIMARY KEY (_scope, TAG_DATABASE, TAG_SCHEMA, TAG_NAME)
+    PRIMARY KEY (_scope, TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE)
 );
 CREATE INDEX IF NOT EXISTS information_schema_tag_references_scope
     ON information_schema_tag_references(_scope);
 
 -- Tags applied to every column of one table or view (one row per column per
--- tag), scoped per table like information_schema_columns. Sourced via
+-- tag value -- see information_schema_tag_references for why), scoped per table like information_schema_columns. Sourced via
 -- INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS rather than TAG_REFERENCES
 -- called once per column -- that function returns every column's tags for
 -- one table in a single call, so this scales with tables, not with columns.
@@ -555,7 +557,7 @@ CREATE TABLE IF NOT EXISTS information_schema_tag_references_all_columns (
     _scope       TEXT    NOT NULL,
     _generation  INTEGER NOT NULL,
     _fetched_at  REAL    NOT NULL,
-    PRIMARY KEY (_scope, COLUMN_NAME, TAG_DATABASE, TAG_SCHEMA, TAG_NAME)
+    PRIMARY KEY (_scope, COLUMN_NAME, TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE)
 );
 CREATE INDEX IF NOT EXISTS information_schema_tag_references_all_columns_scope
     ON information_schema_tag_references_all_columns(_scope);

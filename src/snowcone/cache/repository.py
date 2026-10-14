@@ -421,15 +421,22 @@ _GRANTS = TableSpec(
 _TAG_REFERENCES = TableSpec(
     name="information_schema_tag_references",
     columns=("TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME", "TAG_VALUE", "DOMAIN"),
-    key=("_scope", "TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME"),
-    order_by=("TAG_NAME",),
+    key=("_scope", "TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME", "TAG_VALUE"),
+    order_by=("TAG_NAME", "TAG_VALUE"),
 )
 
 _COLUMN_TAG_REFERENCES = TableSpec(
     name="information_schema_tag_references_all_columns",
     columns=("TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME", "TAG_VALUE", "COLUMN_NAME"),
-    key=("_scope", "COLUMN_NAME", "TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME"),
-    order_by=("COLUMN_NAME", "TAG_NAME"),
+    key=(
+        "_scope",
+        "COLUMN_NAME",
+        "TAG_DATABASE",
+        "TAG_SCHEMA",
+        "TAG_NAME",
+        "TAG_VALUE",
+    ),
+    order_by=("COLUMN_NAME", "TAG_NAME", "TAG_VALUE"),
 )
 
 

@@ -40,7 +40,8 @@ class ColumnsView(ItemDetailView, ObjectView):
     in TableListView's own list of every table in the schema.
 
     Also an `ItemDetailView`: the panel below the table shows the highlighted
-    column's tags, one `TAG = VALUE` per line, the same mechanism `PipeView`/
+    column's tags, one `TAG = VALUE` per line (a multi-value tag's values
+    joined on that one line), the same mechanism `PipeView`/
     `TaskView` use for a history row's error.
     """
 
@@ -129,12 +130,15 @@ class ColumnsView(ItemDetailView, ObjectView):
         self.ensure(tags_scope, config.get(CACHE_TTL))
 
         # Built before the rows -- both the Tags cell and the value the
-        # Tags column sorts by come out of this one scan.
-        tags_by_column: dict[str, list[tuple[str, str]]] = {}
+        # Tags column sorts by come out of this one scan. Grouped by tag
+        # rather than kept as one pair per row: a multi-value tag arrives as
+        # one row per value, and counting rows would score one PII tag with
+        # two values the same as two separate tags.
+        tags_by_column: dict[str, dict[str, list[str]]] = {}
         for r in self.repo.raw_rows(tags_scope):
-            tags_by_column.setdefault(r.get("COLUMN_NAME"), []).append(
-                (r.get("TAG_NAME") or "", r.get("TAG_VALUE") or "")
-            )
+            tags_by_column.setdefault(r.get("COLUMN_NAME"), {}).setdefault(
+                r.get("TAG_NAME") or "", []
+            ).append(r.get("TAG_VALUE") or "")
         # A "0" only means something once the SELECT behind tags_scope has
         # actually completed -- before that (no warehouse yet, or a failed
         # pass), it would be a confident-looking guess, so the cell stays
@@ -158,7 +162,7 @@ class ColumnsView(ItemDetailView, ObjectView):
             table.clear()
             self.detail_rows = {}
             for column in self.repo.columns(scope).rows:
-                tags = tags_by_column.get(column.column_name, [])
+                tags = tags_by_column.get(column.column_name, {})
                 key = column.column_name
                 # Rank values, not display values. The table is handed a RowKey
                 # and reads these back, so rows go in in whatever order the cache
@@ -191,10 +195,12 @@ class ColumnsView(ItemDetailView, ObjectView):
 
     def detail_text(self, row: dict[str, Any]) -> str | None:
         """A column's own tags, for the panel under the table."""
-        tags = row.get("tags") or []
+        tags = row.get("tags") or {}
         if not tags:
             return None
-        return "\n".join(f"{name} = {value}" for name, value in tags)
+        return "\n".join(
+            f"{name} = {', '.join(values)}" for name, values in tags.items()
+        )
 
 
 @register_view

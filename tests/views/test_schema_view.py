@@ -139,6 +139,21 @@ async def test_the_tags_table_lists_name_and_value_pairs(repo) -> None:
         assert table.get_cell_at((0, 1)).plain == "ENG"
 
 
+async def test_the_tags_table_lists_each_value_of_a_multi_value_tag(repo) -> None:
+    ref = SchemaRef(database="MYDB", name="PUBLIC")
+    put_tag(repo, "MYDB", "PUBLIC", TAG_NAME="COST_CENTER", TAG_VALUE="ENG")
+    put_tag(repo, "MYDB", "PUBLIC", TAG_NAME="COST_CENTER", TAG_VALUE="OPS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_schema(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-tags", DataTable)
+        assert table.row_count == 2
+        assert table.get_cell_at((0, 1)).plain == "ENG"
+        assert table.get_cell_at((1, 1)).plain == "OPS"
+
+
 async def test_tags_render_blank_without_a_successful_tag_references_pass(repo) -> None:
     """The no-warehouse degrade-blank case: Grants (metadata layer) still
     renders even though Tags (a SELECT that needs a warehouse) has nothing
