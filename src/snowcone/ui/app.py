@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from time import monotonic
 
+from tcoda.terminal_title import TerminalTitleMixin
 from textual import work
 from textual.app import App
 
@@ -24,9 +25,10 @@ from snowcone.ui.screens.main import MainScreen
 _MISSING_TIMEOUT = 5.0
 
 
-class SnowconeApp(App[None]):
+class SnowconeApp(TerminalTitleMixin, App[None]):
     CSS_PATH = "app.tcss"
     TITLE = "snowcone"
+    TERMINAL_TITLE = TITLE
 
     def __init__(self, *, connector: Connector | None = None) -> None:
         super().__init__()

@@ -1748,8 +1748,9 @@ dialog originally came from.
 ## Shared widgets
 
 The menu bar, the settings system, the log panel (`LogViewer`, see "The SQL
-log") and the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
-live in **`tcoda`** ("Textual coda"), a sibling project shared with
+log"), the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
+and the terminal's window title (`TerminalTitleMixin` on `SnowconeApp`) live
+in **`tcoda`** ("Textual coda"), a sibling project shared with
 `snakecam` and `vc`. They were extracted because the same code had been
 copied into three apps and had already started to drift.
 
