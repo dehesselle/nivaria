@@ -85,6 +85,15 @@ class FetchService:
         self._cancelled: set[Scope] = set()
         self._threads: list[threading.Thread] = []
         self._started = False
+        #: Set by stop(), never cleared. stop() gives up on a worker still
+        #: mid-query, and by the time that query returns the caller has moved
+        #: on: a reconnect has repointed the UI at another identity, and a
+        #: role switch has run USE ROLE on the shared pool, so the gateway's
+        #: retry would even run under the new role and land in the old role's
+        #: cache. Whatever such a worker brings back belongs to nobody, so it
+        #: is dropped -- no write, no notify, no report -- leaving the cache as
+        #: a quit mid-fetch already does.
+        self._stopped = False
 
     # -------------------------------------------------------------- control
 
@@ -100,6 +109,7 @@ class FetchService:
             self._threads.append(thread)
 
     def stop(self, timeout: float = 2.0) -> None:
+        self._stopped = True
         if not self._started:
             return
         for _ in self._threads:
@@ -219,6 +229,8 @@ class FetchService:
         except Exception as error:  # noqa: BLE001
             self._fail(job, error, generation)
             return
+        if self._stopped:
+            return
 
         cursor = page.cursor
         if not self._repo.write_page(scope, generation, page.rows, cursor):
@@ -293,6 +305,8 @@ class FetchService:
         except Exception as error:  # noqa: BLE001
             self._fail(job, error)
             return
+        if self._stopped:
+            return
 
         if not usable:
             # Truncated at Snowflake's SHOW cap and not safely pageable, so
@@ -353,6 +367,8 @@ class FetchService:
         # See _execute: a worker thread boundary.
         except Exception as error:  # noqa: BLE001
             self._fail(job, error)
+            return
+        if self._stopped:
             return
 
         if not usable:
@@ -438,6 +454,8 @@ class FetchService:
         whole schema was dropped, carrying the refresh up to the schema list,
         while a prime would succeed and leave the schema node standing.
         """
+        if self._stopped:
+            return
         scope = job.scope
         message = str(error) or error.__class__.__name__
         missing = is_missing_object(error)
@@ -450,7 +468,7 @@ class FetchService:
         self._announce(scope, complete=True)
 
     def _announce(self, scope: Scope, *, complete: bool) -> None:
-        if self._notify is None:
+        if self._notify is None or self._stopped:
             return
         # A listener raising here would kill the worker thread and silently
         # strand every later job, so it is contained.
@@ -460,7 +478,7 @@ class FetchService:
             _log.exception("cache-update listener failed for %s", scope)
 
     def _report(self, scope: Scope, message: str, *, missing: bool = False) -> None:
-        if self._on_error is None:
+        if self._on_error is None or self._stopped:
             return
         try:
             self._on_error(scope, message, missing)

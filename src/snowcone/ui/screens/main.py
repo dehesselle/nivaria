@@ -613,7 +613,10 @@ class MainScreen(Screen):
         carries the new role, so a worker still bound to the old repo that
         drew one of them afterward would write new-role results into the old
         role's cache file -- the exact bleed a file-per-identity cache exists
-        to rule out. Stopping first closes that window entirely.
+        to rule out. Stopping first keeps every later job out; a worker that
+        `stop()` gave up on, still mid-query, is the stopped service's to
+        silence (see `FetchService._stopped`): `pool.set_role` waits for its
+        statement, but a retry of it would run under the new role.
         """
         assert self.pool is not None
         if self.fetch is not None:

@@ -816,6 +816,72 @@ def test_stopping_with_work_still_queued_does_not_raise(repo) -> None:
     service.stop()
 
 
+class _StragglingGateway(FakeGateway):
+    """A SHOW DATABASES that is still running when the service is stopped,
+    and returns -- or fails -- only once the test lets it."""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        super().__init__(databases=["ACME"])
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self._error = error
+
+    def show_databases(self, *, after=None, limit=1000, allow_reconnect=True):
+        self.entered.set()
+        assert self.release.wait(timeout=3.0)
+        if self._error is not None:
+            raise self._error
+        return super().show_databases(
+            after=after, limit=limit, allow_reconnect=allow_reconnect
+        )
+
+
+def _straggle(repo, gateway: _StragglingGateway) -> tuple[list, list]:
+    """Stop the service while its one worker is mid-query, then let the
+    query finish. Returns what reached notify and on_error."""
+    notified: list = []
+    reported: list = []
+    service = make_service(
+        gateway,
+        repo,
+        notify=lambda *args: notified.append(args),
+        on_error=lambda *args: reported.append(args),
+    )
+    service.request(databases_scope())
+    assert gateway.entered.wait(timeout=3.0)
+    workers = list(service._threads)
+    service.stop(timeout=0.05)  # gives up on the blocked worker
+    gateway.release.set()
+    for worker in workers:
+        worker.join(timeout=3.0)
+    return notified, reported
+
+
+def test_a_worker_still_mid_query_when_the_service_stops_reports_nothing(
+    repo,
+) -> None:
+    """Regression: a QA query that outlived stop() on a profile switch failed
+    against the just-closed QA pool and toasted its error into the PROD
+    session the user had already switched to."""
+    gateway = _StragglingGateway(error=RuntimeError("connection pool is closed"))
+    notified, reported = _straggle(repo, gateway)
+    assert notified == []
+    assert reported == []
+    assert repo.entry(databases_scope()).error is None
+
+
+def test_a_worker_still_mid_query_when_the_service_stops_writes_nothing(
+    repo,
+) -> None:
+    """On a role switch the pool is shared, so a straggler's retry would run
+    under the new role -- what it brings back cannot be trusted to belong to
+    the cache it would be written to."""
+    notified, _ = _straggle(repo, _StragglingGateway())
+    assert notified == []
+    assert repo.databases(databases_scope()).is_empty
+    assert repo.entry(databases_scope()).state is not CacheState.COMPLETE
+
+
 def test_the_shutdown_sentinel_sorts_ahead_of_real_work() -> None:
     """Stopping has to be prompt, not queued behind everything outstanding."""
     from snowcone.service.jobs import SHUTDOWN

@@ -979,6 +979,15 @@ gave up. The straggling connection is simply abandoned instead -- the process
 exiting (or, on reconnect, garbage collection once nothing references it any
 more) reclaims it for free, and nothing here waits on it.
 
+The worker that straggles is dropped the same way: once `FetchService.stop()`
+has run, whatever a worker still mid-query brings back -- rows or an error --
+is neither written, announced nor reported, leaving the cache as a quit
+mid-fetch does. Reporting it once turned a QA query that failed against the
+just-closed pool into an error toast in the PROD session the user had already
+switched to. Writing it is no safer: a role switch shares the pool, so
+`PoolGateway._fetch`'s retry of a failed statement runs after `USE ROLE` and
+would put the new role's rows into the old role's cache.
+
 Three authenticators are supported and chosen in the connect dialog: OAuth
 (`oauth_authorization_code`, the default), browser SSO (`externalbrowser`),
 and password + MFA (`username_password_mfa`). The password field is disabled
