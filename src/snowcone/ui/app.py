@@ -43,6 +43,9 @@ class SnowconeApp(TerminalTitleMixin, App[None]):
         self.profiles = ProfileStore()
         #: When each "no longer exists" notice was last shown, by text.
         self._missing_notices: dict[str, float] = {}
+        #: Set while quit waits for running statements; a second quit then
+        #: exits without waiting.
+        self._quitting = False
 
     def on_mount(self) -> None:
         self._start()
@@ -227,6 +230,47 @@ class SnowconeApp(TerminalTitleMixin, App[None]):
             return
         self._missing_notices[text] = now
         self.notify(text, severity="warning", timeout=_MISSING_TIMEOUT)
+
+    async def action_quit(self) -> None:
+        """Wait for statements in flight before exiting; quit again to stop
+        waiting.
+
+        A fetch worker cannot be interrupted mid-query (see DESIGN.md), and
+        one that outlived the app used to hop back into it after shutdown.
+        """
+        fetch = self.fetch
+        if self._quitting or fetch is None or not fetch.running_count:
+            self.exit()
+            return
+        self._quitting = True
+        self._wait_for_jobs_then_exit(fetch)
+
+    # A worker, not awaited in the action: an action blocks the app's message
+    # queue until it returns, so the second Ctrl+Q would never be handled.
+    @work(group="quit")
+    async def _wait_for_jobs_then_exit(self, fetch: FetchService) -> None:
+        self.push_screen(
+            ClosingDialog(
+                "Waiting for background jobs to finish...",
+                hint="Ctrl+Q again to quit now",
+            )
+        )
+        fetch.stop(timeout=0)
+        # Polled, not asyncio.to_thread(fetch.stop, None): asyncio waits for
+        # its executor threads on the way out, so a forced quit would still
+        # sit out the query.
+        while fetch.running_count:
+            await asyncio.sleep(0.1)
+        self.exit()
+
+    def call_from_thread(self, callback, *args, **kwargs):
+        # Fetch workers, connecting and role/warehouse switches all run on
+        # threads that cannot be interrupted, so one can finish after quit.
+        # Its result is for a UI that no longer exists, and Textual would
+        # raise "App is not running" in that thread.
+        if not self.is_running:
+            return None
+        return super().call_from_thread(callback, *args, **kwargs)
 
     def on_unmount(self) -> None:
         if self.fetch is not None:

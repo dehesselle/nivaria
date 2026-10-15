@@ -882,6 +882,33 @@ def test_a_worker_still_mid_query_when_the_service_stops_writes_nothing(
     assert repo.entry(databases_scope()).state is not CacheState.COMPLETE
 
 
+def test_a_stopped_service_counts_its_query_in_flight_until_it_returns(
+    repo,
+) -> None:
+    """Quitting waits on running_count, not on a join, so the count has to
+    outlive stop() for exactly as long as the statement does."""
+    gateway = _StragglingGateway()
+    service = make_service(gateway, repo)
+    service.request(databases_scope())
+    assert gateway.entered.wait(timeout=3.0)
+    service.stop(timeout=0)
+    assert service.running_count == 1
+    gateway.release.set()
+    assert wait_until(lambda: service.running_count == 0)
+
+
+def test_a_stopped_service_starts_no_queued_job(repo) -> None:
+    """A worker can dequeue real work just before stop() queues its
+    SHUTDOWN. Running it would issue a statement whose result belongs to
+    nobody, and keep quit waiting on it."""
+    service = FetchService(FakeGateway(databases=["ACME"]), repo)
+    service.request(databases_scope())
+    job = service._pending[databases_scope()]
+    service.stop()
+    assert service._claim(job) is False
+    assert service.running_count == 0
+
+
 def test_the_shutdown_sentinel_sorts_ahead_of_real_work() -> None:
     """Stopping has to be prompt, not queued behind everything outstanding."""
     from snowcone.service.jobs import SHUTDOWN

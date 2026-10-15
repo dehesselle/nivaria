@@ -109,7 +109,16 @@ class FetchService:
             self._threads.append(thread)
 
     def stop(self, timeout: float = 2.0) -> None:
-        self._stopped = True
+        """Ask every worker to exit and wait up to `timeout` for each.
+
+        `timeout=0` only signals: quitting waits for `running_count` to drain
+        on the event loop instead, so the wait stays visible and can be cut
+        short.
+        """
+        # Under the lock so _claim cannot start a statement after this:
+        # running_count may only fall from here on.
+        with self._lock:
+            self._stopped = True
         if not self._started:
             return
         for _ in self._threads:
@@ -163,6 +172,12 @@ class FetchService:
         with self._lock:
             return len(self._pending)
 
+    @property
+    def running_count(self) -> int:
+        """Statements in flight, which a stopped service still waits out."""
+        with self._lock:
+            return len(self._running)
+
     def is_busy(self, scope: Scope) -> bool:
         """Whether this scope is queued or mid-fetch, for a spinner."""
         with self._lock:
@@ -186,7 +201,9 @@ class FetchService:
     def _claim(self, job: FetchJob) -> bool:
         """Take ownership of a dequeued job, unless it has been superseded."""
         with self._lock:
-            if self._pending.get(job.scope) is not job:
+            # A worker can dequeue real work just before stop() queues its
+            # SHUTDOWN; that statement would belong to nobody.
+            if self._stopped or self._pending.get(job.scope) is not job:
                 return False
             del self._pending[job.scope]
             self._running.add(job.scope)

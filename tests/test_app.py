@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 from tcoda.widgets import FooterBinding
 from textual.widgets import Input
@@ -129,6 +130,8 @@ class RecordingFetch:
         #: this one finished quiescing.
         self.screen_still_pointed_here_when_stopped: bool | None = None
         self.requested: list = []
+        #: Statements "in flight"; quitting waits for this to reach 0.
+        self.running_count = 0
 
     def request(self, scope, priority) -> bool:
         self.requested.append(scope)
@@ -285,6 +288,102 @@ async def test_quitting_the_connect_screen_exits() -> None:
         await pilot.press("escape")
         await settle(pilot)
     assert app.pool is None
+
+
+async def test_quitting_mid_fetch_waits_behind_a_dialog_until_the_fetch_returns() -> (
+    None
+):
+    """Regression: a fetch worker that outlived the app hopped back into it
+    and raised "App is not running". Its statement cannot be interrupted, so
+    quit waits it out, visibly."""
+    app = SnowconeApp(connector=FakeConnector())
+    _use_recording_fetch(app)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await _connect(pilot, "TEST")
+        fetch = app.fetch
+        assert isinstance(fetch, RecordingFetch)
+        fetch.running_count = 1
+
+        await pilot.press("ctrl+q")
+        await settle(pilot)
+        assert isinstance(app.screen, ClosingDialog)
+        assert fetch.stopped
+        assert app.is_running
+
+        fetch.running_count = 0
+        await settle(pilot)
+        assert app.is_running is False
+
+
+async def test_a_second_quit_while_waiting_exits_at_once() -> None:
+    """A long query should not hold the app hostage."""
+    app = SnowconeApp(connector=FakeConnector())
+    _use_recording_fetch(app)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await _connect(pilot, "TEST")
+        assert isinstance(app.fetch, RecordingFetch)
+        app.fetch.running_count = 1
+
+        await pilot.press("ctrl+q")
+        await settle(pilot)
+        assert app.is_running
+        await pilot.press("ctrl+q")
+        await settle(pilot)
+        assert app.is_running is False
+
+
+async def test_quitting_with_nothing_running_exits_without_a_dialog() -> None:
+    app = SnowconeApp(connector=FakeConnector())
+    _use_recording_fetch(app)
+    pushed: list[type] = []
+    real_push_screen = app.push_screen
+
+    def recording_push_screen(screen, *args, **kwargs):
+        pushed.append(type(screen))
+        return real_push_screen(screen, *args, **kwargs)
+
+    app.push_screen = recording_push_screen  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await _connect(pilot, "TEST")
+        await pilot.press("ctrl+q")
+        await settle(pilot)
+        assert app.is_running is False
+    assert ClosingDialog not in pushed
+
+
+async def test_a_call_from_a_thread_after_the_app_exited_is_dropped() -> None:
+    """Connecting, role switches and a fetch abandoned by a second quit all
+    run on threads that cannot be interrupted, and any of them can finish
+    after the app is gone. Textual raised "App is not running" in that
+    thread.
+
+    run_async rather than run_test: only a real run clears the loop that
+    Textual's own check looks at, as it is after quitting."""
+    app = SnowconeApp(connector=FakeConnector())
+
+    async def quit_at_once(pilot) -> None:
+        await pilot.pause()
+        pilot.app.exit()
+
+    await app.run_async(headless=True, size=(120, 40), auto_pilot=quit_at_once)
+    called: list[bool] = []
+    errors: list[BaseException] = []
+
+    def straggler() -> None:
+        try:
+            app.call_from_thread(called.append, True)
+        except BaseException as error:  # noqa: BLE001 -- the assertion below
+            errors.append(error)
+
+    thread = threading.Thread(target=straggler)
+    thread.start()
+    thread.join(timeout=3.0)
+    assert errors == []
+    assert called == []
 
 
 def test_a_cache_update_after_shutdown_does_not_crash_the_app() -> None:

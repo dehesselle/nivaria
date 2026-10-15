@@ -148,6 +148,12 @@ ClosingDialog > #dialog {
     max-width: 100%;
 }
 
+#closing-hint {
+    width: 100%;
+    content-align: center middle;
+    color: $text-muted;
+}
+
 /* ---- status footer ----------------------------------------------------- */
 
 /* Colours and padding come from tcoda's `FooterStatus > *`. Only the countdown's

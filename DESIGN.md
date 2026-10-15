@@ -988,6 +988,26 @@ switched to. Writing it is no safer: a role switch shares the pool, so
 `PoolGateway._fetch`'s retry of a failed statement runs after `USE ROLE` and
 would put the new role's rows into the old role's cache.
 
+Quitting no longer abandons stragglers by default; it waits for them. Ctrl+Q
+with a statement in flight (`FetchService.running_count`) stops the service
+and shows "Waiting for background jobs to finish..." until the count drains,
+then exits, so every connection is idle and actually closed. A stopped service
+claims no further queued job, so the count can only fall. A second Ctrl+Q
+exits at once and leaves the rest to the straggler rule above. The wait polls
+the count on the event loop, from a worker: awaited in the action itself it
+would block the message queue the second Ctrl+Q arrives on, and
+`asyncio.to_thread(fetch.stop, None)` would not do either, because asyncio
+waits for its executor threads on the way out and a forced quit would sit out
+the query anyway.
+
+Fetch workers are not the only threads that can outlive the app: the connect
+dialog's connection attempt, pool growth and a role or warehouse switch cannot
+be interrupted either, and quitting does not wait for those. Each ends by
+hopping back with `call_from_thread`, which Textual answers with "App is not
+running" once the app is gone. `SnowconeApp.call_from_thread` drops the call
+instead when the app has stopped running: the result is for a UI that no
+longer exists.
+
 Three authenticators are supported and chosen in the connect dialog: OAuth
 (`oauth_authorization_code`, the default), browser SSO (`externalbrowser`),
 and password + MFA (`username_password_mfa`). The password field is disabled
