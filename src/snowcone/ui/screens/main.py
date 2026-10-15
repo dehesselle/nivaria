@@ -53,6 +53,7 @@ from snowcone.ui.messages import (
     CacheUpdated,
     CategorySelected,
     DatabaseSelected,
+    ObjectOpened,
     ObjectSelected,
     SchemaSelected,
     ScopeNeeded,
@@ -337,6 +338,9 @@ class MainScreen(Screen):
         self.detail.show(event.ref)
         self._restart_countdown()
 
+    def on_object_opened(self, event: ObjectOpened) -> None:
+        self._select(event.ref)
+
     def on_category_selected(self, event: CategorySelected) -> None:
         self._select_category(event.scope)
 
@@ -358,10 +362,11 @@ class MainScreen(Screen):
         self._restart_countdown()
 
     def _select(self, ref: ObjectRef) -> None:
-        # A search hit leaves the tree somewhere you can keep browsing from,
-        # rather than a detail pane pointing at an object the tree has never
-        # heard of. A jump from outside the tree only: see
-        # on_object_selected for why a tree highlight must not come here.
+        # A search hit or an Enter in a list view leaves the tree somewhere
+        # you can keep browsing from, rather than a detail pane pointing at
+        # an object the tree cursor is not on. A jump from outside the tree
+        # only: see on_object_selected for why a tree highlight must not
+        # come here.
         self.tree.reveal(ref)
         self.detail.show(ref)
         self._restart_countdown()

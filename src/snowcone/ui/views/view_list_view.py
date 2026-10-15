@@ -47,7 +47,7 @@ from snowcone.models import (
     view_stats_scope,
 )
 from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.messages import ObjectSelected
+from snowcone.ui.messages import ObjectOpened
 from snowcone.ui.views.base import CategoryView, register_category_view
 from snowcone.ui.views.tables import (
     LIST_NOTE,
@@ -103,7 +103,7 @@ class ViewListView(CategoryView):
         if name is None:
             return
         ref = ObjectRef(ObjectType.VIEW, self.scope.database, self.scope.schema, name)
-        self.post_message(ObjectSelected(ref))
+        self.post_message(ObjectOpened(ref))
 
     def stats_scope(self) -> Scope:
         return view_stats_scope(self.scope.database, self.scope.schema)

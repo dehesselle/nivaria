@@ -43,6 +43,17 @@ class ObjectSelected(Message):
         super().__init__()
 
 
+class ObjectOpened(Message):
+    """An object was chosen from outside the tree, so it is revealed there
+    as well as shown. Not `ObjectSelected`: that one is the tree's own
+    highlight, which must never reveal (see DESIGN.md "A highlight is not a
+    jump")."""
+
+    def __init__(self, ref: ObjectRef) -> None:
+        self.ref = ref
+        super().__init__()
+
+
 class CategorySelected(Message):
     """A category node ("Tables (n)", "Views (n)", ...) is under the cursor."""
 

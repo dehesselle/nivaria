@@ -139,8 +139,8 @@ def test_task_list_view_scopes_includes_the_activity_scope(repo) -> None:
     assert task_activity_scope("MYDB", "PUBLIC") in view.scopes()
 
 
-async def test_pressing_enter_on_a_task_row_selects_it(repo) -> None:
-    """See test_pressing_enter_on_a_table_row_selects_it -- same handler,
+async def test_pressing_enter_on_a_task_row_opens_it(repo) -> None:
+    """See test_pressing_enter_on_a_table_row_opens_it -- same handler,
     same reasoning."""
     put_task(repo, "REFRESH_ORDERS")
     scope = objects_scope(ObjectType.TASK, "MYDB", "PUBLIC")
@@ -154,7 +154,7 @@ async def test_pressing_enter_on_a_task_row_selects_it(repo) -> None:
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-    assert app.selected == [
+    assert app.opened == [
         ObjectRef(ObjectType.TASK, "MYDB", "PUBLIC", "REFRESH_ORDERS")
     ]
 

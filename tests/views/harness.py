@@ -29,7 +29,7 @@ from snowcone.models import (
     view_stats_scope,
 )
 from snowcone.service.jobs import encode_data_preview
-from snowcone.ui.messages import ObjectSelected, ScopeNeeded
+from snowcone.ui.messages import ObjectOpened, ScopeNeeded
 from snowcone.ui.widgets.detail_pane import DetailPane
 
 
@@ -40,7 +40,7 @@ class Harness(App[None]):
         super().__init__()
         self._repo = repo
         self.needed: list[str] = []
-        self.selected: list[ObjectRef] = []
+        self.opened: list[ObjectRef] = []
 
     def compose(self) -> ComposeResult:
         yield DetailPane(self._repo, id="detail")
@@ -48,8 +48,8 @@ class Harness(App[None]):
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         self.needed.append(event.scope.key)
 
-    def on_object_selected(self, event: ObjectSelected) -> None:
-        self.selected.append(event.ref)
+    def on_object_opened(self, event: ObjectOpened) -> None:
+        self.opened.append(event.ref)
 
 
 def load(repo: Repository, scope, rows, *, truncated: bool = False) -> None:

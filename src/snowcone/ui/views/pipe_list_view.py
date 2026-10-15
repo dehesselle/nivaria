@@ -47,7 +47,7 @@ from snowcone.format import (
 )
 from snowcone.models import ObjectRef, ObjectType, Scope, pipe_activity_scope
 from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.messages import ObjectSelected
+from snowcone.ui.messages import ObjectOpened
 from snowcone.ui.views.base import CategoryView, register_category_view
 from snowcone.ui.views.tables import (
     LIST_NOTE,
@@ -114,15 +114,19 @@ class PipeListView(TabbedView, CategoryView):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Enter on a row opens that pipe's detail view, revealed in the tree.
 
-        Reuses the exact path a search hit already takes (`ObjectSelected` ->
-        `MainScreen._select` -> `tree.reveal` + `detail.show`), so this needs
-        no new message and no MainScreen change.
+        Takes the same path a search hit does (`MainScreen._select` ->
+        `tree.reveal` + `detail.show`), so the tree cursor follows to the
+        object instead of staying on the category, which would leave nothing
+        on screen naming what the Detail pane shows. Its own message rather
+        than the tree's `ObjectSelected`, which only shows: a tree highlight
+        must never reveal (DESIGN.md "A highlight is not a jump"), and
+        sharing that message is how this once lost its reveal unnoticed.
         """
         name = event.row_key.value
         if name is None:
             return
         ref = ObjectRef(ObjectType.PIPE, self.scope.database, self.scope.schema, name)
-        self.post_message(ObjectSelected(ref))
+        self.post_message(ObjectOpened(ref))
 
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.scope.database, self.scope.schema)

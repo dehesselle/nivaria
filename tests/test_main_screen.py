@@ -887,6 +887,40 @@ async def test_a_search_jump_above_the_highlighted_object_settles_on_the_hit(
         assert screen._last_sweep_at == restarted_at
 
 
+async def test_enter_on_a_list_row_moves_the_tree_cursor_to_that_object(
+    repo,
+) -> None:
+    """Left on the category node, the tree names nothing the Detail pane
+    shows. Enter in a list is a jump from outside the tree, like a search
+    hit, so it reveals."""
+    from textual.widgets import DataTable
+
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS", "PAYMENTS")
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        tree = screen.query_one(ObjectTree)
+        tree.root.children[0].expand()
+        await pilot.pause()
+        schema = tree.root.children[0].children[0]
+        schema.expand()
+        await pilot.pause()
+        tree.move_cursor(schema.children[0])
+        await settle(pilot)
+
+        screen.query_one("#detail-list", DataTable).focus()
+        await pilot.pause()
+        await pilot.press("down", "enter")
+        await settle(pilot)
+
+        assert tree.cursor_node.data.key == "PAYMENTS"
+        assert screen.detail.ref.name == "PAYMENTS"
+
+
 async def test_highlighting_an_object_in_the_tree_does_not_reveal_it_again(
     repo, monkeypatch
 ) -> None:

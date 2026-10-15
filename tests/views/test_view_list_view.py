@@ -126,7 +126,7 @@ def test_view_list_view_scopes_includes_both_stats_scopes(repo) -> None:
     assert materialized_view_stats_scope("MYDB", "PUBLIC") in view.scopes()
 
 
-async def test_pressing_enter_on_a_view_row_selects_it(repo) -> None:
+async def test_pressing_enter_on_a_view_row_opens_it(repo) -> None:
     """Reuses the exact path a search hit takes -- see the identical table
     test for the full reasoning."""
     put_view(repo, "ORDERS_V")
@@ -141,4 +141,4 @@ async def test_pressing_enter_on_a_view_row_selects_it(repo) -> None:
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-    assert app.selected == [ObjectRef(ObjectType.VIEW, "MYDB", "PUBLIC", "ORDERS_V")]
+    assert app.opened == [ObjectRef(ObjectType.VIEW, "MYDB", "PUBLIC", "ORDERS_V")]

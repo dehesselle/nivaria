@@ -1184,7 +1184,14 @@ leaves it on the database node instead.
 A tree highlight shows the object in the Detail pane and does nothing else.
 Revealing (`ObjectTree.reveal`: expand down to a node, then move the cursor
 there and centre it) is for a jump from outside the tree, which today means
-a search hit.
+a search hit or Enter on a row of a category list view. Otherwise the tree
+cursor stays on the category, and nothing on screen names the object the
+Detail pane shows.
+
+The two travel as different messages: the tree's highlight posts
+`ObjectSelected`, a list view's Enter posts `ObjectOpened`. They used to
+share `ObjectSelected`, so making the highlight show-only quietly took the
+list views' reveal with it.
 
 The two used to share one path, and that was a real incident. The trigger is
 a second Textual property:

@@ -151,9 +151,9 @@ def test_pipe_list_view_scopes_includes_the_activity_scope(repo) -> None:
     assert pipe_activity_scope("MYDB", "PUBLIC") in view.scopes()
 
 
-async def test_pressing_enter_on_a_pipe_row_selects_it(repo) -> None:
-    """See test_pressing_enter_on_a_table_row_selects_it -- same handler,
-    same reasoning, added to pipes only per the current request."""
+async def test_pressing_enter_on_a_pipe_row_opens_it(repo) -> None:
+    """See test_pressing_enter_on_a_table_row_opens_it -- same handler,
+    same reasoning."""
     put_pipe(repo, "LOAD_ORDERS")
     scope = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
     app = Harness(repo)
@@ -166,4 +166,4 @@ async def test_pressing_enter_on_a_pipe_row_selects_it(repo) -> None:
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-    assert app.selected == [ObjectRef(ObjectType.PIPE, "MYDB", "PUBLIC", "LOAD_ORDERS")]
+    assert app.opened == [ObjectRef(ObjectType.PIPE, "MYDB", "PUBLIC", "LOAD_ORDERS")]

@@ -96,11 +96,10 @@ def test_table_list_view_scopes_includes_the_stats_scope(repo) -> None:
     assert table_stats_scope("MYDB", "PUBLIC") in view.scopes()
 
 
-async def test_pressing_enter_on_a_table_row_selects_it(repo) -> None:
-    """Reuses the exact path a search hit takes (ObjectSelected ->
-    MainScreen._select) -- this only has to prove the row posts the message
-    with the right ref; the reveal/show wiring itself is search's own,
-    already-tested plumbing."""
+async def test_pressing_enter_on_a_table_row_opens_it(repo) -> None:
+    """This only has to prove the row posts ObjectOpened with the right ref;
+    that the screen then reveals it in the tree is test_main_screen's
+    test_enter_on_a_list_row_moves_the_tree_cursor_to_that_object."""
     put_table(repo, "ORDERS")
     scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
     app = Harness(repo)
@@ -113,7 +112,7 @@ async def test_pressing_enter_on_a_table_row_selects_it(repo) -> None:
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-    assert app.selected == [ObjectRef(ObjectType.TABLE, "MYDB", "PUBLIC", "ORDERS")]
+    assert app.opened == [ObjectRef(ObjectType.TABLE, "MYDB", "PUBLIC", "ORDERS")]
 
 
 async def test_moving_between_two_schemas_tables_reuses_the_list_view(repo) -> None:

@@ -45,7 +45,7 @@ from snowcone.cache.repository import Repository
 from snowcone.format import format_timestamp_minutes
 from snowcone.models import ObjectRef, ObjectType, Scope, task_activity_scope
 from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.messages import ObjectSelected
+from snowcone.ui.messages import ObjectOpened
 from snowcone.ui.views.base import CategoryView, register_category_view
 from snowcone.ui.views.tables import (
     LIST_NOTE,
@@ -94,7 +94,7 @@ class TaskListView(CategoryView):
         if name is None:
             return
         ref = ObjectRef(ObjectType.TASK, self.scope.database, self.scope.schema, name)
-        self.post_message(ObjectSelected(ref))
+        self.post_message(ObjectOpened(ref))
 
     def activity_scope(self) -> Scope:
         return task_activity_scope(self.scope.database, self.scope.schema)

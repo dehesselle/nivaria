@@ -26,7 +26,7 @@ from snowcone.cache.repository import Repository
 from snowcone.format import format_date
 from snowcone.models import ObjectRef, ObjectType, Scope
 from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.messages import ObjectSelected
+from snowcone.ui.messages import ObjectOpened
 from snowcone.ui.views.base import CategoryView, register_category_view
 from snowcone.ui.views.tables import (
     LIST_NOTE,
@@ -69,7 +69,7 @@ class StageListView(CategoryView):
         if name is None:
             return
         ref = ObjectRef(ObjectType.STAGE, self.scope.database, self.scope.schema, name)
-        self.post_message(ObjectSelected(ref))
+        self.post_message(ObjectOpened(ref))
 
     def scopes(self) -> list[Scope]:
         return [self.scope]
