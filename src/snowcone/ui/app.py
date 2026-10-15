@@ -135,6 +135,7 @@ class SnowconeApp(TerminalTitleMixin, App[None]):
             # same reset applies: whatever was on screen belonged to the old
             # identity's cache.
             self.screen.set_repo(self.repo)
+            self.screen.prefetch_session_lists()
             profile = self._matching_profile(pool)
             if profile is not None and profile.databases:
                 self.screen.set_databases(list(profile.databases))

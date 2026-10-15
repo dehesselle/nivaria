@@ -165,15 +165,21 @@ class MainScreen(Screen):
             yield PoolGauge(id="footer-pool")
 
     def on_mount(self) -> None:
-        self._request(databases_scope(), Priority.INTERACTIVE)
-        # Prefetched too, not just databases: both are cheap, unpaged SHOW
-        # calls, and fetching them lazily on the picker's first open meant the
-        # dialog didn't have anything to show yet -- one keypress to request
-        # the list, a second to actually get the picker.
-        self._request(warehouses_scope(), Priority.INTERACTIVE)
-        self._request(roles_scope(), Priority.INTERACTIVE)
+        self.prefetch_session_lists()
         self.set_interval(TICK, self._tick)
         self._tick()
+
+    def prefetch_session_lists(self) -> None:
+        """Ask for what the database, warehouse and role pickers offer.
+
+        Warehouses and roles too, not just databases: both are cheap, unpaged
+        SHOW calls, and fetching them lazily on the picker's first open meant
+        the dialog didn't have anything to show yet -- one keypress to request
+        the list, a second to actually get the picker.
+        """
+        self._request(databases_scope(), Priority.INTERACTIVE)
+        self._request(warehouses_scope(), Priority.INTERACTIVE)
+        self._request(roles_scope(), Priority.INTERACTIVE)
 
     @property
     def countdown(self) -> Countdown:
@@ -648,9 +654,7 @@ class MainScreen(Screen):
         # open, same reasoning as on_mount: a brand-new role's cache file has
         # nothing in it yet, and even a previously-visited one may have gone
         # stale while this role was not the active one.
-        self._request(databases_scope(), Priority.INTERACTIVE)
-        self._request(warehouses_scope(), Priority.INTERACTIVE)
-        self._request(roles_scope(), Priority.INTERACTIVE)
+        self.prefetch_session_lists()
 
     def _role_switch_failed(self) -> None:
         assert self.pool is not None

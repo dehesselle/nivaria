@@ -7,7 +7,13 @@ from textual.widgets import Input
 
 from snowcone.cache.db import Database
 from snowcone.cache.repository import Repository
-from snowcone.models import databases_scope, grants_scope, tag_references_scope
+from snowcone.models import (
+    databases_scope,
+    grants_scope,
+    roles_scope,
+    tag_references_scope,
+    warehouses_scope,
+)
 from snowcone.ui.app import SnowconeApp
 from snowcone.ui.screens.closing import ClosingDialog
 from snowcone.ui.screens.connect import ConnectScreen
@@ -122,8 +128,10 @@ class RecordingFetch:
         #: mean the screen had already been repointed at a successor before
         #: this one finished quiescing.
         self.screen_still_pointed_here_when_stopped: bool | None = None
+        self.requested: list = []
 
     def request(self, scope, priority) -> bool:
+        self.requested.append(scope)
         return True
 
     def cancel_where(self, predicate) -> list:
@@ -244,6 +252,30 @@ async def test_reconnecting_shows_a_please_wait_dialog_while_the_old_session_clo
         assert first_fetch.stopped
 
     assert ClosingDialog in pushed
+
+
+async def test_reconnecting_prefetches_the_new_identitys_databases_warehouses_and_roles() -> (
+    None
+):
+    """Same as at startup and after a role switch: the new identity's cache
+    file may have nothing in it yet, and without asking up front the first
+    open of each picker only requested the list and closed again."""
+    app = SnowconeApp(connector=FakeConnector())
+    _use_recording_fetch(app)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await _connect(pilot, "TEST")
+        first_fetch = app.fetch
+
+        await _reopen_connect(pilot)
+        await _connect(pilot, "PROD")
+
+        assert isinstance(pilot.app.screen, MainScreen)
+        second_fetch = app.fetch
+        assert isinstance(second_fetch, RecordingFetch)
+        assert second_fetch is not first_fetch
+        for scope in (databases_scope(), warehouses_scope(), roles_scope()):
+            assert scope in second_fetch.requested
 
 
 async def test_quitting_the_connect_screen_exits() -> None:

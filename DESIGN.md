@@ -1616,10 +1616,11 @@ key bindings keep working without being re-implemented.
   multi-select sibling, `MultiPickerDialog`, see "The Object tree" above),
   backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
   — small, flat, unpaged lists, unlike the object mirrors), requested
-  eagerly on mount alongside the database list rather than on the picker's
-  first open — lazily fetching it there meant the first open ever just
-  requested the list and closed again, since there was nothing cached yet
-  to show. Unlike the
+  eagerly alongside the database list rather than on the picker's first
+  open — on mount, and again after a role switch or a reconnect, since either
+  points the app at a different cache file. Lazily fetching it on the
+  picker's first open meant that open just requested the list and closed
+  again, since there was nothing cached yet to show. Unlike the
   database picker, which only ever changes what a query is built to ask for,
   picking a warehouse or role actually rewrites the session: see
   `ConnectionPool.set_role` / `set_warehouse` below.
