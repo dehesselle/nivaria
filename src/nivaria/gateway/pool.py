@@ -38,7 +38,7 @@ AUTHENTICATORS = (OAUTH, EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA)
 #: giving up. Deliberately short and fixed rather than a Setting -- a tuning
 #: knob for "how long should a denied prompt take to resolve," not a per-user
 #: preference. Bounds OAuth's and password+MFA's approval wait (see
-#: DESIGN.md, "The connection pool"); externalbrowser's local-socket wait is
+#: docs/DESIGN.md, "The connection pool"); externalbrowser's local-socket wait is
 #: not governed by either kwarg in the installed driver (verified: no
 #: timeout exists anywhere in that code path) and stays unbounded -- an
 #: accepted gap, also called out there.
@@ -471,7 +471,7 @@ class ConnectionPool:
         HTTP session) and was observed to hang the whole app on quit --
         and, via the identical `stop(); close()` sequence, on a fast
         reconnect too -- while a background fetch was still running a
-        query. Workers cannot be interrupted (see DESIGN.md), so a
+        query. Workers cannot be interrupted (see docs/DESIGN.md), so a
         still-checked-out connection is simply abandoned here rather than
         raced: the process exiting (or, on reconnect, garbage collection)
         reclaims it for free, and nothing here waits on a straggling query.

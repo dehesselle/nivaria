@@ -736,7 +736,7 @@ class Repository:
         STG_CUSTOMER_ORDERS is the whole point. The owning database is not
         baked into this text -- search.py adds it as a display-only prefix,
         since letting it compete for the query's leading characters the way
-        schema does would dilute matching for no benefit (see DESIGN.md).
+        schema does would dilute matching for no benefit (see docs/DESIGN.md).
         """
         if not databases:
             return []
@@ -781,7 +781,7 @@ class Repository:
 
         Currently unused -- SearchDialog.on_mount's call into this is
         commented out, cross-database column search not being ready for
-        prime time yet (see DESIGN.md "Known gaps"). Kept multi-database-
+        prime time yet (see docs/DESIGN.md "Accepted design gaps"). Kept multi-database-
         ready anyway, so re-enabling it later is restoring one call, not
         writing new code.
         """

@@ -167,7 +167,7 @@ def split_query(query: str) -> tuple[str, tuple[str, ...]]:
     Only the first word is scored. Every later word narrows the results
     without re-scoring them, so adding one can never reorder the list or bring
     a row back. Letting every word score equally, fzf-style, was rejected: a
-    lone word must keep the database out of matching (see DESIGN.md "Matching
+    lone word must keep the database out of matching (see docs/DESIGN.md "Matching
     and ranking"), so a second word would change what the first one may
     match, and the list could grow or reshuffle as the user typed more.
     """

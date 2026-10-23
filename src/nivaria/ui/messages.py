@@ -46,7 +46,7 @@ class ObjectSelected(Message):
 class ObjectOpened(Message):
     """An object was chosen from outside the tree, so it is revealed there
     as well as shown. Not `ObjectSelected`: that one is the tree's own
-    highlight, which must never reveal (see DESIGN.md "A highlight is not a
+    highlight, which must never reveal (see docs/DESIGN.md "A highlight is not a
     jump")."""
 
     def __init__(self, ref: ObjectRef) -> None:

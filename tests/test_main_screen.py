@@ -807,7 +807,7 @@ async def test_a_schema_search_hit_reveals_expands_and_opens_its_view(repo) -> N
     always -- but since that moves the cursor onto the schema node, and a
     schema node now posts SchemaSelected on highlight, choosing a schema hit
     also opens its Grants/Tags view, not just navigating the tree the way it
-    used to (see SchemaRef and DESIGN.md's "Choosing a hit")."""
+    used to (see SchemaRef and docs/DESIGN.md's "Choosing a hit")."""
     put_schemas(repo, "MYDB", "AAA", "STAGING")
     put_tables(repo, "MYDB", "STAGING", "STG_CUSTOMER_ORDERS")
     app = Harness(repo, RecordingFetch())

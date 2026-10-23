@@ -209,12 +209,11 @@ CREATE INDEX IF NOT EXISTS information_schema_columns_scope
 
 -- LAST_DDL/LAST_ALTERED for the "Tables (n)" list, sourced via a real SELECT
 -- against INFORMATION_SCHEMA.TABLES (needs a running warehouse) rather than
--- SHOW -- see DESIGN.md's dual-source note. LAST_DDL is a pure DDL
+-- SHOW -- see docs/DESIGN.md "A second source". LAST_DDL is a pure DDL
 -- timestamp; LAST_ALTERED is the closest available proxy for "last DML" --
 -- it also covers DDL and background metadata operations, so the UI labels
--- it "Last Altered", not "Last DML". Unlike every SHOW-sourced table above,
--- this column set is NOT verified against a live account -- it is taken
--- from Snowflake's published INFORMATION_SCHEMA.TABLES documentation only.
+-- it "Last Altered", not "Last DML". Column names and values verified live
+-- on 2026-09-09 (docs/snowflake-behavior.md).
 CREATE TABLE IF NOT EXISTS information_schema_tables (
     TABLE_CATALOG TEXT NOT NULL,
     TABLE_SCHEMA  TEXT NOT NULL,
@@ -232,19 +231,16 @@ CREATE INDEX IF NOT EXISTS information_schema_tables_scope
 -- LAST_DDL/LAST_ALTERED for the "Views (n)" list, the same
 -- INFORMATION_SCHEMA.TABLES statement information_schema_tables above uses,
 -- just filtered to TABLE_TYPE = 'VIEW' instead of 'BASE TABLE' -- see
--- ScopeKind.VIEW_STATS. Kept as its own physical table rather than sharing
+-- ScopeType.VIEW_STATS. Kept as its own physical table rather than sharing
 -- information_schema_tables under a second _scope value: table and view
 -- names cannot collide within one schema, so it would technically be safe,
 -- but this repo already keeps near-identical shapes in separate physical
 -- tables (account_usage_copy_history vs account_usage_task_history) rather
 -- than lean on that, and it costs nothing here since neither table is large.
--- Column names verified live on 2026-09-09 against RENETEST1-3 (Snowflake
--- 10.32.102) with LAST_DDL/LAST_ALTERED present for TABLE_TYPE = 'VIEW' rows
--- exactly as for 'BASE TABLE' -- but populated values are not: those three
--- databases carry no user-created view, only Snowflake's own
--- INFORMATION_SCHEMA system views, which read back LAST_DDL/LAST_ALTERED as
--- NULL (system-managed, not user DDL). A real user view's actual values
--- remain unconfirmed.
+-- Column names and values verified live on 2026-09-09: every user view
+-- probed carries non-null LAST_DDL/LAST_ALTERED, while Snowflake's own
+-- INFORMATION_SCHEMA system views read back NULL for both
+-- (docs/snowflake-behavior.md).
 CREATE TABLE IF NOT EXISTS information_schema_views (
     TABLE_CATALOG TEXT NOT NULL,
     TABLE_SCHEMA  TEXT NOT NULL,
@@ -262,17 +258,17 @@ CREATE INDEX IF NOT EXISTS information_schema_views_scope
 -- Rows/bytes for materialized views in a schema -- SHOW VIEWS (show_views
 -- above) never carries these, even for materialized views; SHOW MATERIALIZED
 -- VIEWS is Snowflake's separate command that does, with its own column set
--- (see ScopeKind.MATERIALIZED_VIEW_STATS). Metadata layer, needs no
+-- (see ScopeType.MATERIALIZED_VIEW_STATS). Metadata layer, needs no
 -- warehouse, unlike information_schema_views/information_schema_tables.
--- Column names verified live on 2026-09-09 against RENETEST1-3 (Snowflake
--- 10.32.102): the full column list is created_on, name, reserved,
--- database_name, schema_name, cluster_by, rows, bytes, source_database_name,
--- source_schema_name, source_table_name, refreshed_on, compacted_on, owner,
--- invalid, invalid_reason, behind_by, comment, text, is_secure,
--- automatic_clustering, owner_role_type -- rows/bytes are real columns here,
--- confirming they exist where SHOW VIEWS never carries them. Populated
--- values are unconfirmed: none of those three databases has an actual
--- materialized view to read one back from.
+-- Column names and values verified live on 2026-09-09
+-- (docs/snowflake-behavior.md): the full column list is created_on, name,
+-- reserved, database_name, schema_name, cluster_by, rows, bytes,
+-- source_database_name, source_schema_name, source_table_name,
+-- refreshed_on, compacted_on, owner, invalid, invalid_reason, behind_by,
+-- comment, text, is_secure, automatic_clustering, owner_role_type --
+-- rows/bytes are real columns here, confirming they exist where SHOW VIEWS
+-- never carries them, and they read back the materialized view's real row
+-- count and size.
 CREATE TABLE IF NOT EXISTS show_materialized_views (
     database_name TEXT NOT NULL,
     schema_name   TEXT NOT NULL,
@@ -290,14 +286,13 @@ CREATE INDEX IF NOT EXISTS show_materialized_views_scope
 -- Every pipe's load history in a schema (bounded by the "pipe history fetch
 -- window" setting), sourced via a real SELECT against
 -- SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY (needs a running warehouse) rather
--- than SHOW -- see DESIGN.md's dual-source note, the second instance of the
--- pattern information_schema_tables established. Unlike that first
+-- than SHOW -- see docs/DESIGN.md "A second source", the second instance of
+-- the pattern information_schema_tables established. Unlike that first
 -- instance, the source here is ACCOUNT_USAGE rather than INFORMATION_SCHEMA:
 -- it also needs IMPORTED PRIVILEGES on the SNOWFLAKE database (or
 -- ACCOUNTADMIN) and can lag real activity by up to ~2 hours -- either gap
--- just leaves these columns blank, same as a missing warehouse does. This
--- column set is NOT verified against a live account -- it is taken from
--- Snowflake's published ACCOUNT_USAGE.COPY_HISTORY documentation only.
+-- just leaves these columns blank, same as a missing warehouse does. Column
+-- names and values verified live on 2026-09-09 (docs/snowflake-behavior.md).
 --
 -- One row per pipe -- reduced from one row per historical load by a QUALIFY
 -- in queries.pipe_activity, keeping only each pipe's latest. This backs the
@@ -332,11 +327,10 @@ CREATE INDEX IF NOT EXISTS account_usage_copy_history_scope
 -- Scoped per pipe, like information_schema_copy_history below, and fetched
 -- just as lazily -- only once that pipe's detail view is open. This is a
 -- separate table rather than the same one under a different _scope value:
--- account_usage_copy_history's primary key has no _scope column, since it
--- never needed one before, so a row shared between that schema-wide scope
--- and a per-pipe scope here would let whichever pass wrote it last steal its
--- _scope tag out from under the other. This column set is likewise NOT
--- verified against a live account.
+-- account_usage_copy_history's primary key has no _scope column, so a row
+-- shared between that schema-wide scope and a per-pipe scope here would let
+-- whichever pass wrote it last steal its _scope tag out from under the
+-- other. Column names and values verified live on 2026-09-09.
 CREATE TABLE IF NOT EXISTS account_usage_copy_history_detail (
     PIPE_CATALOG_NAME       TEXT,
     PIPE_SCHEMA_NAME        TEXT,
@@ -365,8 +359,7 @@ CREATE INDEX IF NOT EXISTS account_usage_copy_history_detail_scope
 -- SELECT against INFORMATION_SCHEMA.COPY_HISTORY. Scoped per pipe, like
 -- information_schema_columns is scoped per table -- _scope disambiguates
 -- which pipe's rows these are, since the physical table holds every pipe's
--- history together. This column set is likewise NOT verified against a live
--- account.
+-- history together. Column names and values verified live on 2026-09-09.
 CREATE TABLE IF NOT EXISTS information_schema_copy_history (
     FILE_NAME               TEXT,
     FILE_SIZE               INTEGER,
@@ -388,13 +381,12 @@ CREATE INDEX IF NOT EXISTS information_schema_copy_history_scope
 -- Every task's latest run in a schema (bounded by the "task history fetch
 -- window" setting), sourced via a real SELECT against
 -- SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY (needs a running warehouse) rather
--- than SHOW -- see DESIGN.md's dual-source note, the same pattern
+-- than SHOW -- see docs/DESIGN.md "A second source", the same pattern
 -- account_usage_copy_history established. Needs IMPORTED PRIVILEGES on the
 -- SNOWFLAKE database (or ACCOUNTADMIN) and can lag real activity by up to
 -- ~45 minutes -- either gap just leaves these columns blank, same as a
--- missing warehouse does. This column set is NOT verified against a live
--- account -- it is taken from Snowflake's published ACCOUNT_USAGE.
--- TASK_HISTORY documentation only.
+-- missing warehouse does. Column names and values verified live on
+-- 2026-09-09 (docs/snowflake-behavior.md).
 --
 -- One row per task -- reduced from one row per historical run by a QUALIFY
 -- in queries.task_activity, keeping only each task's latest. QUERY_ID is
@@ -431,8 +423,7 @@ CREATE INDEX IF NOT EXISTS account_usage_task_history_scope
 -- separate table rather than the same one under a different _scope value,
 -- for the same reason account_usage_copy_history_detail is separate from
 -- account_usage_copy_history: the schema-wide table's primary key has no
--- _scope column, since it never needed one before. This column set is
--- likewise NOT verified against a live account.
+-- _scope column. Column names and values verified live on 2026-09-09.
 CREATE TABLE IF NOT EXISTS account_usage_task_history_detail (
     NAME              TEXT,
     DATABASE_NAME     TEXT,
@@ -460,8 +451,8 @@ CREATE INDEX IF NOT EXISTS account_usage_task_history_detail_scope
 -- which task's rows these are, since the physical table holds every task's
 -- history together. Unlike information_schema_copy_history, no target-table
 -- resolution is needed to fetch this: the function accepts TASK_NAME/
--- DATABASE_NAME/SCHEMA_NAME as direct named arguments. This column set is
--- likewise NOT verified against a live account.
+-- DATABASE_NAME/SCHEMA_NAME as direct named arguments. Column names and
+-- values verified live on 2026-09-09.
 CREATE TABLE IF NOT EXISTS information_schema_task_history (
     NAME              TEXT,
     QUERY_ID          TEXT,
@@ -486,13 +477,13 @@ CREATE INDEX IF NOT EXISTS information_schema_task_history_scope
 -- column key (a grantee can hold several distinct privileges on the same
 -- object, and the same privilege/grantee pair can recur across separate
 -- grant statements), so the composite key below is a best-effort choice,
--- same as account_usage_copy_history_detail's -- unverified against a live
--- account for uniqueness at scale.
+-- same as account_usage_copy_history_detail's -- its uniqueness at scale has
+-- not been checked against a live account.
 --
--- granted_by_role_type is a speculative companion to granted_by, mirroring
--- the owner_role_type column every other SHOW table already carries --
--- unconfirmed against a live account; if SHOW GRANTS does not return it,
--- ingest just leaves it NULL, same as any other unreturned column.
+-- Column names verified live on 2026-09-09, and for SHOW GRANTS ON TABLE on
+-- 2026-10-14 (docs/snowflake-behavior.md). granted_by_role_type is
+-- granted_by's companion, mirroring the owner_role_type column every other
+-- SHOW table carries; it reads 'ROLE' on real output.
 CREATE TABLE IF NOT EXISTS show_grants (
     created_on           TEXT,
     privilege             TEXT,
@@ -520,10 +511,11 @@ CREATE INDEX IF NOT EXISTS show_grants_scope ON show_grants(_scope);
 -- ACCOUNT_USAGE.TAG_REFERENCES: that needs IMPORTED PRIVILEGES on SNOWFLAKE
 -- (or ACCOUNTADMIN) and can lag ~2 hours, both unnecessary here since
 -- INFORMATION_SCHEMA.TAG_REFERENCES already covers a single object with no
--- extra privilege and near-real-time data. Column set is documentation-only,
--- unverified against a live account. TAG_VALUE is part of the key because a
--- multi-value tag (MULTI_VALUE = TRUE) comes back as one row per value; keyed
--- on TAG_NAME alone, each value would overwrite the one before it.
+-- extra privilege and near-real-time data. Column names and values verified
+-- live on 2026-09-09 (docs/snowflake-behavior.md). TAG_VALUE is part of the
+-- key because a multi-value tag (MULTI_VALUE = TRUE) comes back as one row
+-- per value; keyed on TAG_NAME alone, each value would overwrite the one
+-- before it.
 CREATE TABLE IF NOT EXISTS information_schema_tag_references (
     TAG_DATABASE TEXT,
     TAG_SCHEMA   TEXT,
@@ -539,13 +531,16 @@ CREATE INDEX IF NOT EXISTS information_schema_tag_references_scope
     ON information_schema_tag_references(_scope);
 
 -- Tags applied to every column of one table or view (one row per column per
--- tag value -- see information_schema_tag_references for why), scoped per table like information_schema_columns. Sourced via
+-- tag value -- see information_schema_tag_references for why), scoped per
+-- table like information_schema_columns. Sourced via
 -- INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS rather than TAG_REFERENCES
 -- called once per column -- that function returns every column's tags for
 -- one table in a single call, so this scales with tables, not with columns.
 -- Same warehouse/degrade-blank story as information_schema_tag_references
--- above. Column set is documentation-only, unverified against a live
--- account -- same caveat as information_schema_tag_references.
+-- above. Verified live on 2026-09-14, which is how the function was found
+-- to report inherited schema- and database-level tags against every column
+-- too; queries.tag_references_all_columns filters those out
+-- (docs/snowflake-behavior.md).
 CREATE TABLE IF NOT EXISTS information_schema_tag_references_all_columns (
     TAG_DATABASE TEXT,
     TAG_SCHEMA   TEXT,

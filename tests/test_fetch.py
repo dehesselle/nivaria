@@ -1682,7 +1682,7 @@ def test_a_columns_prime_repairs_a_cold_schema_list_before_falling_back(repo) ->
     """Pre-warming may be the first request ever made against a database
     nobody has browsed this session, so the SCHEMAS scope this fallback would
     normally read can still be empty. Rather than leaning on another scope to
-    have finished first (there is no dependency graph -- see DESIGN.md), the
+    have finished first (there is no dependency graph -- see docs/DESIGN.md), the
     fallback asks Snowflake for the schema names directly."""
     from nivaria.models import columns_prime_scope, columns_scope, schemas_scope
 

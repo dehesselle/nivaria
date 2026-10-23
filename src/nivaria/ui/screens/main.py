@@ -340,7 +340,7 @@ class MainScreen(Screen):
         # revealing it again queues a cursor move of its own. Textual
         # re-highlights a node whose line merely shifted, so a highlight
         # that moves the cursor can answer another one forever -- see
-        # DESIGN.md "A highlight is not a jump".
+        # docs/DESIGN.md "A highlight is not a jump".
         self.detail.show(event.ref)
         self._restart_countdown()
 

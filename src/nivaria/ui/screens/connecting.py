@@ -26,7 +26,7 @@ driver's local-socket wait for that authenticator takes no timeout argument
 at all (verified by reading it -- see the comment on `CONNECT_TIMEOUT_SECONDS`
 in `pool.py`), so an abandoned browser tab under that authenticator can still
 leave this dialog showing "0 seconds" indefinitely. Accepted gap, not fixed
-by the countdown -- see DESIGN.md.
+by the countdown -- see docs/DESIGN.md.
 
 No Cancel button: the blocking call into `snowflake.connector.connect()`
 cannot be interrupted from the outside once made -- the driver exposes no hook

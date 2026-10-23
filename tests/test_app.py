@@ -118,7 +118,7 @@ class RecordingFetch:
     screen state, it was told to stop -- used to prove
     NivariaApp.open_connect fully quiesces the outgoing identity before
     MainScreen is repointed at a new one, the same discipline
-    MainScreen._switch_role already uses for a role switch (see DESIGN.md).
+    MainScreen._switch_role already uses for a role switch (see docs/DESIGN.md).
     """
 
     def __init__(self, app: NivariaApp) -> None:

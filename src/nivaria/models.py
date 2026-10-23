@@ -46,7 +46,7 @@ class ObjectType(StrEnum):
         "next page" came back identical to the last. Declared here rather than
         discovered at runtime, so the statement builder can stop asking for
         something that does not work instead of the scheduler having to
-        recover from it. See DESIGN.md, "Bounding a result".
+        recover from it. See docs/DESIGN.md, "Bounding a result".
         """
         return self not in (ObjectType.PIPE, ObjectType.STAGE)
 
@@ -68,7 +68,7 @@ class ScopeType(StrEnum):
     COLUMNS_PRIME = "columns_prime"
     #: A schema's tables' LAST_DDL/LAST_ALTERED, sourced by a real SELECT
     #: against INFORMATION_SCHEMA.TABLES rather than SHOW -- the first
-    #: deliberate exception to SHOW-only (see DESIGN.md). Scoped to
+    #: deliberate exception to SHOW-only (see docs/DESIGN.md). Scoped to
     #: (database, schema) like OBJECTS, but backed by its own mirror table.
     TABLE_STATS = "table_stats"
     #: A schema's views' LAST_DDL/LAST_ALTERED, the same INFORMATION_SCHEMA.
@@ -88,7 +88,7 @@ class ScopeType(StrEnum):
     #: fetch window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
     #: instance of the dual-source pattern TABLE_STATS established (see
-    #: DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
+    #: docs/DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
     #: its own mirror table. Its own data barely changes on the ordinary CACHE_TTL cadence, so it carries a much
     #: longer effective TTL -- see `scope_ttl` below. Reduced to one row per
     #: pipe in SQL (see queries.pipe_activity) -- a single pipe's own full
@@ -110,7 +110,7 @@ class ScopeType(StrEnum):
     #: Every task's *latest* run in a schema (bounded by the "task history
     #: fetch window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY rather than SHOW -- the same
-    #: dual-source pattern PIPE_ACTIVITY established (see DESIGN.md), just
+    #: dual-source pattern PIPE_ACTIVITY established (see docs/DESIGN.md), just
     #: against a different ACCOUNT_USAGE view. Scoped to (database, schema)
     #: like PIPE_ACTIVITY, but backed by its own mirror table.
     #: Reduced to one row per task in SQL (see queries.task_activity) -- a
@@ -146,7 +146,7 @@ class ScopeType(StrEnum):
     #: Tags applied to one schema or one database (schema is None), sourced
     #: by a real SELECT against INFORMATION_SCHEMA.TAG_REFERENCES rather than
     #: SHOW -- the fourth instance of the dual-source pattern TABLE_STATS
-    #: established (see DESIGN.md). Needs a running warehouse; degrades
+    #: established (see docs/DESIGN.md). Needs a running warehouse; degrades
     #: blank without one, same as every SELECT-backed scope.
     TAG_REFERENCES = "tag_references"
     #: One table's (or view's) columns' tags, sourced by a real SELECT

@@ -3,7 +3,7 @@ schema across every currently selected database, given the room a modal can
 take instead of a sliver of the top pane.
 
 Column search is currently disabled -- see `on_mount`'s commented-out
-`_load_columns()` call and DESIGN.md "Known gaps". The reader, the ranking
+`_load_columns()` call and docs/DESIGN.md "Accepted design gaps". The reader, the ranking
 logic below, and `MIN_COLUMN_QUERY_LENGTH` are left in place for when it is
 re-enabled; this docstring still describes them as if live, since the code
 they describe is unchanged, just not currently invoked.
@@ -135,7 +135,7 @@ class SearchDialog(Dialog[Hit]):
         # Column search is disabled for now -- cross-database column search
         # is not ready for prime time. The reader (_read_columns), _rank's
         # column-handling logic, and MIN_COLUMN_QUERY_LENGTH are all left in
-        # place; only this call is commented out. See DESIGN.md "Known gaps".
+        # place; only this call is commented out. See docs/DESIGN.md "Accepted design gaps".
         self._columns_loaded: asyncio.Task[None] | None = None
         # self._columns_loaded = asyncio.create_task(self._load_columns())
         self._schemas_loaded: asyncio.Task[None] = asyncio.create_task(

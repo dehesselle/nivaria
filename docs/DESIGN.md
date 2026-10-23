@@ -1,14 +1,21 @@
 # nivaria — design
 
-A terminal UI for browsing and searching Snowflake objects quickly.
+This document describes how nivaria works and why: the context a change needs
+before it touches anything.
 
-This document describes how nivaria works and why. It is the context a new
-working session needs before changing anything. It deliberately avoids file
-layout and code: read the modules for those.
+It deliberately avoids file layout and code: read the modules for those. How to
+use nivaria is in [MANUAL.md](MANUAL.md), how it behaves while running in
+[OPERATIONS.md](OPERATIONS.md). What live Snowflake accounts were observed to do
+is recorded in [snowflake-behavior.md](snowflake-behavior.md), and the timings
+the decisions below rest on in [measurements.md](measurements.md). The names
+used for parts of the screen (Object tree, Detail pane, Status footer, ...) are
+defined in the manual's [Screen anatomy](MANUAL.md#screen-anatomy).
 
 ---
 
-## The one rule
+## Architecture
+
+### The one rule
 
 **The UI reads the local sqlite cache and nothing else.**
 
@@ -26,66 +33,83 @@ of them:
   deduplicated and prioritised**, and it must never leave the UI in a
   half-updated state.
 
+### Layers
+
+- **Cache** (`cache/`): one sqlite file per (account, role), mirroring
+  Snowflake's `SHOW` results, plus the freshness ledger that makes refreshes
+  surgical. See "The cache".
+- **Gateway** (`gateway/`): the only code that talks to Snowflake. It builds
+  every statement (`queries.py`), owns the connection pool and logs each
+  statement before it is sent. It is a protocol, so tests substitute a fake.
+  See "Fetching" and "The connection pool".
+- **Fetch service** (`service/`): background workers, one per pool
+  connection, that run one page per job, write into the cache and post a
+  message naming the scope they changed. See "The fetch scheduler".
+- **UI** (`ui/`): the Textual screens, the Object tree, the detail views and
+  search. It reads the cache, requests refreshes and repaints on messages.
+
 ---
 
-## Screen anatomy
+## Core principles
 
-Use these names when discussing changes.
+These are the invariants a change must not break. Each links to the section
+that explains it in full.
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                            Menu bar (F9)                                 │
-├────────────────────┬─────────────────────────────────────────────────────┤
-│ ┌─────────────────┐│                                                     │
-│ │  MYDB (12)      ││                                                     │
-│ │  OTHERDB (5)    ││              Detail pane                            │
-│ │   Object tree   ││       (hosts exactly one detail view;               │
-│ │                 ││   drag this border to resize either pane)           │
-│ │                 ││                                                     │
-│ └─────────────────┘│                                                     │
-├────────────────────┴─────────────────────────────────────────────────────┤
-│ F1 Log  / Search  F5 Refresh                       Role  Warehouse  (2/5)│
-└──────────────────────────── Status footer ───────────────────────────────┘
-```
-
-`F1` slides the **Log panel** down over the top third, showing every
-statement nivaria sends; `F1` again hides it. See "The SQL log".
-
-`/` opens the **Search modal** over this screen, at roughly 90 % of the
-terminal:
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ ┌────────────────────────────────────────────────────────────────────┐   │
-│ │ search objects -- more words narrow by schema or database           │   │
-│ │ ......................................................................│
-│ │  MYDB.STAGING.STG_CUSTOMER_ORDERS                            table  │   │
-│ │  MYDB.SALES.ORDERS                                              view │   │
-│ │  OTHERDB.RAW.LOAD_ORDERS                                       pipe │   │
-│ │  ...                                                                │   │
-│ └────────────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-| Name | What it is |
-|---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcoda`'s `MenuBar` (see "Shared widgets" below); nivaria only declares what is in it, inline in `MainScreen.compose`. Two menus. **Nivaria** (`n`), the app-identity menu, leftmost: **About ...** (`a`) -- a `tcoda.widgets.AboutMenuItem` reading `ui/about.txt` (see "Shared widgets" below for why that's a real filesystem path, not just an `importlib.resources` handle) -- then a separator, **Settings ...** (`s`) -- a `tcoda.widgets.SettingsMenuItem`, which opens the dialog itself, so nivaria wires nothing for it -- then another separator and **Quit** (`q`, `Ctrl+Q` shown right-aligned), which runs `app.quit`. **Connection** (`c`), the session menu: **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming". Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
-| **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
-| **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
-| **Detail pane** | Hosts exactly one detail view at a time, chosen by whatever node the cursor is on. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
-| **Object view** | The per-type detail UI for one object (e.g. Table view, Pipe view). Owns its whole detail body. One of four view families the pane can host -- see "Detail views" below for the other three. |
-| **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
-| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen: every statement nivaria sends, live. `tcoda`'s `LogViewer`, fed by `gateway/sql_log.py` -- see "The SQL log" below. |
-
-The tree/Detail split starts at 25 % / 75 % of the width, in `fr` units, and
-is now genuinely resizable: dragging `ObjectTree`'s right border (the same
-mechanism as sibling project snakecam's `ResizableTree`) overwrites that `fr`
-value with a fixed cell width, and the Detail pane's own `fr` absorbs
-whatever is left. Neither pane can be dragged narrower than a small minimum.
-The drag is not persisted across sessions, and a terminal resize does not
-re-clamp an already-narrow pane -- both accepted gaps, see "Known gaps".
-The search modal alone is sized in `%`, not `fr`, on purpose: it wants a
-share of whatever terminal it is in, not a fixed cell count.
+1. **The UI reads the sqlite cache and nothing else**, so no interaction ever
+   waits on Snowflake. See "The one rule".
+2. **Tree and detail data come from `SHOW`**, because `SHOW` needs no
+   warehouse. A fact only a `SELECT` can supply is its own scope that degrades
+   blank on its own, so a session without a warehouse still shows everything
+   else. See "`SHOW`, because it needs no warehouse" and "A second source".
+3. **The cache mirrors Snowflake.** One table per `SHOW`, columns named as
+   Snowflake names them; nivaria's own bookkeeping is `_`-prefixed so it cannot
+   collide; column headers use Snowflake's words. Inventing vocabulary loses
+   information and confuses anyone who knows Snowflake. See "Shape" and
+   "Column headers mirror Snowflake".
+4. **Scopes are independent.** Each query is self-contained, so there is no
+   ordering or dependency between scopes, and no deadlock surface. See
+   "Scopes".
+5. **A refresh is a pass**: rows are deleted only when it finishes, a write
+   carrying a stale generation is rejected, and a failed pass never sweeps, so
+   the UI never flashes empty and yesterday's data beats none. See "The
+   freshness ledger".
+6. **One cache file per (account, role)**, because `SHOW` output is filtered
+   by role and the SQL carries no role. `FetchService` is stopped *before*
+   `ConnectionPool.set_role` changes the role, or a worker writes the new
+   role's rows into the old role's file. See "One cache file per identity".
+7. **Every edit to `schema.sql` or `search.sql` bumps `SCHEMA_VERSION`**,
+   because `IF NOT EXISTS` would never apply it to an existing file. Nothing is
+   migrated; a test pins the scripts' digest to the version. See "A schema
+   version".
+8. **Table data never reaches the disk.** Data-preview rows can be personal
+   data and live in an in-memory database only. See "Table data never reaches
+   the disk".
+9. **Round trips dominate; payload is nearly free.** No statement whose count
+   scales with the number of objects or rows when a batch form exists, and a
+   reduction (one row per pipe) happens in SQL, not in Python. See "Round
+   trips dominate".
+10. **Every result is bounded**, by three independent layers plus row caps on
+    the history statements. See "Bounding a result".
+11. **No keyset paging on the database-wide prime**: object names repeat
+    across schemas, so resuming after a name skips rows. See "Database
+    priming".
+12. **Background work never opens a connection, and connections open one at a
+    time**, because each new connection can mean an MFA prompt. See "The
+    connection pool".
+13. **An update never moves the tree cursor, and a highlight only shows.**
+    Revealing is for jumps from outside the tree. See "The cursor must not
+    move" and "A highlight is not a jump".
+14. **Staleness is decided in one place**, `models.is_stale`, so the sweep, the
+    tree and the detail views cannot drift apart. See "A scope whose data does
+    not age on the ordinary cadence".
+15. **nivaria stores no password.** The driver owns every credential. See
+    "Credentials and profiles".
+16. **Modules outside the UI layer do not import Textual, and the gateway is a
+    protocol.** That keeps the cache, scheduler, matcher and formatting
+    testable as plain functions, and lets every test run offline against a
+    fake gateway without importing the Snowflake driver.
+17. **A `Menu`/`MenuItem` id must not match an `app.tcss` id**, because the id
+    is also a CSS id and a clash garbles the menu bar. See "Shared widgets".
 
 ---
 
@@ -96,7 +120,8 @@ share of whatever terminal it is in, not a fixed cell count.
 The bottom layer is **one table per `SHOW` command, with the result columns
 named exactly as Snowflake names them** — `created_on`, `database_name`,
 `cluster_by`, `invalid_reason` and so on. Column sets were verified against a
-live account (Snowflake 10.31.103) rather than taken from documentation.
+live account rather than taken from documentation (see
+[snowflake-behavior.md](snowflake-behavior.md#verified-column-sets)).
 
 Only a useful subset of each result is mirrored; columns Snowflake returns that
 we do not mirror are dropped silently on ingest, so Snowflake adding a column
@@ -139,7 +164,6 @@ is always Snowflake's column; `type` everywhere else is nivaria's word for
 the concept. `Repository.search_corpus` is the one function that crosses the
 seam, reading `row["kind"]` into an `ObjectType`.
 
-
 ### Scopes: the unit of everything
 
 A **scope** is one separately-refreshable set of rows — the databases list, one
@@ -150,26 +174,25 @@ staleness all be dictionary lookups.
 Scopes are **independent of one another**. It is tempting to think a schema's
 tables must wait for that database's schema list to finish refreshing, but each
 query is self-contained, so they simply run concurrently. There is no
-dependency graph, no ordering constraint and no deadlock surface. If a schema
-really was dropped, its tables fetch fails with "does not exist", that failure
-is recorded, and the failing job asks for the listing one level up
-(`models.containing_scopes`), whose refresh removes the node. That request
-is made after the fact and never waited on, so it adds no ordering.
+dependency graph, no ordering constraint and no deadlock surface.
 
-This used to say the schema list's "own next pass" would remove the node,
-and that was true but useless: the next pass was the TTL sweep, up to
-`CACHE_TTL` away and postponed by every navigation, so a schema dropped in
-Snowsight stayed in the tree and failed every visit with an error toast. A
-drop made elsewhere is invisible to nivaria until a statement trips over it,
-so tripping over it is the trigger. "Does not exist" is recognised by the
-driver's error number (2003), not its message text, which varies by object
-kind; it is reported as a warning rather than an error, and identical
-notices are folded, since one visit to a dropped schema fails its Grants and
-Tags together. It climbs one level per failure: a table's columns name only
-the table, so a dropped *schema* found that way first refreshes the schema's
-object listings, and those are requested per schema on purpose -- a
-database-wide prime would succeed and leave the schema node standing, while
-`SHOW ... IN SCHEMA` fails the same way and carries the refresh up.
+If a schema really was dropped, its tables fetch fails with "does not exist",
+that failure is recorded, and the failing job asks for the listing one level up
+(`models.containing_scopes`), whose refresh removes the node. That request is
+made after the fact and never waited on, so it adds no ordering. Waiting for the
+schema list's own next pass instead would leave the node standing until the TTL
+sweep, which every navigation postpones: a drop made elsewhere is invisible to
+nivaria until a statement trips over it, so tripping over it is the trigger.
+
+"Does not exist" is recognised by the driver's error number (2003), not its
+message text, which varies by object kind; it is reported as a warning rather
+than an error, and identical notices are folded, since one visit to a dropped
+schema fails its Grants and Tags together. It climbs one level per failure: a
+table's columns name only the table, so a dropped *schema* found that way first
+refreshes the schema's object listings, and those are requested per schema on
+purpose -- a database-wide prime would succeed and leave the schema node
+standing, while `SHOW ... IN SCHEMA` fails the same way and carries the refresh
+up.
 
 ### One cache file per identity, not a role dimension on Scope
 
@@ -180,7 +203,7 @@ no such syntax. It is pure session state, invisible in the SQL, so "which
 role was active" cannot be recovered from a scope alone — it would have to be
 stamped onto every row at fetch time from whatever the connection's role
 happened to be *right then*, which is a much bigger seam to open (every scope
-constructor, every mirror table's key, a schema migration) for a problem that
+constructor, every mirror table's key, a schema change) for a problem that
 has a far cheaper fix.
 
 That fix: `SHOW` output is filtered by role, so the whole cache — not one
@@ -188,24 +211,23 @@ table, not one scope type, all of it — is only ever valid for the role that
 was active while it was built. So instead of tagging rows, nivaria keeps a
 **separate sqlite file per (account, role)** (`paths.cache_file`), and treats
 switching roles as switching *which file* `Repository` points at, the same way
-`open_connect` already swaps in a whole new `ConnectionPool`. Within one file,
-everything above (scopes, the pass protocol, staleness) is exactly as
-described and needs no changes, because it was already correct for a single,
-fixed identity — the one thing that used to not hold across a role switch.
+`open_connect` swaps in a whole new `ConnectionPool`. Within one file,
+everything above (scopes, the pass protocol, staleness) holds unchanged,
+because it is correct for a single, fixed identity.
 
-This is also why it does not cost a wipe: switching back to a role visited
-earlier in the session reopens that role's own file, warm, rather than
+This is also why a switch does not cost a wipe: switching back to a role
+visited earlier in the session reopens that role's own file, warm, rather than
 refetching everything. An admin who alternates between two roles all day
-pays one refetch per role the *first* time they use it that session, not
-every time they switch. Account is part of the key too, not just role, so
-two different accounts that happen to use a same-named role (a generic
-`SYSADMIN` exists in plenty of accounts) cannot share a file either. Warehouse
-is deliberately excluded from the key: `SHOW` needs no warehouse (see below),
-so nothing it returns can vary with which one is active.
+pays one refetch per role the *first* time they use it, not every time they
+switch. Account is part of the key too, not just role, so two different
+accounts that happen to use a same-named role (a generic `SYSADMIN` exists in
+plenty of accounts) cannot share a file either. Warehouse is deliberately
+excluded from the key: `SHOW` needs no warehouse (see below), so nothing it
+returns can vary with which one is active.
 
 Because the identity is not known until a connection exists, the cache is not
-opened at app startup — `NivariaApp.on_mount` no longer creates a `Repository`
-before the connect dialog even runs. It is opened once a pool exists
+opened at app startup: `NivariaApp.on_mount` creates no `Repository` before
+the connect dialog runs. It is opened once a pool exists
 (`NivariaApp.switch_repo`), and re-opened by the same call after a role
 switch or a reconnect. `MainScreen.set_repo` (and the matching method on
 `ObjectTree` and `DetailPane`) is what repoints a widget at a different
@@ -238,7 +260,7 @@ one is indistinguishable from a complete one by looking at it, and presenting
 a partial answer as a whole one is the thing this design does not allow.
 `HistoryView` renders a note above the table when it is set, and `begin_pass`
 clears it, so raising the cap (or a pipe going quiet) retires the note on its
-own. The column was added to `schema.sql` in place.
+own.
 
 Refreshing a scope is a **pass**:
 
@@ -275,11 +297,11 @@ open, a file carrying any other version is deleted together with its `-wal`
 and `-shm` and rebuilt empty. nivaria is pre-1.0 with no
 backward-compatibility policy, so nothing is migrated; the cache refills
 itself like a first start. A test pins a digest of both scripts to the
-version, so changing a script without the bump fails the suite.
+version, so changing a script without the bump fails the suite. The digest
+covers the whole text, comments included.
 
 Adding a column to an existing mirror table in place is therefore an ordinary
-change, not an exception (`FIRST_ERROR_MESSAGE`/`FIRST_ERROR_LINE_NUMBER` and
-`cache_entry.truncated` were added that way).
+change, not an exception.
 
 ### Table data never reaches the disk
 
@@ -293,12 +315,11 @@ knows the difference. The memory database has its own `cache_entry`, so a
 preview's freshness lives and dies with its rows. Previews are gone when the
 app exits, and a reconnect or role switch starts without them.
 
-Deleting previews from the file instead was the first version, and it was
-not enough. SQLite leaves deleted content in free pages and in the `-wal`
-file until something overwrites it, so the rows stayed recoverable from disk
-after nivaria could no longer read them. The ledger entry had to be deleted
-alongside the rows, too, or it would read as a preview fetched and found
-empty.
+Keeping previews in the file and deleting them is not enough. SQLite leaves
+deleted content in free pages and in the `-wal` file until something
+overwrites it, so the rows would stay recoverable from disk after nivaria
+could no longer read them. The ledger entry would have to be deleted alongside
+the rows, too, or it would read as a preview fetched and found empty.
 
 The memory database breaks the cache's "a connection per call, never held"
 rule, and has to. An in-memory database belongs to the connection that
@@ -330,7 +351,9 @@ is read from the first row rather than from the cached column list, which can
 be older than the rows and name other columns. JSON has no type for some of
 what the driver returns, so a `Decimal` is stored as a string (a float would
 drop a `NUMBER(38,x)`'s digits), a timestamp as ISO 8601, and a `BINARY` as
-upper-case hex, Snowflake's own default output format.
+upper-case hex, Snowflake's own default output format. Anything else the
+encoder does not know is stored as `str()`, so a surprise degrades a cell's
+rendering rather than failing the fetch.
 
 ---
 
@@ -402,7 +425,7 @@ the same exception `information_schema_columns` established).
 #### The second-source scopes
 
 | Scope | Source | Feeds | Needs |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `TABLE_STATS` | `INFORMATION_SCHEMA.TABLES`, `TABLE_TYPE = 'BASE TABLE'` | Tables (n): Last DDL, Last Altered | warehouse |
 | `VIEW_STATS` | the same statement, `TABLE_TYPE = 'VIEW'` | Views (n): Last DDL, Last Altered | warehouse |
 | `MATERIALIZED_VIEW_STATS` | `SHOW MATERIALIZED VIEWS` | Views (n): Rows, Size | — |
@@ -437,11 +460,15 @@ it needs `IMPORTED PRIVILEGES` and lags hours, for no gain over the
 once per column: it returns every tag on every column of one table in a
 single call, so the Columns view's Tags column costs one query per table
 regardless of how many columns it has — the same "no query whose cost scales
-with row count" rule the rest of this app already holds `SHOW` to.
+with row count" rule the rest of this app already holds `SHOW` to. It filters
+out `APPLY_METHOD = 'INHERITED'`, because the function also reports every
+schema- and database-level tag against each column underneath (see
+[snowflake-behavior.md](snowflake-behavior.md#tag-references)), and a column
+must not show its schema's tags as its own.
 
 Both functions report a multi-value tag (`MULTI_VALUE = TRUE`) as one row
 per value, so `TAG_VALUE` is part of both mirrors' keys. Without it, the
-cache's upsert kept only the last value of each tag. The Columns view's
+cache's upsert would keep only the last value of each tag. The Columns view's
 detail panel joins one tag's values onto a single `TAG = a, b` line.
 
 Snowflake's own visibility rules still apply on top: `SHOW GRANTS ON <object>`
@@ -463,21 +490,20 @@ reasons as `ACCOUNT_USAGE.TAG_REFERENCES` above. So every table or view is
 its own round trip, and the Table and View views ask for it only while
 their Grants tab is shown (see "What decides a view's shape"). A
 materialized view is listed by `SHOW VIEWS` (`is_materialized = true`) and
-so opens as a view, and `ON VIEW` covers it: verified on the sandbox on
-2026-10-14, `SHOW GRANTS ON VIEW` and `ON MATERIALIZED VIEW` returned the
-same rows for one, with `granted_on` reading `MATERIALIZED_VIEW`.
+so opens as a view, and `ON VIEW` covers it (see
+[snowflake-behavior.md](snowflake-behavior.md#show-grants)).
 
-#### One row per pipe, in SQL — a real incident
+#### One row per pipe, in SQL
 
 `PIPE_ACTIVITY` is reduced to each pipe's latest load by a `QUALIFY
 ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1`,
 and that `QUALIFY` is load-bearing. Without it, on an account with ~400 pipes
-and frequent ingestion, the query returned unboundedly many historical rows —
-one per load, over the whole fetch window, across every pipe in the schema —
-and the app hung for minutes materialising them just to throw away all but
-the newest per pipe a moment later. Collapsing in Python is not enough; it
-has to happen in SQL. `TASK_ACTIVITY` carries the same reduction for the same
-reason.
+and frequent ingestion, the query returns one row per load, over the whole
+fetch window, across every pipe in the schema — hundreds of thousands of rows
+(see [measurements.md](measurements.md#history-volume)) — and the app hangs
+for minutes materialising them just to throw away all but the newest per pipe.
+Collapsing in Python is not enough; it has to happen in SQL. `TASK_ACTIVITY`
+carries the same reduction for the same reason.
 
 `ACCOUNT_USAGE.COPY_HISTORY` is what the schema-wide list reads at all
 because `INFORMATION_SCHEMA.COPY_HISTORY` requires a `TABLE_NAME` argument
@@ -493,10 +519,9 @@ does not share the schema-wide scope: `PIPE_ACTIVITY_HISTORY` and
 full of pipes never pays for history nobody has looked at.
 
 They get their own mirror tables rather than reusing the schema-wide ones
-under a different `_scope` value, because those tables' primary keys predate
-having two scopes write into them and do not include `_scope`: a row visible
-to both would let whichever pass wrote it last steal its `_scope` tag from
-the other.
+under a different `_scope` value, because those tables' primary keys do not
+include `_scope`: a row visible to both would let whichever pass wrote it last
+steal its `_scope` tag from the other.
 
 #### Merging the two halves of a history
 
@@ -512,15 +537,14 @@ The merge key differs, and the reason is Snowflake's: a task run has
 A pipe's file load has no equivalent, so it is keyed on `(FILE_NAME,
 PIPE_RECEIVED_TIME)`.
 
-`LAST_LOAD_TIME` looks like the natural second half of that key and is not,
-and this was a real incident: the two views stamp it independently, so the
-same load carried `11:11:24.961` in `ACCOUNT_USAGE` and `11:11:24.926` in
-`INFORMATION_SCHEMA` on a production account. Every load in both sources
-showed up twice, which the minute-precision "Loaded" column hid. Comparing all
-shared columns for every overlapping load there found `LAST_LOAD_TIME` the
-only one that differed, and `PIPE_RECEIVED_TIME` equal and non-NULL in every
-pair. A row without one falls back to `LAST_LOAD_TIME`, so it cannot collapse
-several loads of one file name into one.
+`LAST_LOAD_TIME` looks like the natural second half of that key and is not:
+the two views stamp it independently, so the same load carries slightly
+different values in each (see
+[snowflake-behavior.md](snowflake-behavior.md#copy-history)) and every load in
+both sources would show up twice — hidden by the minute-precision "Loaded"
+column. `PIPE_RECEIVED_TIME` is equal in both. A row without one falls back to
+`LAST_LOAD_TIME`, so it cannot collapse several loads of one file name into
+one.
 
 Rows older than the "display window" setting are filtered out of the *view*
 only; they stay in the fetch-window-bounded cache, so shrinking the display
@@ -539,16 +563,16 @@ scopes.
 
 A pipe that has never loaded anything has no cached row to resolve a target
 from, and that is a normal, **permanent** state for plenty of real pipes, not
-a transient failure to retry. Treating it as one was the first version's
-mistake: it queued `PIPE_HISTORY` anyway, `fetch_page` raised, and the fetch
-layer reported an error on every attempt, forever. The fix lives above the
-fetch layer: `PipeView.scopes()` only lists `pipe_history_scope` once a
-target actually resolves, and `update_content` only `ensure()`s it under the
-same condition — so neither the interactive path nor the background sweep
-(which watches `scopes()` too) ever queues it. Such a pipe renders an empty
-history and starts fetching real data the moment `PIPE_ACTIVITY` first gets a
-row for it. `fetch_page` still raises if `PIPE_HISTORY` is requested with no
-target: a safety net for a caller that skips the gate, not the expected path.
+a transient failure to retry. Queuing `PIPE_HISTORY` anyway would make
+`fetch_page` raise and the fetch layer report an error on every attempt,
+forever. So the gate lives above the fetch layer: `PipeView.scopes()` only
+lists `pipe_history_scope` once a target actually resolves, and
+`update_content` only `ensure()`s it under the same condition — so neither the
+interactive path nor the background sweep (which watches `scopes()` too) ever
+queues it. Such a pipe renders an empty history and starts fetching real data
+the moment `PIPE_ACTIVITY` first gets a row for it. `fetch_page` still raises
+if `PIPE_HISTORY` is requested with no target: a safety net for a caller that
+skips the gate, not the expected path.
 
 `TaskView` needs none of this. `INFORMATION_SCHEMA.TASK_HISTORY` accepts
 `TASK_NAME`/`DATABASE_NAME`/`SCHEMA_NAME` as direct named arguments, all of
@@ -558,14 +582,14 @@ are always requested once the view is open.
 One thing that looks redundant and is not: `queries.task_history` still
 database-qualifies the function name (`"<database>".INFORMATION_SCHEMA.
 TASK_HISTORY(...)`) even though `DATABASE_NAME` is also one of its named
-arguments. Those are two different things, and this was a real incident: an
-unqualified `INFORMATION_SCHEMA.TASK_HISTORY` resolves against whichever
-database is current in the session, which the pool never sets (only `USE
-ROLE`/`USE WAREHOUSE` are ever issued), so it failed on a live account with
-"invalid identifier" regardless of where the task lived — silently, since the
-`ACCOUNT_USAGE` half of the merge still returned data. `queries.pipe_history`
-qualifies `COPY_HISTORY` the same way.
-
+arguments. Those are two different things: an unqualified
+`INFORMATION_SCHEMA.TASK_HISTORY` resolves against whichever database is
+current in the session, which the pool never sets (only `USE ROLE`/`USE
+WAREHOUSE` are ever issued), so it fails with "invalid identifier" regardless
+of where the task lives (see
+[snowflake-behavior.md](snowflake-behavior.md#task-history)) — silently, since
+the `ACCOUNT_USAGE` half of the merge still returns data.
+`queries.pipe_history` qualifies `COPY_HISTORY` the same way.
 
 #### A scope whose data does not age on the ordinary cadence
 
@@ -588,57 +612,46 @@ is still honoured for every scope with no override, and a first-ever fetch
 which is the one place staleness is decided anywhere in the app.** All three
 callers go through it: `Repository.stale_scopes` (the background sweep),
 `_ScopedView.ensure` (a detail view's paint-time check) and
-`ObjectTree._ensure` (the tree's). Having one function is not tidiness — the
-three had already drifted, with the tree checking a `CACHE_TTL` snapshotted
-into it at construction (so a settings change did nothing until a restart)
-and skipping `scope_ttl` altogether.
+`ObjectTree._ensure` (the tree's). Having one function is not tidiness: three
+separate checks drift, and a tree that snapshots `CACHE_TTL` at construction
+or skips `scope_ttl` ignores a settings change until restart.
 
 `PIPE_ACTIVITY_HISTORY`'s own override is 13 days, one short of
 `INFORMATION_SCHEMA.COPY_HISTORY`'s 14-day retention rather than the full 14:
 the two sources must jointly cover every day with no gap between them, and
 `ACCOUNT_USAGE`'s own ingestion lag (up to a few hours) eats into a boundary
 cut exactly at 14, so the override stays one day inside it for margin.
-`PIPE_ACTIVITY` (the schema-wide latest-per-pipe snapshot the "Pipes (n)"
-list reads) carries the same 13-day override, inherited from before this
-scope was split in two rather than freshly justified by the argument above:
-its own data changes every time any pipe in the schema loads something new,
-which on a busy account is not rare, so the list's own Loaded/Status columns
-can now go up to 13 days without a refetch even though nothing about the
-`INFORMATION_SCHEMA` coverage argument requires that for *this* scope. That
-was already true before the split -- `PipeListView` never merged in the
-near-real-time source the way `PipeView` does -- so this isn't a regression,
-but it's worth revisiting on its own if the list turns out to need fresher
-data than that.
+`PIPE_ACTIVITY` carries the same 13-day override, which the coverage argument
+does not require for it — see "Accepted design gaps".
 
 `object_type` on a `Scope` means "this is a `SHOW` listing of one object
 type" -- or, on an object-level `GRANTS` scope, which kind of object it names
 -- and nothing keys off it being set: `MainScreen.on_scope_needed` upgrades a
 scope to a whole-database `SHOW`-prime when its *type* is `OBJECTS`, not when
-it happens to carry both a database and an object type. That distinction used
-to be a live landmine — the check was structural, so any new SELECT-backed
-scope that set `object_type` was silently redirected into fetching `SHOW
-TABLES` instead of its own statement, and six scope constructors carried a
-defensive comment about it. A new scope no longer has to know.
+it happens to carry both a database and an object type. A structural check
+would silently redirect any new SELECT-backed scope that sets `object_type`
+into fetching `SHOW TABLES` instead of its own statement; keyed on the type, a
+new scope does not have to know.
 
 ### Round trips dominate; payload is nearly free
 
-Measured against the reference account: **~187 ms per `SHOW` round trip
-regardless of size**, while 383 rows came back in 210 ms.
+A `SHOW` round trip costs about the same regardless of how many rows it
+returns (~187 ms against the reference account, see
+[measurements.md](measurements.md#round-trips)).
 
 This inverts the intuitive approach to chunking. Small pages do **not** make
-progress feel smoother — they multiply latency. Paging a 2145-table database in
-pages of 5 would take ~80 s; in pages of 1000 it takes under a second. Pages
-exist to **bound a job and give cancellation points**, not to animate progress.
-Lowering the page size setting mainly makes things slower.
+progress feel smoother — they multiply latency. Pages exist to **bound a job
+and give cancellation points**, not to animate progress. Lowering the page
+size setting mainly makes things slower.
 
 ### Database priming
 
 Because round trips dominate, a schema's objects are **not** fetched per
-schema. One `SHOW <type> IN DATABASE` returns every schema's objects at once —
-measured at ~1 s for 2145 tables across 54 schemas, against ~10 s for 54
-separate calls. Any request for one schema's objects is therefore upgraded to a
-database-wide prime, which then completes *every* schema's scope from that
-single result.
+schema. One `SHOW <type> IN DATABASE` returns every schema's objects at once,
+about ten times faster than one call per schema on a 54-schema database (see
+[measurements.md](measurements.md#database-priming)). Any request for one
+schema's objects is therefore upgraded to a database-wide prime, which then
+completes *every* schema's scope from that single result.
 
 Schemas that returned nothing still get a completed pass. Otherwise they would
 read as "never fetched", the tree would keep asking, and the node would never
@@ -652,12 +665,11 @@ settle.
 > by schema. Within a *single* schema, where names are unique, keyset paging is
 > verified correct and is used — for the object types that honour it.
 
-That threshold used to be read as "Snowflake truncated us at 10 000". It is
-read as "this response is too big to take in one bite" now, which reaches the
-same decision for an honest reason: a `SHOW` result at the threshold may or
-may not be complete — `SHOW COLUMNS` has returned 11 511 rows against a
-limit of 10 000 — and either way the answer is the same: fall back to a chunk
-small enough to trust whole.
+The threshold means "this response is too big to take in one bite", not
+"Snowflake truncated us at 10 000": a `SHOW` result at the threshold may or
+may not be complete — `SHOW` can return more than 10 000 rows (see
+[snowflake-behavior.md](snowflake-behavior.md#show-row-counts)) — and either
+way the answer is the same: fall back to a chunk small enough to trust whole.
 
 ### Column cache priming
 
@@ -666,9 +678,9 @@ per table, only when that table's detail view is opened (see "The Object
 tree" and the registry section below). That leaves most tables in a database
 with no cached columns at all, which is fine for the detail pane but means
 column names would be absent from search for anything nobody has personally
-opened — moot for the moment anyway, since column search itself is currently
-disabled entirely (see "Known gaps"); this priming mechanism stays useful for
-the detail pane and is ready to serve search again once that is re-enabled.
+opened — moot for the moment, since column search itself is disabled (see
+"Accepted design gaps"); this priming mechanism stays useful for the detail
+pane and is ready to serve search again once that is re-enabled.
 
 **Pre-warm cache** (Connection menu) fixes that on demand — there is no
 automatic trigger, since there was no good signal found for "the user wants
@@ -710,21 +722,13 @@ then, an accepted gap: it only matters for one schema large enough to
 overflow the cap by itself, and the menu action's own object-list priming is
 already running concurrently by the time it could matter.
 
-`SHOW COLUMNS IN DATABASE`/`IN SCHEMA` were verified live on 2026-09-09
-(Snowflake 10.32.102) against a database with 614 tables/11 511 columns
-across 25 schemas: the result shape matches `map_show_columns`'s assumptions
-exactly (`TEXT`/`FIXED`/`TIMESTAMP_NTZ`/`VARIANT` blobs all parsed as
-expected). Two things did **not** match the assumptions this tiering was built
-on: `LIMIT`/`FROM` is a no-op for this command at both scopes, and the same
-call returned 11 511 rows, over the 10k figure `MAX_PAGE_SIZE` was once
-documented as a hard ceiling.
-
-Neither breaks the tiering. Each tier issues exactly one call and reads
+`SHOW COLUMNS` ignores `LIMIT`/`FROM` at every scope (see
+[snowflake-behavior.md](snowflake-behavior.md#keyset-paging)), and that costs
+the tiering nothing. Each tier issues exactly one call and reads
 `usable = len(rows) < threshold`, never a `FROM`-based continuation, so a tier
-that comes back at or over the threshold simply falls through to the next one.
-Columns are in fact the one place the no-op finding costs nothing: the tiers
-*are* the chunking mechanism here, and paging was never used. The builders no
-longer accept `after`/`limit` at all, so that cannot quietly be reintroduced.
+that comes back at or over the threshold simply falls through to the next one:
+the tiers *are* the chunking mechanism here. The builders accept no
+`after`/`limit` at all, so paging cannot quietly be reintroduced.
 
 Priming always runs at **background** priority, the same tier as the
 staleness sweep: it can run for a while with nobody watching, so it must
@@ -737,34 +741,16 @@ work.
 
 ### Verified and unverified paging
 
-`LIMIT n FROM 'name'` keyset paging was verified correct — same rows, same
-order as an unpaged fetch — for databases, schemas, tables and (added
-2026-09-09, against a schema with 63 views) views, at both `IN SCHEMA` and
-`IN DATABASE` scope. It is **unverified for tasks** — no account probed so
-far has had enough of them to page through.
-
-> **`LIMIT`/`FROM` is a confirmed no-op for `SHOW PIPES`, `SHOW COLUMNS` and
-> `SHOW STAGES`, at both `IN SCHEMA` and `IN DATABASE` scope.** First
-> observed 2026-09-09 on the sandbox account (Snowflake 10.32.102): `SHOW PIPES IN SCHEMA <schema-with-27-pipes>
-> LIMIT 5` returned all 27 rows; `SHOW PIPES IN DATABASE
-> <db-with-614-pipes> LIMIT 300` returned all 614; the identical query
-> repeated with `FROM '<last pipe name>'` returned the same 614 again, not
-> the next page. `SHOW COLUMNS IN SCHEMA`/`IN DATABASE` behaved identically.
-> Tables and views, tested the same way in the same session, honoured
-> `LIMIT` correctly at both scopes — this is specific to a subset of object
-> types, not a general property of `IN SCHEMA`/`IN DATABASE`.
->
-> Reconfirmed the same day on a second, independent (production) account,
-> against schemas at real scale: `SHOW PIPES IN SCHEMA ... LIMIT 10`
-> returned all 395 pipes in the schema; `SHOW COLUMNS IN SCHEMA ... LIMIT
-> 10` returned all 6655 columns; `SHOW STAGES IN SCHEMA ... LIMIT 10` also
-> returned every stage in its schema, unpaged. Confirmed across two
-> unrelated accounts, not an artifact of the sandbox's data.
+`LIMIT n FROM 'name'` keyset paging is verified correct for databases, schemas,
+tables and views, and a confirmed no-op for `SHOW PIPES`, `SHOW COLUMNS` and
+`SHOW STAGES`, at both `IN SCHEMA` and `IN DATABASE` scope. Tasks are
+unverified. The observations are in
+[snowflake-behavior.md](snowflake-behavior.md#keyset-paging).
 
 `ObjectType.pageable` is where that finding lives in the code, and the
 statement builders consult it: `show_objects`/`show_objects_in_database` emit
 no paging tail at all for an unpageable type, and `show_columns_in_database`/
-`show_columns_in_schema` no longer take `after`/`limit` arguments. A clause
+`show_columns_in_schema` take no `after`/`limit` arguments. A clause
 Snowflake ignores is worse than no clause, because the SQL log then shows a
 bound that was never applied.
 
@@ -774,44 +760,36 @@ is undetectable for those statements** — without a working `LIMIT` there is no
 row count that can mean "there was more" — which is why the row ceiling below
 is their only bound.
 
-Snowflake's own "SHOW caps at 10k rows regardless of `LIMIT`" does not hold
-universally either: a real `SHOW COLUMNS IN DATABASE` call against the
-614-table database above returned 11 511 rows in one response. `MAX_PAGE_SIZE`
-is therefore documented as the largest `LIMIT` worth *asking* for, never as a
-ceiling anything may rely on.
+`MAX_PAGE_SIZE` is documented as the largest `LIMIT` worth *asking* for, never
+as a ceiling anything may rely on: Snowflake's own "SHOW caps at 10k rows" does
+not hold universally.
 
-#### The hang this used to be
+#### Why a paging no-op is a hang, not a slow fetch
 
-Worth keeping on record, because the shape of the bug is the reason for the
-guards below rather than for a one-line fix.
+Continuation decides "there is another page" from `len(rows) == limit` and
+resumes with `FROM '<last row's name>'`. Against a statement that ignores both
+clauses, every "next page" comes back as the identical full result with the
+identical last name: **an unbounded loop, not merely a slow one.** The pass
+never reaches `finish_pass`, and a worker thread plus a pool connection stay
+pinned re-issuing the same query. The default pool is three workers, so three
+such scopes wedge the whole app. That shape is why the guards below exist
+rather than a one-line fix.
 
-`FetchService._execute` decided "there is another page" from
-`len(rows) == limit` and resumed with `FROM '<last row's name>'`. Against a
-statement that ignores both clauses, every "next page" came back as the
-identical full result with the identical last name: **an unbounded loop, not
-merely a slow one.** The pass never reached `finish_pass`, and a worker thread
-plus a pool connection stayed pinned re-issuing the same query. The default
-pool is three workers, so three such scopes wedge the whole app.
+Two paths reach the paged path for an unpageable type, and the second is the
+one that matters:
 
-Two paths reached it, and the second is the one that matters:
-
-- `_fan_out`, after a whole-database prime came back over the chunk threshold,
-  queues one per-schema `OBJECTS` job. It is object-type agnostic, so **pipes
-  and stages sit on it identically** — stages were never a separate or lesser
-  exposure, which an earlier draft of this document guessed they might be.
+- `_fan_out`, after a whole-database prime comes back over the chunk
+  threshold, queues one per-schema `OBJECTS` job. It is object-type agnostic,
+  so pipes and stages sit on it identically.
 - **The staleness sweep** (`MainScreen._sweep`) requests
   `tree.visible_scopes()` *directly*, so it never passes through
   `on_scope_needed`'s `OBJECTS` → `DATABASE_PRIME` upgrade. An expanded Pipes
-  or Stages node in a schema with more objects than `PAGE_SIZE` was enough on
-  its own, with no truncated prime needed first. Anything that bypasses that
-  upgrade is on the paged path, and the sweep is not the only caller that
-  could.
+  or Stages node in a schema with more objects than `PAGE_SIZE` is enough on
+  its own. Anything that bypasses that upgrade is on the paged path, and the
+  sweep is not the only caller that could.
 
-Neither probed account had a schema over 1000 pipes (395 on production, 27 on
-the sandbox), so this was never observed firing in the wild — the no-op paging
-is what was directly observed, and the hang is what the continuation code,
-read against it, implied. Lowering `PAGE_SIZE` below the pipe count
-reproduces it on a 395-pipe schema, which is also how the fix is verified.
+Lowering `PAGE_SIZE` below a schema's pipe count reproduces the loop, which is
+also how the guards are verified.
 
 ### Bounding a result
 
@@ -839,13 +817,14 @@ On top of those, the **history statements carry their own row cap**
 (`HISTORY_MAX_ROWS`), because they are the only queries whose size follows how
 *busy* an object is rather than how many objects exist. `pipe_activity` and
 `task_activity` are `QUALIFY`-reduced to one row per object, but a *single*
-pipe's `pipe_activity_history` was bounded by nothing except its 90-day fetch
-window — and a production schema showed 433 892 raw `COPY_HISTORY` rows across
-190 pipes in 13 days. `ORDER BY <time> DESC LIMIT n` is the fix, and the
-`ORDER BY` is half of it: without it a `LIMIT` keeps an arbitrary slice, which
-is worse than no cap because it still looks complete.
-`INFORMATION_SCHEMA.TASK_HISTORY`'s `RESULT_LIMIT` was exactly that mistake
-— pinned at 10 000 with no documented ordering. It is still set, clamped to
+pipe's `pipe_activity_history` is otherwise bounded by nothing except its
+90-day fetch window, and a busy schema produces hundreds of thousands of raw
+`COPY_HISTORY` rows in two weeks (see
+[measurements.md](measurements.md#history-volume)). `ORDER BY <time> DESC
+LIMIT n` is the fix, and the `ORDER BY` is half of it: without it a `LIMIT`
+keeps an arbitrary slice, which is worse than no cap because it still looks
+complete. `INFORMATION_SCHEMA.TASK_HISTORY`'s `RESULT_LIMIT` is exactly that
+mistake on its own, with no documented ordering. It is still set, clamped to
 the function's maximum, but the outer `ORDER BY ... LIMIT` is what decides
 which rows survive.
 
@@ -858,11 +837,11 @@ Snowsight's own Data Preview limit for both tables and views), and is the
 one capped statement with no `ORDER BY`. That is the mistake described
 above, made deliberately: ordering would make Snowflake scan and sort the
 whole table to hand back 100 rows of it, and a preview promises no
-particular rows. What the history mistake got wrong was letting an arbitrary
-slice look complete, so the Data tab says so instead: a capped preview reads
-"Showing 100 of n rows, in no particular order", with n from `SHOW TABLES`'
-`rows` when cached. A view has no such count in `SHOW VIEWS`, so its note
-just says "Showing 100 rows".
+particular rows. What makes the history mistake a mistake is letting an
+arbitrary slice look complete, so the Data tab says so instead: a capped
+preview reads "Showing 100 of n rows, in no particular order", with n from
+`SHOW TABLES`' `rows` when cached. A view has no such count in `SHOW VIEWS`,
+so its note just says "Showing 100 rows".
 
 The preview is also the one statement with a **timeout**
 (`DATA_PREVIEW_TIMEOUT`, 15 s), because its `LIMIT` bounds what a *view*'s
@@ -873,19 +852,18 @@ see all of its input before the outer `LIMIT` can apply. Snowflake documents
 the sorting case: with `ORDER BY` and `LIMIT` it "ordinarily scans all
 eligible rows", short of narrow top-K pruning conditions. Snowsight bounds
 its own view preview the same way, with a 300 s cancel, and warns that a
-complex view may show none; 15 s was chosen deliberately shorter, since the
+complex view may show none; 15 s is deliberately shorter, since the
 Data tab follows the tree cursor and each preview holds a pool worker while
 it runs. The worker thread still cannot be interrupted (see "The fetch
 scheduler"). The driver can: `cursor.execute(..., timeout=n)` starts a timer
 thread of its own that asks Snowflake to cancel the query, and `execute`
-then raises errno 604 ("SQL execution canceled"). Verified on the sandbox
-on 2026-10-14: a 1 s timeout on `SELECT SYSTEM$WAIT(5)` raised `000604
-(57014): SQL execution was cancelled by the client due to a timeout`, once,
-and the connection stayed in the pool and answered the next query. That is
-an ordinary failed pass, shown in the Data tab's note. Like any scope whose first fetch
-failed, a view that always times out is tried again once per sweep while
-its Data tab stays open. The timeout applies to tables too: one statement,
-one setting, and a table preview that runs that long is just as stuck.
+then raises errno 604 ("SQL execution canceled"), leaving the connection
+usable (see [snowflake-behavior.md](snowflake-behavior.md#query-timeout)).
+That is an ordinary failed pass, shown in the Data tab's note. Like any scope
+whose first fetch failed, a view that always times out is tried again once per
+sweep while its Data tab stays open. The timeout applies to tables too: one
+statement, one setting, and a table preview that runs that long is just as
+stuck.
 
 > **Counts first was considered and rejected.** For a `SHOW` a count needs
 > `RESULT_SCAN(LAST_QUERY_ID())`, an ordinary `SELECT` — so it needs a
@@ -894,40 +872,39 @@ one setting, and a table preview that runs that long is just as stuck.
 > `SELECT`s a count costs the same scan as the query and doubles the round
 > trips, in a design where round trips dominate. A bounded query gets the rows
 > **and** the "was there more" signal in one trip (`len(rows) >= limit`) — the
-> same trick `fetch_database`'s `usable` check already used.
+> same trick `fetch_database`'s `usable` check already uses.
 
 ---
 
 ## The connection pool
 
 In a corporate account **every new connection can trigger an interactive MFA
-prompt**. The pool exists to make that a one-time event.
+prompt**. The pool exists to make that a one-time event. What a user sees of
+this is described in [OPERATIONS.md](OPERATIONS.md#connections-and-mfa); the
+reasons are here.
 
 - The connect dialog opens exactly **one** connection when submitted. There is
   no point asking about the rest before knowing that one even works, and a
   failed first connection is the common case the retry loop exists for.
-- If the configured pool size is more than one, success is followed by a
-  confirmation dialog ("Do you want to expand the connection pool to N?",
-  where N is the configured pool size), with plain **Yes** / **No**
-  options. Declining leaves the pool at size one rather than failing or
-  silently upgrading — which is also what keeps a pool size of one always
-  reachable on demand, handy under test and for a quick look that would
-  rather not field extra MFA prompts.
-- Confirmed growth, like the first connection, is opened **eagerly**, with
-  progress reported as `Connecting (2/5) ...` / `(wait for browser / MFA: nn
-  seconds)` — the same two lines whether it is the lone up-front connection
-  or growth confirmed afterwards, and always counted against the pool's
-  eventual target size rather than however many connections that particular
-  step happens to be opening. The countdown starts at
-  `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`, 20s), the same value passed to
-  the driver as `login_timeout`/`external_browser_timeout` — so a denied or
-  abandoned OAuth or password+MFA approval resolves in a short, visible wait
-  instead of the driver's undocumented multi-minute default. There is
-  deliberately no Cancel button: `snowflake.connector.connect()` cannot be
-  interrupted from the outside once called, so a Cancel button could only
-  hide the dialog while the attempt kept running unseen underneath — see
-  "Accepted design gaps" for the one authenticator this timeout does not
-  actually bound.
+- Growing the pool beyond one connection is **confirmed** in a dialog.
+  Declining leaves the pool at size one rather than failing or silently
+  upgrading — which is also what keeps a pool size of one always reachable on
+  demand, handy under test and for a quick look that would rather not field
+  extra MFA prompts. OAuth skips the question: its cached access/refresh
+  token is reused for every connection the pool opens (see "Authenticators"),
+  so growing the pool costs no further prompts and there is nothing to weigh.
+- Confirmed growth, like the first connection, is opened **eagerly**, with the
+  same progress lines whether it is the lone up-front connection or growth
+  confirmed afterwards, always counted against the pool's eventual target
+  size. The countdown starts at `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`),
+  the same value passed to the driver as
+  `login_timeout`/`external_browser_timeout` — so a denied or abandoned OAuth
+  or password+MFA approval resolves in a short, visible wait instead of the
+  driver's undocumented multi-minute default. There is deliberately no Cancel
+  button: `snowflake.connector.connect()` cannot be interrupted from the
+  outside once called, so a Cancel button could only hide the dialog while the
+  attempt kept running unseen underneath — see "Accepted design gaps" for the
+  one authenticator this timeout does not actually bound.
 - Every connection — the first and any confirmed growth — is opened
   **sequentially**. Opening them in parallel would fan out N browser windows or
   push notifications simultaneously — exactly the disruption this design
@@ -949,24 +926,26 @@ prompt**. The pool exists to make that a one-time event.
   merely busy, only on one already known to be dead — and if nothing idle is
   alive, it fails fast rather than block or reconnect. Either way, the
   connection is closed and dropped from the pool rather than reused, so the
-  **Pool gauge's total honestly shrinks** (e.g. `(2/4)` instead of `(2/5)`)
-  to match what is actually alive. The gap this leaves is only ever repaired
-  by the next interactive/visible checkout that finds the pool short — it
-  opens the missing connection itself, on demand, restoring the total. A
-  connection that fails only once actually queried (the case a closed-check
-  at checkout cannot see) follows the same rule: replaced transparently for
-  an interactive/visible caller, retried once against the fresh connection;
-  dropped and shrunk, with no retry, for a background one.
+  **Pool gauge's total honestly shrinks** to match what is actually alive.
+  The gap this leaves is only ever repaired by the next interactive/visible
+  checkout that finds the pool short — it opens the missing connection
+  itself, on demand, restoring the total. A connection that fails only once
+  actually queried (the case a closed-check at checkout cannot see) follows
+  the same rule: replaced transparently for an interactive/visible caller,
+  retried once against the fresh connection; dropped and shrunk, with no
+  retry, for a background one.
 - **"Does not exist" is the exception to that rule**: the connection that
   reported it is healthy, so `PoolGateway._fetch_once` hands it back to the
-  pool and only then raises, and `_fetch` does not retry it. Before this,
-  every visit to an object dropped elsewhere closed two working connections
-  and opened two new ones, each a possible MFA prompt. A data preview
-  cancelled by its timeout (errno 604, see "Bounding a result") is treated
-  the same: cancelling one query leaves its session fine, and a retry would
-  only run out the timeout again. Kept to those two error numbers on purpose:
-  an expired session is the same driver exception type, and that one must
-  still be discarded.
+  pool and only then raises, and `_fetch` does not retry it. Otherwise every
+  visit to an object dropped elsewhere would close two working connections
+  and open two new ones, each a possible MFA prompt. A data preview cancelled
+  by its timeout (errno 604, see "Bounding a result") is treated the same:
+  cancelling one query leaves its session fine, and a retry would only run
+  out the timeout again. Kept to those two error numbers on purpose: an
+  expired session is the same driver exception type, and that one must still
+  be discarded.
+
+### Stragglers on quit and reconnect
 
 `ConnectionPool.close()` -- called on quit and at the start of a reconnect,
 right after `FetchService.stop()` -- only closes connections that are
@@ -974,31 +953,30 @@ currently idle. One a worker thread still has checked out is left alone: a
 worker's `cursor.execute()` call cannot be interrupted (see "The fetch
 scheduler"), so closing that connection from another thread races the
 driver's own session teardown against whatever request is still in flight on
-it, and was observed to hang the whole app on quit until the query finally
-gave up. The straggling connection is simply abandoned instead -- the process
-exiting (or, on reconnect, garbage collection once nothing references it any
-more) reclaims it for free, and nothing here waits on it.
+it, which can hang the whole app on quit until the query finally gives up.
+The straggling connection is simply abandoned instead -- the process exiting
+(or, on reconnect, garbage collection once nothing references it any more)
+reclaims it for free, and nothing here waits on it.
 
 The worker that straggles is dropped the same way: once `FetchService.stop()`
 has run, whatever a worker still mid-query brings back -- rows or an error --
 is neither written, announced nor reported, leaving the cache as a quit
-mid-fetch does. Reporting it once turned a QA query that failed against the
-just-closed pool into an error toast in the PROD session the user had already
-switched to. Writing it is no safer: a role switch shares the pool, so
-`PoolGateway._fetch`'s retry of a failed statement runs after `USE ROLE` and
-would put the new role's rows into the old role's cache.
+mid-fetch does. Reporting it would turn a query that failed against the
+just-closed pool of one session into an error toast in the session the user
+has already switched to. Writing it is no safer: a role switch shares the
+pool, so `PoolGateway._fetch`'s retry of a failed statement runs after `USE
+ROLE` and would put the new role's rows into the old role's cache.
 
-Quitting no longer abandons stragglers by default; it waits for them. Ctrl+Q
-with a statement in flight (`FetchService.running_count`) stops the service
-and shows "Waiting for background jobs to finish..." until the count drains,
-then exits, so every connection is idle and actually closed. A stopped service
-claims no further queued job, so the count can only fall. A second Ctrl+Q
-exits at once and leaves the rest to the straggler rule above. The wait polls
-the count on the event loop, from a worker: awaited in the action itself it
-would block the message queue the second Ctrl+Q arrives on, and
-`asyncio.to_thread(fetch.stop, None)` would not do either, because asyncio
-waits for its executor threads on the way out and a forced quit would sit out
-the query anyway.
+Quitting waits for stragglers rather than abandoning them by default:
+`Ctrl+Q` with a statement in flight (`FetchService.running_count`) stops the
+service and waits until the count drains, so every connection is idle and
+actually closed. A stopped service claims no further queued job, so the count
+can only fall. A second `Ctrl+Q` exits at once and leaves the rest to the
+straggler rule above. The wait polls the count on the event loop, from a
+worker: awaited in the action itself it would block the message queue the
+second `Ctrl+Q` arrives on, and `asyncio.to_thread(fetch.stop, None)` would not
+do either, because asyncio waits for its executor threads on the way out and a
+forced quit would sit out the query anyway.
 
 Fetch workers are not the only threads that can outlive the app: the connect
 dialog's connection attempt, pool growth and a role or warehouse switch cannot
@@ -1007,6 +985,8 @@ hopping back with `call_from_thread`, which Textual answers with "App is not
 running" once the app is gone. `NivariaApp.call_from_thread` drops the call
 instead when the app has stopped running: the result is for a UI that no
 longer exists.
+
+### Authenticators
 
 Three authenticators are supported and chosen in the connect dialog: OAuth
 (`oauth_authorization_code`, the default), browser SSO (`externalbrowser`),
@@ -1030,14 +1010,12 @@ browser every time the access token expires.
 > `keyring` extra) is a real dependency, not an optional nicety.** On Windows
 > and macOS the driver's token cache is backed by the OS keyring; without the
 > `keyring` package installed it silently falls back to a no-op cache that
-> never persists anything, and the symptom is exactly the bug this
+> never persists anything, and the symptom is exactly the problem this
 > architecture exists to avoid -- every connection in the pool, OAuth or SSO,
 > reopens a fresh browser prompt instead of the second connection onward
-> reusing what the first one just obtained. This was already latently true
-> for `externalbrowser`'s "connections 2..N usually do not prompt at all"
-> claim above; OAuth just made the gap loud enough to notice. Linux instead
-> falls back to a permissioned file under `~/.cache/snowflake/`, which needs
-> no extra dependency.
+> reusing what the first one just obtained. Linux instead falls back to a
+> permissioned file under `~/.cache/snowflake/`, which needs no extra
+> dependency.
 >
 > On Windows, installing `keyring` is necessary but not sufficient: its
 > default backend (`WinVaultKeyring`) stores each token as a
@@ -1057,12 +1035,14 @@ browser every time the access token expires.
 > ceiling. macOS Keychain has no equivalent restriction, so this is
 > Windows-only.
 
+### Credentials and profiles
+
 **nivaria stores no password anywhere.** Each remembered identity is a
 `Profile` (`nivaria/profiles.py`, on disk at `recent.json`): account, user,
-authenticator, role, warehouse and an optional display name, plus the databases last selected for that
-identity's Object tree (see "The Object tree" above) -- UI state riding on
+authenticator, role, warehouse and an optional display name, plus the
+databases last selected for that identity's Object tree -- UI state riding on
 the same record because it is naturally scoped to the same identity, which is
-also why the type outgrew being just a bundle of connection parameters. For
+also why the type is more than a bundle of connection parameters. For
 SSO and OAuth there is nothing to store -- the driver obtains and caches its
 own credential; for password+MFA the driver's own token cache already means
 the password is typed once per machine rather than once per connection.
@@ -1074,8 +1054,8 @@ there is for a connection attempt.
 The two writers own disjoint fields of the same record -- the connect screen
 the connection fields and the name, the picker the databases -- so both go
 through `ProfileStore.remember`, which merges into the stored record for that
-identity instead of replacing it. Rebuilding the record from the connection
-parameters alone once wiped a profile's name every time its databases were
+identity instead of replacing it; rebuilding the record from the connection
+parameters alone would wipe a profile's name every time its databases were
 picked. Identity is account/user/authenticator, with account and user
 casefolded because Snowflake resolves them case-insensitively. A `recent.json`
 that exists but cannot be read shows as "no recents", but is never written
@@ -1129,8 +1109,8 @@ schema's tables cannot cause a whole-tree rebuild.
 
 ### The staleness sweep
 
-One clock, not two: `CACHE_TTL` is both the sweep's interval and the footer
-countdown's length. There is no separate poll constant. When the countdown
+`CACHE_TTL` is both the sweep's interval and the footer countdown's length;
+there is no separate poll constant. When the countdown
 reaches zero, `MainScreen._sweep` asks which of the scopes **currently on
 screen** have exceeded `CACHE_TTL` and requests those at background priority,
 then the countdown restarts at `CACHE_TTL`. Scopes nobody is looking at are
@@ -1151,10 +1131,10 @@ the initial requests `MainScreen.on_mount` issues at startup.
 
 A view's paint-time check never re-requests the scope whose own update it is
 painting. A scope whose first fetch failed has no `fetched_at`, so it always
-reads as stale. Re-requesting it from the repaint its failure caused made a
-failing statement (no warehouse, say) retry itself. Whether that looped
-depended on a race: the worker had to leave `FetchService._running` before
-the repaint ran. A failed scope is retried by the sweep, or when the user
+reads as stale, and re-requesting it from the repaint its failure caused
+would make a failing statement (no warehouse, say) retry itself — looping or
+not depending on whether the worker left `FetchService._running` before the
+repaint ran. A failed scope is retried by the sweep, or when the user
 navigates back to it.
 
 ---
@@ -1164,6 +1144,10 @@ navigates back to it.
 Lazy: a node's children are materialised when it is first expanded. Counts on
 collapsed nodes (`Schemas (54)`, `Tables (383)`) come from the cache, so they
 are correct and instant without materialising anything beneath them.
+
+One top-level node per selected database. Several databases can be selected at
+once (the Databases picker, `MultiPickerDialog`), so the tree carries no border
+title naming one, and search runs across all of them.
 
 ### The cursor must not move
 
@@ -1218,12 +1202,11 @@ cursor stays on the category, and nothing on screen names the object the
 Detail pane shows.
 
 The two travel as different messages: the tree's highlight posts
-`ObjectSelected`, a list view's Enter posts `ObjectOpened`. They used to
-share `ObjectSelected`, so making the highlight show-only quietly took the
-list views' reveal with it.
+`ObjectSelected`, a list view's Enter posts `ObjectOpened`. Sharing one
+message would make a show-only highlight take the list views' reveal with it.
 
-The two used to share one path, and that was a real incident. The trigger is
-a second Textual property:
+Keeping highlight and reveal on separate paths is what prevents a loop, and
+the trigger is a second Textual property:
 
 > When the cursor's own node merely **changes line** -- something above it
 > was expanded or added -- `Tree._build` reassigns `cursor_line` from the
@@ -1232,19 +1215,19 @@ a second Textual property:
 > node again, although the cursor never moved.
 
 With the cursor on a table in a lower schema, a search jump to a table in a
-collapsed schema above it expanded that schema, which shifted the highlighted
-table and re-highlighted it. Because a highlight also revealed, that queued a
+collapsed schema above it expands that schema, which shifts the highlighted
+table and re-highlights it. If a highlight also revealed, that would queue a
 deferred cursor move back to the old table while the jump's own move was
-still pending. Each move highlighted its node, each highlight queued another
-move, and the two alternated forever. The UI went sluggish, the tree
-scrolled by itself, and the countdown froze, because every selection
-restarts it. No Snowflake work was involved at all.
+still pending. Each move highlights its node, each highlight would queue
+another move, and the two would alternate forever: the UI goes sluggish, the
+tree scrolls by itself, and the countdown freezes, because every selection
+restarts it. No Snowflake work is involved at all.
 
 The tree also filters what it announces. It drops a highlight for a node the
 cursor has already left, because that move posts a highlight of its own and
 holding an arrow key would otherwise repaint the Detail pane for every
 object passed. It drops Textual's repeat highlight of the node it announced
-last, because each repeat re-showed the same table, which reset its sort and
+last, because each repeat would re-show the same table, resetting its sort and
 cursor. `set_databases` forgets the last announcement: the screen clears the
 Detail pane alongside it, so the next highlight has to be able to refill it.
 
@@ -1269,11 +1252,8 @@ Re-showing would repaint the view and reset its sort and cursor, and that
 happens without the user moving: when the open table is picked again in
 search, or when a search jump's own cursor move announces it.
 
-**A view owns its whole body.** There used to be a second registry contract —
-a view's `compose_context()` fed a separate "Context bar" pane above the
-Detail pane — but that pane was never a distinct concept, only
-selection-dependent content cramped into a one-line strip by its own
-container. The two are one pane now, and `compose_context()` is gone with it.
+**A view owns its whole body.** There is no separate context strip above the
+Detail pane: selection-dependent content belongs to the view that shows it.
 
 **A view declares which cache scopes it reads** (`scopes()`). That is how it
 knows whether an update concerns it, and how its data joins the staleness
@@ -1282,7 +1262,7 @@ sweep.
 ### Four families, two registries
 
 | Node under the cursor | View family | Found by |
-|---|---|---|
+| --- | --- | --- |
 | an object leaf (`ORDERS`) | `ObjectView` | `view_for(type)` — registry, `@register_view` |
 | a category node (`Tables (n)`) | `CategoryView` | `category_view_for(type)` — registry, `@register_category_view` |
 | a schema node | `SchemaView` | constructed directly by `DetailPane.show_schema` |
@@ -1320,7 +1300,7 @@ actually returns rather than a style choice:
   than Definition. Switching by mnemonic moves
   focus into the tab just shown: a mnemonic only fires while focus is inside
   the view, and Textual drops focus from a widget it hides instead of moving
-  it, so the next mnemonic used to go nowhere.
+  it, so the next mnemonic would otherwise go nowhere.
 - **A detail panel under a table**, for what does not fit in a cell: the
   history views' error message for the highlighted row, a column's tags
   (`ColumnsView`), or a grantee's individual grants. It describes the
@@ -1373,13 +1353,13 @@ gates the user-facing toggle).
 ### Shared machinery
 
 `ui/views/tables.py` holds what the views above have in common, and each
-piece is there because the duplicated version had already drifted:
+piece is there because duplicated versions drift:
 
 - **`HoverTooltipTable`** — shows a cell's full-precision timestamp on
   hover, for the five list views whose columns are too narrow for one. It
-  maps a **column header** to the field holding the untruncated value; the
-  five copies it replaced each mapped a *column index*, so reordering a
-  view's columns would have silently aimed its tooltips at the wrong one.
+  maps a **column header** to the field holding the untruncated value, not a
+  *column index*, so reordering a view's columns cannot silently aim its
+  tooltips at the wrong one.
 - **`TabbedView`** — the mnemonic tab switch, in one place instead of five.
 - **`_ScopedView.keeping_cursor`** — wraps a table's clear-and-repopulate
   so a repaint answering a cache update keeps the user's row. Without it,
@@ -1397,9 +1377,9 @@ piece is there because the duplicated version had already drifted:
   consumers: `HistoryView` (below), for `PipeView`/`TaskView`'s load/run
   errors; `ColumnsView` (`table_view.py`), for a column's tags; and the
   grants table (`grants.py`). Only the describing function differs. It is a
-  widget, not the view mixin it started as: the Table view holds two (columns
-  and grants), and the mixin had one panel per view and answered every
-  table's highlight with it.
+  widget, not a view mixin: the Table view holds two (columns and grants),
+  and a mixin has one panel per view and would answer every table's
+  highlight with it.
 - **`HistoryView`** — the two-source history table in a `PanelledTable`, and
   its capped/empty/errored note, shared by `PipeView` and `TaskView`.
 - **`grants.py`** — the one Grants rendering, for the schema, database and
@@ -1408,13 +1388,11 @@ piece is there because the duplicated version had already drifted:
 The widget ids are shared too (`detail-list`, `detail-history`,
 `detail-grants`, `detail-sql`, ...), and deliberately: exactly one
 view is mounted at a time, so `#detail-history` means "whichever history
-table is on screen". The panel is the exception, because one view can hold
-two: it is styled by the class `detail-item`, and each panel's id is its
-table's plus `-item` (`detail-columns-item`, `detail-grants-item`). The
-per-view ids these replaced had already cost
-something real — `app.tcss` styled the pipe view's history table, detail
-panel and SQL pane, and the task view, a later copy of all three under
-its own ids, silently picked up none of it.
+table is on screen", and an `app.tcss` rule written for one view's history
+table, detail panel or SQL pane applies to every other view's too. The panel
+is the exception, because one view can hold two: it is styled by the class
+`detail-item`, and each panel's id is its table's plus `-item`
+(`detail-columns-item`, `detail-grants-item`).
 
 ### Column headers mirror Snowflake
 
@@ -1468,27 +1446,26 @@ outright, since they are the same on every row of one object's grants. The
 raw layout would serve an audit of who granted what and when better; the
 panel covers that case one grantee at a time.
 
-
 ---
 
 ## Search
 
-A modal (`SearchDialog`), opened by `/` at roughly 90 % of the screen and
-closed by `escape` (dismisses with nothing chosen) or `enter` (opens the
-highlighted hit and closes). It is a modal rather than an always-mounted
-widget in the top pane because search is the primary way to navigate a
-database of thousands of objects, and it earns the room only a modal can take
-without permanently stealing it from the tree and detail pane.
+A modal (`SearchDialog`), opened by `/` at roughly 90 % of the screen. It is a
+modal rather than an always-mounted widget in the top pane because search is
+the primary way to navigate a database of thousands of objects, and it earns
+the room only a modal can take without permanently stealing it from the tree
+and detail pane. It is sized in `%`, not `fr`, because it wants a share of
+whatever terminal it is in, not a fixed cell count.
 
 Find-as-you-type over every cached object and schema across every selected
 database, ranked by subsequence matching so `stgord` finds
 `STG_CUSTOMER_ORDERS`. Substring search would not, which is the whole point;
 sqlite's full-text matching cannot express it either, so ranking happens in
 Python over three in-memory corpora — object names, column names (paired with
-their owning object), and schema names. Column search is currently disabled
-— see "Known gaps" — but the corpus and its ranking logic below are otherwise
-described as still live, since the code is unchanged, only its one call site
-in `SearchDialog.on_mount` is commented out.
+their owning object), and schema names. Column search is disabled (see
+"Accepted design gaps"), but the corpus and its ranking logic below are
+described as live, since the code is intact and only its one call site in
+`SearchDialog.on_mount` is commented out.
 
 A trigram/substring index (SQLite's FTS5) was considered as a way to push
 matching into SQL instead. Rejected: it cannot express subsequence matching
@@ -1502,13 +1479,12 @@ semantics, not one faster than the other for the same job.
 
 Each corpus loads as its own background task, kicked off in `on_mount` but
 not awaited there — first paint is not delayed behind any of them. Object and
-schema lists are cheap (~5ms even at 2000 objects), but the column corpus is
-real work: measured at ~55-75ms for 30k cached columns, and ~700ms at 270k.
-Fetching all three together would mean the cheap ones wait on the slowest —
-splitting them means name and schema matches are usable almost immediately,
-with column matches joining in once their own load lands (when that load
-runs at all — see "Known gaps": column search's task creation is currently
-commented out, so in practice only two of the three loads fire).
+schema lists are cheap, but the column corpus is real work at scale (see
+[measurements.md](measurements.md#search)). Fetching all three together would
+mean the cheap ones wait on the slowest — splitting them means name and schema
+matches are usable almost immediately, with column matches joining in once
+their own load lands (while column search is disabled, only two of the three
+loads fire).
 
 Typing never waits on a load either: ranking proceeds against whatever
 corpus already exists — empty, partial, or complete — and each load re-runs
@@ -1525,7 +1501,7 @@ which while the modal is open is the modal itself, not `MainScreen`, so a
 background update would not reach a live corpus here any more than it
 reaches the tree or detail pane while any other modal (the database picker,
 say) is on top. Closing and reopening the dialog picks up whatever changed in
-between, at the cost a keystroke used to pay to notice a stale corpus.
+between.
 
 ### Matching and ranking
 
@@ -1538,7 +1514,7 @@ poor alignment in the name. Without this, `stgord` ranks `STAGING.LOAD_ORDERS`
 *above* `STAGING.STG_CUSTOMER_ORDERS`.
 
 The displayed text also carries a `DATABASE.` prefix ahead of `SCHEMA.NAME`,
-since several databases can be selected at once now — but that prefix is
+since several databases can be selected at once — but that prefix is
 added purely at render time (`SearchDialog._option_text`) and deliberately
 excluded from ranking itself. Extending the schema/name qualification to a
 third, database level would spend the query's leading characters on the
@@ -1549,7 +1525,7 @@ It can still be *matched*, by a filter word (below), just never scored.
 
 **Multi-word queries: the first word ranks, the rest filter.** Everything
 above describes the query's first word; it is matched, scored and ordered
-exactly as a one-word query always was. Each further word, after a space, only
+exactly as a one-word query. Each further word, after a space, only
 narrows: a row survives if every filter word fuzzy-matches inside *one* of
 its parts — database, schema or name — so `MY_TEST_TABLE my_test_schema
 test_db` walks a name repeated across databases down to one row. Filters
@@ -1582,18 +1558,15 @@ Below `MIN_COLUMN_QUERY_LENGTH` characters (a plain module constant in
 a per-user preference), ranking skips the column corpus entirely; object and
 schema names are still matched at any length. A short, generic fragment
 scores against every cached column for little relevance benefit and, at a
-heavily pre-warmed scale, real per-keystroke latency: measured at 270k cached
-columns, ranking a single query ranged 73-450ms depending on how selective it
-was. Even so, this only skips queries shorter than the constant — a 4+
-character fragment still costs whatever ranking the full column corpus costs;
-the constant does not bound that.
+heavily pre-warmed scale, real per-keystroke latency. Even so, this only skips
+queries shorter than the constant — a longer fragment still costs whatever
+ranking the full column corpus costs; the constant does not bound that.
 
-Ranking runs in a thread (`asyncio.to_thread`), not on the event loop.
-Measured cost for a whole corpus, worst query: 2k objects 3ms, 10k 14ms, 50k
-70ms, 100k 150ms — comfortable directly on the event loop at those sizes, and
-the input is debounced on top, which is how this ran until the column corpus
-routinely started outnumbering the object corpus 10-20x. The matcher was
-already a plain function precisely so this stayed an easy change.
+Ranking runs in a thread (`asyncio.to_thread`), not on the event loop, and the
+input is debounced on top. Object corpora alone would be comfortable on the
+event loop, but the column corpus routinely outnumbers the object corpus
+10-20x (see [measurements.md](measurements.md#search)). The matcher is a plain
+function precisely so this stays an easy change.
 
 ### Choosing a hit
 
@@ -1606,59 +1579,53 @@ further down to the last visible row. A **schema** hit is different —
 with some placeholder type, since a schema has no `ObjectType` and no mirror
 row of its own to show. Choosing one instead **reveals and expands it** in
 the tree (`ObjectTree.reveal_schema`), which moves the cursor onto the
-schema node itself — and since a schema node now announces itself on
-highlight (`SchemaSelected`, see "Detail views" below), that
+schema node itself — and since a schema node announces itself on
+highlight (`SchemaSelected`, see "Detail views"), that
 also opens its Grants/Tags view, not just the tree navigation alone.
 
 ---
 
 ## Status footer
 
-The right corner carries four indicators. Textual's command-palette binding is
+The right corner carries four indicators: Role, Warehouse, Countdown and Pool
+gauge (what each shows is in the
+[manual](MANUAL.md#status-footer)). Textual's command-palette binding is
 suppressed so the corner is available; the footer is otherwise Textual's, so
 key bindings keep working without being re-implemented.
 
-- **Role** / **Warehouse** — the pool's current role and warehouse, read
-  straight off the pool's connect params each tick. Leaving either field blank
-  in the connect dialog does not mean "none" is shown forever: Snowflake
-  always activates *some* role for a session (the user's default, or
-  `PUBLIC`), and the driver already learns what it resolved from the login
-  response (`sessionInfo.roleName` / `.warehouseName`, exposed as
-  `connection.role` / `.warehouse`) — no extra query needed. `connect_all`
-  adopts whichever of the two was left blank from that
-  (`ConnectionPool._adopt_resolved_session`), so the footer shows the real
-  session state rather than an unfilled form field. Warehouse can genuinely
-  read `none` even after this — a session can have no active warehouse at all
-  (see "`SHOW`, because it needs no warehouse" above) — but role never
-  legitimately does. Picked from **Connection > Role ...** / **Warehouse
-  ...**, the same fuzzy-picker-over-cached-rows pattern as the database
-  picker (`PickerDialog`, single-select -- the database picker is the
-  multi-select sibling, `MultiPickerDialog`, see "The Object tree" above),
-  backed by their own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES`
-  — small, flat, unpaged lists, unlike the object mirrors), requested
-  eagerly alongside the database list rather than on the picker's first
-  open — on mount, and again after a role switch or a reconnect, since either
-  points the app at a different cache file. Lazily fetching it on the
-  picker's first open meant that open just requested the list and closed
-  again, since there was nothing cached yet to show. Unlike the
-  database picker, which only ever changes what a query is built to ask for,
-  picking a warehouse or role actually rewrites the session: see
-  `ConnectionPool.set_role` / `set_warehouse` below.
-- **Countdown** — seconds until the next background staleness check (see "The
-  staleness sweep" above). A global timer, deliberately: `CACHE_TTL` is both
-  its length and the sweep's own interval, so this is one clock, not a
-  per-scope freshness readout. Navigating to something new restarts it. It
-  becomes a spinner while anything on screen is being refetched, and blanks
-  when the TTL is `0`. Fixed width, right-aligned, no leading zeroes, so the
-  digits do not shift as it
-  counts down.
-- **Pool gauge** — `(in use / total)` connections, giving a live sense of
-  background activity.
+Role and Warehouse are read straight off the pool's connect params each tick.
+Leaving either field blank in the connect dialog does not mean "none" is shown
+forever: Snowflake always activates *some* role for a session (the user's
+default, or `PUBLIC`), and the driver already learns what it resolved from the
+login response (`sessionInfo.roleName` / `.warehouseName`, exposed as
+`connection.role` / `.warehouse`) — no extra query needed. `connect_all`
+adopts whichever of the two was left blank from that
+(`ConnectionPool._adopt_resolved_session`), so the footer shows the real
+session state rather than an unfilled form field. Warehouse can genuinely
+read `none` even after this — a session can have no active warehouse at all
+— but role never legitimately does.
+
+The Role and Warehouse pickers (`PickerDialog`, single-select; the database
+picker is the multi-select sibling, `MultiPickerDialog`) are backed by their
+own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES` — small, flat, unpaged
+lists, unlike the object mirrors), requested eagerly alongside the database
+list rather than on the picker's first open — on mount, and again after a role
+switch or a reconnect, since either points the app at a different cache file.
+Fetching lazily on the picker's first open would make that open just request
+the list and close again, since there would be nothing cached yet to show.
+Unlike the database picker, which only ever changes what a query is built to
+ask for, picking a warehouse or role actually rewrites the session: see
+"Switching warehouse or role mid-session" below.
+
+The Countdown is a global timer, deliberately: `CACHE_TTL` is both its length
+and the sweep's own interval (see "The staleness sweep"), so this is one
+clock, not a per-scope freshness readout. It has a fixed width, right-aligned,
+no leading zeroes, so the digits do not shift as it counts down.
 
 The gauge is polled a few times a second rather than pushed from the pool. Pool
 usage changes on worker threads, so pushing would require marshalling on every
 acquire and release; polling a lock-guarded integer is simpler, has no thread
-hazards, and is still fast enough to register a ~187 ms round trip. The
+hazards, and is still fast enough to register a single round trip. The
 warehouse/role labels ride the same poll for the same reason.
 
 ### Switching warehouse or role mid-session
@@ -1689,17 +1656,16 @@ returned.
 A role switch does not touch the cache at all in the sense above — no row is
 deleted or invalidated. Instead the *file* changes: `MainScreen` is repointed
 at a different `Repository`, one sqlite file per (account, role). See "One
-cache file per identity, not a role dimension on Scope" earlier in this
-document for why, and for the fetch-service sequencing a same-pool role switch
-requires. Warehouse switches skip all of this: `SHOW` is metadata-layer and
-consults no warehouse, so nothing about the cache needs to change when it does.
+cache file per identity, not a role dimension on Scope" for why, and for the
+fetch-service sequencing a same-pool role switch requires. Warehouse switches
+skip all of this: `SHOW` is metadata-layer and consults no warehouse, so
+nothing about the cache needs to change when it does.
 
 ---
 
 ## The SQL log
 
-`F1` slides a log panel down over the top third of the screen; `F1` again
-hides it. It is `tcoda`'s `LogViewer` (see "Shared widgets"), mounted in
+The `F1` log panel is `tcoda`'s `LogViewer` (see "Shared widgets"), mounted in
 `MainScreen.compose` with its defaults, so nivaria wires nothing for it: the
 widget installs its own key binding and its own screen layer, owns a rolling
 in-memory buffer that exists whether or not the panel is mounted, and offers
@@ -1739,7 +1705,8 @@ them with no per-setting wiring. Only values that differ from their default are
 persisted -- a setting nobody has touched stays absent from the file, so a
 future release can change its default without a stale override shadowing it.
 Values are read **at the point of use**, never cached, so a change takes effect
-without a restart.
+without a restart. The full list is in the
+[manual](MANUAL.md#settings).
 
 All of that machinery -- `Setting`, the registry, `ConfigStore`, the dialog --
 is `tcoda`'s (see "Shared widgets" below). `nivaria/settings.py` is only the
@@ -1747,17 +1714,12 @@ declarations plus the one `configure("nivaria")` call that tells the shared
 store which app's config file to use; the store resolves that path lazily, on
 first read, so importing the module touches no disk.
 
-The ones that matter: **cache TTL** (`0` disables background refreshing),
-**pool size**, **fetch page size**.
-
-Six more exist purely so the measures in "Bounding a result" are adjustable
-rather than baked in: **history row cap** (`HISTORY_MAX_ROWS`), **data
-preview rows** (`DATA_PREVIEW_ROWS`), **data preview timeout**
-(`DATA_PREVIEW_TIMEOUT`, `0` disables), **max pages per refresh**
-(`MAX_PAGES_PER_PASS`), **result row ceiling** (`ROW_CEILING`, `0` disables)
-and **prime chunk threshold** (`PRIME_CHUNK_THRESHOLD`). Their
-defaults are starting points, not measured optima — an account whose shape
-makes one of them wrong should be able to say so without a code change.
+The bounding settings (`HISTORY_MAX_ROWS`, `DATA_PREVIEW_ROWS`,
+`DATA_PREVIEW_TIMEOUT`, `MAX_PAGES_PER_PASS`, `ROW_CEILING`,
+`PRIME_CHUNK_THRESHOLD`) exist purely so the measures in "Bounding a result"
+are adjustable rather than baked in. Their defaults are starting points, not
+measured optima — an account whose shape makes one of them wrong should be
+able to say so without a code change.
 
 `PAGE_SIZE` is the one setting **not** read at the point of use: it is
 snapshotted into `FetchService` at construction, so a change only takes effect
@@ -1765,20 +1727,15 @@ on the next `restart_fetch` (a reconnect or a role switch). Not deliberate,
 just unfixed — and worth knowing when lowering it to reproduce a paging
 problem.
 
-**Settings ...** (Nivaria menu) opens a modal listing every registered
-`Setting`, grouped under a heading per `Setting.group`, each editable in
-place. **OK** validates and writes, then closes; **Apply** does the same but
-leaves the dialog open; **Cancel**/escape discard, confirming first if
-anything was typed that differs from what was last saved -- the same "unsaved
-changes" guard `ConnectScreen` uses. Clearing a field's text and confirming is
-how a setting is reset to its default. A value that fails to parse
-(`ValueError`) blocks OK/Apply with an inline warning rather than silently
-discarding it or falling back to the default -- that fallback exists for a
-hand-edited settings.json, not for a mistake made in the dialog itself.
+A value that fails to parse in the dialog (`ValueError`) blocks OK/Apply with
+an inline warning rather than silently discarding it or falling back to the
+default -- that fallback exists for a hand-edited settings.json, not for a
+mistake made in the dialog itself. Cancel confirms first if anything was typed
+that differs from what was last saved -- the same "unsaved changes" guard
+`ConnectScreen` uses.
 
 `tcoda`'s dialog also supports per-instance settings and callback-only action
-rows, which nivaria declares none of; they exist for the sibling app the
-dialog originally came from.
+rows, which nivaria declares none of.
 
 ---
 
@@ -1787,30 +1744,41 @@ dialog originally came from.
 The menu bar, the settings system, the log panel (`LogViewer`, see "The SQL
 log"), the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
 and the terminal's window title (`TerminalTitleMixin` on `NivariaApp`) live
-in **`tcoda`** ("Textual coda"), a sibling project shared with
-`snakecam` and `vc`. They were extracted because the same code had been
-copied into three apps and had already started to drift.
+in **`tcoda`** ("Textual coda") because they are shared between different
+projects.
 
-It is an ordinary runtime dependency, installed from PyPI and bounded to one
-minor series in `pyproject.toml`. There is deliberately no `[tool.uv.sources]`
-path entry pointing at the sibling checkout: the lock and the tests must run
-against the release a published nivaria wheel will actually pull in, not
-whatever `../tcoda` happens to contain. To try unreleased tcoda changes,
-`just local-tcoda <command>` overlays an editable `../tcoda` for that one
-command without touching `pyproject.toml` or `uv.lock`.
+It is an ordinary runtime dependency from PyPI, bounded to one minor series in
+`pyproject.toml`; see
+[DEVELOPMENT.md](DEVELOPMENT.md#testing-against-unreleased-tcoda) for working
+against unreleased changes.
 
-Three things about it are worth knowing from inside nivaria:
+Things worth knowing about it from inside nivaria:
 
 - **`tcoda` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
   than in a stylesheet -- a library cannot rely on a consumer's `CSS_PATH`.
-  So the menu-bar and settings-dialog rules are no longer in `app.tcss`.
+  So the menu-bar and settings-dialog rules are not in `app.tcss`.
   `app.tcss` outranks `DEFAULT_CSS` regardless of specificity, so anything
   tcoda does style can still be overridden here.
 - **`MenuBar` installs its own `F9` binding** on whichever screen it is
-  mounted on, which is why `MainScreen.BINDINGS` no longer carries one.
-  Textual only consults the focus chain plus the screen and the app when
-  resolving a key, so a bar that is never focused cannot own the binding
-  itself.
+  mounted on, which is why `MainScreen.BINDINGS` carries none. Textual only
+  consults the focus chain plus the screen and the app when resolving a key,
+  so a bar that is never focused cannot own the binding itself.
+- **nivaria only declares what is in the menu bar**, inline in
+  `MainScreen.compose`: the staged bar-only/dropdown flow, mnemonics and
+  separators are `MenuBar`'s. **About ...** is a `tcoda.widgets.AboutMenuItem`
+  reading `ui/about.txt` through a real filesystem path rather than just an
+  `importlib.resources` handle, and **Settings ...** a
+  `tcoda.widgets.SettingsMenuItem`, which opens the dialog itself, so nivaria
+  wires nothing for it. Choosing any other entry posts `MenuItem.Pressed`,
+  handled with `@on(MenuItem.Pressed, "#database")` and the like on
+  `MainScreen`, which hands off to the same `@work` wrapper the matching key
+  binding uses -- a plain message handler has no worker context, and
+  `push_screen_wait` needs one.
+- **A `shortcut` label advertises a key binding**, independent of `mnemonic`
+  (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W`
+  are live key bindings hidden from the footer (`show=False`): the menu's
+  `shortcut` label is where they are advertised, keeping the footer down to
+  the bindings someone would reach for without having opened the menu first.
 - **A `Menu`/`MenuItem` id is also a CSS id.** Textual only requires it to be
   unique among one menu's own children, but any `app.tcss` rule of the same
   name styles it too -- and for a widget inside a one-row bar that does not
@@ -1822,189 +1790,35 @@ Three things about it are worth knowing from inside nivaria:
   not just its text, so a future clash fails a test instead of only looking
   wrong.
 
----
-
-## Tooling and conventions
-
-- **uv** manages the project and the virtualenv. Use `uv sync --all-groups` for
-  dependencies and `uv add` to introduce one. The interpreter is the project
-  `.venv`. `tcoda` comes from PyPI like everything else -- see "Shared
-  widgets" for testing against the sibling checkout.
-- **ruff** formats and lints, on **default settings with no configuration** —
-  there is deliberately no `[tool.ruff]` section. Run `ruff format` and
-  `ruff check` after changes and let the formatter decide. ruff is installed
-  globally, not as a project dependency.
-- **pytest** with async auto mode; every UI test drives a real app through
-  Textual's test pilot.
-- **No test may reach the network or import the Snowflake driver.** A fake
-  gateway and a fake connector stand in, so the cache, scheduler and entire UI
-  are driven offline. The gateway is a protocol precisely to make that seam
-  exist.
-- Modules outside the UI layer **do not import Textual**. That is what keeps
-  the cache, scheduler, matcher and formatting testable as plain functions.
-- Comments explain *why the obvious alternative was rejected*, and tests are
-  named as sentences describing the behaviour they protect.
+The tree/Detail split's drag-to-resize border uses the same mechanism as
+sibling project snakecam's `ResizableTree`: dragging `ObjectTree`'s right
+border overwrites its initial `fr` width with a fixed cell width, and the
+Detail pane's own `fr` absorbs whatever is left.
 
 ---
 
-## Known gaps
-
-### Unverified against a live account
-
-Every `SHOW`-sourced mirror in `schema.sql` was verified against a live
-account (see that file's header). Every `INFORMATION_SCHEMA`/`ACCOUNT_USAGE`
-mirror's **column names** were originally taken from Snowflake's published
-documentation only, unconfirmed against a real account — a wrong name would
-surface as that one scope rendering blank, never a crash, per the
-degrade-blank convention. On 2026-09-09 (Snowflake 10.32.102,
-a sandbox account whose `RENETEST1`/`2`/`3`
-databases carry 614-657 tables and pipes each, apparently built for exactly
-this kind of scale check) every one of those column lists was run for real
-and resolved without error:
-`information_schema_tables`, `information_schema_views`,
-`account_usage_copy_history`, `account_usage_copy_history_detail`,
-`information_schema_copy_history`, `account_usage_task_history`,
-`account_usage_task_history_detail`, `information_schema_task_history`,
-`information_schema_tag_references` and `show_grants` are all confirmed —
-none of these column sets is a documentation guess any more.
-
-What that first pass could **not** confirm was *values*, for scopes where
-the sandbox account simply had no matching data. A second round on
-2026-09-09, partly against a real production account (queries handed to the
-user to run and relay counts back from, since neither of us wanted to put
-this session's hands directly on production) and partly by deliberately
-creating test data on the sandbox (a materialized view, and a real task —
-both left in place), closed all of it except the `ACCOUNT_USAGE` lag figure,
-which turned out not to be worth chasing — see the last bullet below:
-
-- `information_schema_tables`/`information_schema_views`: `table_stats`
-  (`TABLE_TYPE = 'BASE TABLE'`) returned real `LAST_DDL`/`LAST_ALTERED`
-  timestamps for 27 real tables on the sandbox — genuinely verified, not
-  just column-resolved. `view_stats` is the identical statement bound to
-  `'VIEW'` instead; the sandbox held no user-created view, but production
-  did — 37 real views, all 37 with non-null `LAST_DDL` and `LAST_ALTERED`.
-  **Fully confirmed.**
-- `show_materialized_views`: column names were already confirmed; values
-  were not, since neither probed account had a materialized view. Closed by
-  creating one on the sandbox (500 inserted rows into `RENETEST1.
-  ABIDING_NOUGAT.ADAMANT_RELISH`, then `CREATE MATERIALIZED VIEW ... AS
-  SELECT ... FROM` that table): the resulting `SHOW MATERIALIZED VIEWS` row
-  carries `rows = 500` and `bytes = 11264` — both real, non-null, and `rows`
-  matches the insert exactly — plus a correctly resolved
-  `source_database_name`/`source_schema_name`/`source_table_name` and
-  populated `refreshed_on`/`compacted_on`. **Fully confirmed.** Left in
-  place on the sandbox at the user's request, not cleaned up.
-- `account_usage_copy_history`(`_detail`)/`information_schema_copy_history`:
-  **confirmed**, including the `QUALIFY` reduction's actual row-collapsing
-  behaviour, not just its SQL validity. A raw, unreduced
-  `ACCOUNT_USAGE.COPY_HISTORY` count against one production schema's pipes
-  (13-day window) came back at **433 892 rows** — real evidence the scale
-  this reduction guards against is live and current on that account, not
-  just a historical incident. The same window run through the actual
-  `PIPE_ACTIVITY` reduction came back at **190 rows, 190 distinct pipe
-  names** — a 1:1 match, and a ~2284x collapse from the raw count. The
-  `QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY
-  LAST_LOAD_TIME DESC) = 1` reduction is no longer confirmed only by the
-  hang it originally fixed on a different, unreduced query — it now has a
-  direct, real-data confirmation of its own.
-- `account_usage_task_history`(`_detail`): **confirmed** on production — 7
-  real task runs, all from 1 distinct task, over a 7-day window.
-  `information_schema_task_history` is **confirmed** too, by creating a real
-  task on the sandbox (`RENETEST1.ABIDING_NOUGAT.CLAUDE_VERIFY_TASK`, `AS
-  SELECT 1`, three manually triggered runs): `SCHEDULED_TIME`,
-  `COMPLETED_TIME`, `STATE` and, on the runs that failed (the sandbox's
-  `SYSADMIN` role turned out to lack `USAGE` on warehouse `WH` — an account
-  setup gap, not a nivaria one), `ERROR_CODE`/`ERROR_MESSAGE` all came back
-  real and non-null. `QUERY_ID`/`QUERY_START_TIME` stayed `NULL` on every
-  run, but that's consistent with the task failing before a query was ever
-  submitted, not a sign the columns don't populate on success — not chased
-  further, since a `USAGE` grant on that warehouse would need `ACCOUNTADMIN`
-  to fix, which is out of scope for a verification pass.
-- `information_schema_tag_references`: **confirmed** on production — 3
-  real tag references, covering 3 distinct tag names.
-- `information_schema_tag_references_all_columns` (`COLUMN_TAG_REFERENCES`,
-  added after this pass) was checked against a real account on 2026-09-14
-  and found wrong: `TAG_REFERENCES_ALL_COLUMNS` reports a schema- or
-  database-level tag against every column of every table underneath it too
-  (`APPLY_METHOD = 'INHERITED'`), so every column showed its schema's tags
-  as if they were its own. Fixed by adding `WHERE APPLY_METHOD IS DISTINCT
-  FROM 'INHERITED'` to the query (`queries.tag_references_all_columns`).
-  **Now confirmed**, including the fix.
-- `granted_by_role_type` on `SHOW GRANTS` is **no longer speculative**: it
-  exists and reads `'ROLE'` on real `SHOW GRANTS ON SCHEMA`/`ON DATABASE`
-  output.
-- `SHOW GRANTS ON TABLE` (object-level `GRANTS`) was checked on 2026-10-14
-  against the sandbox account, through `PoolGateway` and a throwaway cache:
-  it returns **exactly the same nine columns** as `ON SCHEMA`, with
-  `granted_on = 'TABLE'` and `name` the table's fully qualified name, and its
-  rows sit next to the schema's in `show_grants` without touching them.
-  `grant_option` arrives as the strings `'true'`/`'false'`, which is what
-  `grants.py` tests for. Exercised by granting `SELECT ... WITH GRANT OPTION`
-  and `INSERT` on `RENETEST1.BLUE_THORN.CAPABLE_OPTION` to `PUBLIC`, then
-  revoking both -- nothing left behind. The owner's `OWNERSHIP` row also
-  reads `grant_option = 'true'`. **Confirmed.**
-- `information_schema_copy_history`'s `PIPE_NAME` output column being
-  bare/unqualified, and its `TABLE_NAME` argument accepting a
-  fully-qualified `catalog.schema.table` string, are **both confirmed** —
-  the statement referencing both compiled and ran with no "invalid
-  identifier" error.
-- Whether `INFORMATION_SCHEMA.TASK_HISTORY` needs a running warehouse is
-  **confirmed yes** (tested directly: `No active warehouse selected in the
-  current session` with none active) — no longer just an analogy with
-  `COPY_HISTORY`/`TAG_REFERENCES`, which were tested the same way and also
-  confirmed to need one, along with `table_stats`/`view_stats`.
-- `ACCOUNT_USAGE` lag figures (~2 h for copy history, ~45 min for task
-  history) are Snowflake's published numbers and **not something this
-  project tracks further by design decision**: the lag is neither
-  guaranteed nor reproducible, so no measurement taken at any one moment
-  would be more trustworthy than Snowflake's own "up to ~X" figure, and
-  chasing a tighter number would just be a snapshot masquerading as a
-  guarantee. (A production comparison during this verification pass did
-  show `INFORMATION_SCHEMA.COPY_HISTORY` seeing one load 2 minutes 28
-  seconds before `ACCOUNT_USAGE.COPY_HISTORY` did — consistent with the
-  published figures, not a tighter bound on them, and not chased further
-  for the reason above.)
-
-Paging carries a related but different caveat now — see "Verified and
-unverified paging" for what was confirmed (and what was found actively
-broken, on two independent accounts: `LIMIT`/`FROM` is a no-op for `SHOW
-PIPES`, `SHOW COLUMNS` and `SHOW STAGES`). That finding is no longer only
-recorded: it is enforced in the statement builders, and guarded against for
-the types nobody has probed yet — see "Bounding a result". `SHOW COLUMNS IN
-DATABASE`/`IN SCHEMA` were exercised at real scale (614 tables, 11 511 columns
-on the sandbox; 6655 columns in one schema alone on production) — see "Column
-cache priming".
-
-**`DATA_PREVIEW` is unverified against a live account.** Which Python types
-the driver returns for `VARIANT`, `BINARY`, `TIMESTAMP_TZ`, `VECTOR` and
-`GEOGRAPHY` decides whether the JSON encoding in `jobs.encode_data_preview`
-keeps their meaning. Anything it does not know is stored as `str()`, so a
-surprise degrades a cell's rendering rather than failing the fetch.
-
-**`SHOW TASKS` is still unverified for `LIMIT`/`FROM`**: no probed account has
-had enough tasks to page through one. It is no longer a hang risk either way
-— if it does ignore both clauses, the cursor-progress guard completes the pass
-after a single repeat instead of looping — but verifying it would let
-`ObjectType.pageable` state a fact rather than a default.
-
-### Accepted design gaps
+## Accepted design gaps
 
 - The Pipes (n) **Execution State** column is derived from `invalid_reason`,
   not read from `SYSTEM$PIPE_STATUS` — see "Column headers mirror Snowflake".
   Only `RUNNING` and `STOPPED` are reachable; Snowflake's `PAUSED` and
   `STOPPED_*` variants are not distinguishable this way.
+- `PIPE_ACTIVITY` (the schema-wide latest-per-pipe snapshot the Pipes (n) list
+  reads) carries `PIPE_ACTIVITY_HISTORY`'s 13-day TTL override although the
+  `INFORMATION_SCHEMA` coverage argument does not apply to it, and
+  `PipeListView` does not merge in the near-real-time source the way
+  `PipeView` does. The list's Loaded/Status columns can therefore be up to 13
+  days old without a refetch on a busy account. Worth revisiting if the list
+  turns out to need fresher data.
 - The tree/Detail drag-resize does not persist across sessions, and does not
-  re-clamp an already-narrow pane if the terminal is then resized smaller --
-  both ported as-is from sibling project snakecam's identical mechanism.
+  re-clamp an already-narrow pane if the terminal is then resized smaller.
 - A single stage's own leaf node has no Object view. Deliberate, not an open
   gap: see "What decides a view's shape".
-- **Multiple databases can be browsed and searched at once**, reversing what
-  used to be a deliberate constraint here. The concern that constraint was
-  protecting against — total object counts across many databases getting
-  impractical — is not addressed by anything new; it simply hasn't been hit
-  at the scales exercised so far. Treat performance at a large multi-database
-  selection as an open question.
-- Databases still aren't themselves a *searchable hit* the way a schema is:
+- **Performance at a large multi-database selection is an open question.**
+  Several databases can be browsed and searched at once, and nothing bounds
+  total object counts across them; it simply has not been hit at the scales
+  exercised so far.
+- Databases aren't themselves a *searchable hit* the way a schema is:
   selecting one is a picker action, not a search result.
 - Column search is implemented end to end at the repository layer
   (`Repository.search_column_corpus`) but its one call site in
@@ -2013,31 +1827,26 @@ after a single repeat instead of looping — but verifying it would let
 - There is no automatic trigger for column cache priming — no good signal was
   found for "the user wants this now" short of asking, so it is a manual menu
   action.
+- `SHOW TASKS` is unverified for `LIMIT`/`FROM`. It is no hang risk either way
+  — if it ignores both clauses, the cursor-progress guard completes the pass
+  after a single repeat instead of looping — but verifying it would let
+  `ObjectType.pageable` state a fact rather than a default.
+- `DATA_PREVIEW`'s JSON encoding is unverified for `VARIANT`, `BINARY`,
+  `TIMESTAMP_TZ`, `VECTOR` and `GEOGRAPHY`: which Python types the driver
+  returns for them decides whether `jobs.encode_data_preview` keeps their
+  meaning. A surprise degrades a cell's rendering rather than failing the
+  fetch.
 - `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`) bounds a denied or abandoned
   approval for OAuth and password+MFA, but not for browser SSO
-  (`externalbrowser`): the installed driver's `AuthByWebBrowser` waits on a
-  raw `select.select()` with no timeout argument anywhere in that code path,
-  confirmed by reading it rather than assumed — no kwarg reaches it, and
-  `socket.setdefaulttimeout()` would not either, since `select.select()`
-  ignores a socket's `.settimeout()`. An abandoned browser tab under that
-  authenticator can still leave the "Connecting ..." dialog counting down to
-  0 and sitting there indefinitely. A client-side watchdog was considered and
-  rejected for now: the driver gives no way to reclaim the blocked thread or
-  its open listening socket, so a watchdog could only abandon the dialog, not
-  the resource underneath it.
-
-### The cost of adding a scope
-
-Adding one scope currently touches ten places, and there is no shortcut:
-
-1. a `ScopeType` member, 2. a `*_scope()` constructor, 3. a case in
-`Scope.key`, 4. a `TableSpec`, 5. a case in `Repository.spec_for`, 6. a table
-in `schema.sql` and a `SCHEMA_VERSION` bump, 7. a builder in `gateway/queries.py`, 8. a method on the
-`SnowflakeGateway` protocol, 9. the same on `PoolGateway`, 10. a case in
-`jobs.fetch_page`.
-
-That grew from six scopes to twenty-one without anyone deciding it should. A
-table-driven scope registry would collapse most of it, but it is a large
-change with no bug behind it, so the list above is the checklist until it
-starts hurting.
-
+  (`externalbrowser`): the installed driver waits on a socket with no timeout
+  that nothing can reach (see
+  [snowflake-behavior.md](snowflake-behavior.md#externalbrowser-login)). An
+  abandoned browser tab under that authenticator can still leave the
+  "Connecting ..." dialog counting down to 0 and sitting there indefinitely. A
+  client-side watchdog was considered and rejected for now: the driver gives
+  no way to reclaim the blocked thread or its open listening socket, so a
+  watchdog could only abandon the dialog, not the resource underneath it.
+- Adding a scope touches ten places (the checklist is in
+  [DEVELOPMENT.md](DEVELOPMENT.md#adding-a-scope)). A table-driven scope
+  registry would collapse most of it, but it is a large change with no bug
+  behind it, so the checklist stands until it starts hurting.

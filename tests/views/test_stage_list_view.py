@@ -2,7 +2,7 @@
 
 This list is the only place a stage is shown in any detail -- a stage has no
 per-object view, because its `SHOW STAGES` row is the whole picture (see
-DESIGN.md, "What decides a view's shape").
+docs/DESIGN.md, "What decides a view's shape").
 
 The hover tests below cover the same shared-`HoverTooltipTable` pattern as
 test_table_list_hover.py -- see that file for the offset-fudge reasoning.

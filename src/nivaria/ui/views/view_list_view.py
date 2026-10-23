@@ -15,8 +15,8 @@ them itself:
   means blank" shape `table_list_view.py`'s own stats merge already uses.
 * Last DDL/Last Altered come from `view_stats_scope`, the same
   INFORMATION_SCHEMA.TABLES statement `table_list_view.py`'s own stats scope
-  uses, just filtered to views instead of base tables -- see DESIGN.md's
-  dual-source note. That SELECT needs a running warehouse, unlike
+  uses, just filtered to views instead of base tables -- see docs/DESIGN.md
+  "A second source". That SELECT needs a running warehouse, unlike
   Rows/Size's SHOW-sourced scope; a session with no warehouse, or any other
   query failure, just leaves those two columns blank.
 

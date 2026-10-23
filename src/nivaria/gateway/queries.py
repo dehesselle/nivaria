@@ -176,7 +176,7 @@ def show_columns_in_database(database: str) -> str:
 
     Mirrors `show_objects_in_database`'s rationale: SHOW is metadata-layer, so
     this needs no warehouse either. Verified live against a 614-table/
-    11511-column database (see DESIGN.md, "Column cache priming").
+    11511-column database (see docs/DESIGN.md, "Column cache priming").
 
     Deliberately takes no `after`/`limit`: both are a confirmed no-op for this
     statement, and it used to accept them anyway, which put a `LIMIT 10000`
@@ -202,8 +202,8 @@ def table_stats(database: str) -> str:
     """LAST_DDL/LAST_ALTERED for every base table in a schema.
 
     An ordinary SELECT against INFORMATION_SCHEMA.TABLES -- unlike every
-    builder above, this needs a running warehouse (see DESIGN.md's
-    dual-source note). TABLE_SCHEMA and TABLE_TYPE are left as `%s`
+    builder above, this needs a running warehouse (see docs/DESIGN.md
+    "A second source"). TABLE_SCHEMA and TABLE_TYPE are left as `%s`
     placeholders for the caller to bind rather than interpolated: unlike
     `SHOW ... FROM`, an ordinary SELECT accepts the driver's pyformat bind
     parameters, better injection hygiene than `quote_literal`. Only the
@@ -280,7 +280,7 @@ def tag_references(database: str) -> str:
 
     An ordinary SELECT against INFORMATION_SCHEMA.TAG_REFERENCES -- unlike
     `show_grants_on_schema`/`show_grants_on_database` above, this needs a
-    running warehouse (see DESIGN.md's dual-source note). The object name
+    running warehouse (see docs/DESIGN.md "A second source"). The object name
     and domain ('SCHEMA'/'DATABASE') bind as ordinary `%s` parameters, same
     as `table_stats`'s WHERE clause -- only the containing database (needed
     to address `db.INFORMATION_SCHEMA.TAG_REFERENCES` itself) is an
@@ -463,7 +463,7 @@ def task_activity(fetch_days: int) -> str:
 
     `fetch_days` comes from the "task history fetch window" setting, read
     fresh at fetch time. Like `pipe_activity`, this needs a running warehouse
-    (unverified -- see DESIGN.md) and IMPORTED PRIVILEGES on the SNOWFLAKE
+    (see docs/snowflake-behavior.md) and IMPORTED PRIVILEGES on the SNOWFLAKE
     database (or ACCOUNTADMIN); either gap just fails this one scope, same as
     a missing warehouse does for `table_stats`.
     """
@@ -529,7 +529,7 @@ def task_history(database: str, schema: str, task: str, max_rows: int) -> str:
     an unqualified `INFORMATION_SCHEMA.TASK_HISTORY` resolves against whatever
     database happens to be current in the session, which the connection pool
     never sets (only USE ROLE/USE WAREHOUSE are ever issued -- see "The
-    connection pool" in DESIGN.md), so it fails with "invalid identifier
+    connection pool" in docs/DESIGN.md), so it fails with "invalid identifier
     INFORMATION_SCHEMA.TASK_HISTORY" regardless of which database the task
     actually lives in. The DATABASE_NAME/SCHEMA_NAME named arguments below are
     a separate thing -- they filter the function's *output*, not its own

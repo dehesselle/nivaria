@@ -4,7 +4,7 @@ Two callers. `NivariaApp.open_connect` stops the outgoing `FetchService` and
 closes the outgoing `ConnectionPool` off the event-loop thread
 (`asyncio.to_thread`) so the UI can actually repaint this dialog instead of
 hard-freezing, but that teardown is still a real, unbounded-ish wait -- a
-worker thread mid-query cannot be interrupted (see DESIGN.md), so
+worker thread mid-query cannot be interrupted (see docs/DESIGN.md), so
 `FetchService.stop()` can block for a couple of seconds. Quitting waits out
 the same statements before exiting (`NivariaApp.action_quit`). A dedicated
 dialog, the same idea as `ConnectingDialog`, makes either wait visible instead

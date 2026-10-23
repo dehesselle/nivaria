@@ -7,9 +7,9 @@ import pytest
 
 from nivaria.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database, MemoryDatabase
 
-#: The SHA-256 of the schema scripts as of SCHEMA_VERSION 1. Change it only
+#: The SHA-256 of the schema scripts as of SCHEMA_VERSION 2. Change it only
 #: together with a bump of SCHEMA_VERSION.
-SCHEMA_DIGEST = "b94d35b075d417578731251150944e7b0483d9f19db7726223f5809b2d38429a"
+SCHEMA_DIGEST = "7e26107c0547816f41c2d29ae683a32793b0608326d15369d2b3b9cde463f862"
 
 
 def test_prepare_creates_the_file_and_its_parent_directory(tmp_path) -> None:
@@ -78,7 +78,7 @@ def test_a_schema_change_comes_with_a_version_bump() -> None:
     search.sql therefore fails here until both the version and the digest
     above are updated."""
     digest = hashlib.sha256("".join(_SCHEMA_SCRIPTS).encode()).hexdigest()
-    assert (SCHEMA_VERSION, digest) == (1, SCHEMA_DIGEST), (
+    assert (SCHEMA_VERSION, digest) == (2, SCHEMA_DIGEST), (
         "the schema scripts changed: bump SCHEMA_VERSION in cache/db.py, then "
         "update the version and SCHEMA_DIGEST in this test"
     )

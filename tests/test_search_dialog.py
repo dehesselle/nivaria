@@ -361,7 +361,7 @@ async def test_a_schema_hit_shows_its_database_prefix_too(repo) -> None:
 async def test_column_search_is_disabled_for_now(repo) -> None:
     """Cross-database column search is not ready for prime time yet -- the
     call that would load the column corpus is commented out in
-    SearchDialog.on_mount (see DESIGN.md "Known gaps"), so a query that only
+    SearchDialog.on_mount (see docs/DESIGN.md "Accepted design gaps"), so a query that only
     matches via a column now surfaces nothing at all."""
     put(repo, ObjectType.TABLE, "SALES", "ORDERS")
     put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
@@ -501,7 +501,7 @@ async def test_filter_words_may_come_in_any_order(repo) -> None:
 
 
 async def test_a_single_word_never_matches_the_database(repo) -> None:
-    """The database stays out of ranking (see DESIGN.md "Matching and
+    """The database stays out of ranking (see docs/DESIGN.md "Matching and
     ranking"); only a filter word may match it."""
     put(repo, ObjectType.TABLE, "SALES", "ORDERS", database="PRODDB")
     app = Harness(repo, databases=("PRODDB",))

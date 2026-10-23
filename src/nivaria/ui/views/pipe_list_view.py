@@ -6,12 +6,12 @@ healthy one) opens by default, alongside Activity (last load activity
 per pipe). Status needs no new scope: `invalid_reason` is already mirrored
 onto the same `SHOW PIPES` rows this view already reads for the Name column.
 
-"Execution State" is the one **inferred** column in this app (see DESIGN.md,
+"Execution State" is the one **inferred** column in this app (see docs/DESIGN.md,
 "Column headers mirror Snowflake"): it is not read from anywhere, it is `RUNNING` when `invalid_reason` is empty and `STOPPED`
 when it is not. Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`'
 `executionState`, which nivaria never queries -- that is a per-pipe function
 call, so showing it for a whole schema would cost one round trip per pipe,
-against the round-trips-dominate rule (see DESIGN.md). The column is worth
+against the round-trips-dominate rule (see docs/DESIGN.md). The column is worth
 having anyway: an empty `invalid_reason` cell on its own reads as "nothing
 fetched", not "this pipe is fine". `RUNNING`/`STOPPED` borrow
 `executionState`'s vocabulary rather than inventing a third one, but only
@@ -21,8 +21,8 @@ those two values are reachable -- Snowflake's `PAUSED` and its
 The base rows (every pipe that exists) come from `SHOW PIPES`, already
 mirrored for the tree's own category count -- no new fetch scope for those.
 Rows/Size/Loaded/Status/Target Table/Filename are this app's second set of
-columns sourced from an ordinary `SELECT` instead of `SHOW` (see DESIGN.md's
-dual-source note and `table_list_view.py`'s precedent): `SHOW PIPES` carries
+columns sourced from an ordinary `SELECT` instead of `SHOW` (see docs/DESIGN.md
+"A second source" and `table_list_view.py`'s precedent): `SHOW PIPES` carries
 no load-activity data at all. That SELECT (against
 SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY) needs a running warehouse and elevated
 privileges, unlike everything else in this view, so it lives in its own
@@ -119,7 +119,7 @@ class PipeListView(TabbedView, CategoryView):
         object instead of staying on the category, which would leave nothing
         on screen naming what the Detail pane shows. Its own message rather
         than the tree's `ObjectSelected`, which only shows: a tree highlight
-        must never reveal (DESIGN.md "A highlight is not a jump"), and
+        must never reveal (docs/DESIGN.md "A highlight is not a jump"), and
         sharing that message is how this once lost its reveal unnoticed.
         """
         name = event.row_key.value

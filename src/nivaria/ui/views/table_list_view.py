@@ -5,7 +5,7 @@ The base columns are sourced entirely from `SHOW TABLES`, already mirrored
 for the tree's own category count -- no new fetch scope for those. "Last
 DDL" and "Last Altered" are this app's first columns sourced from an
 ordinary `SELECT` against INFORMATION_SCHEMA.TABLES instead of `SHOW` (see
-DESIGN.md's dual-source note): `SHOW TABLES` carries no equivalent
+docs/DESIGN.md "A second source"): `SHOW TABLES` carries no equivalent
 timestamp. That SELECT needs a running warehouse, unlike everything else in
 this view, so it lives in its own scope (`table_stats_scope`) with its own
 freshness -- a session with no warehouse, or any other query failure, just

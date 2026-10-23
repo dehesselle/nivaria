@@ -421,7 +421,7 @@ class FetchService:
         Pre-warming may be the first request ever made against a database
         nobody has browsed yet, so the SCHEMAS scope this would normally read
         can still be empty -- there is no dependency graph to lean on here
-        (see DESIGN.md), so a cold cache is repaired by asking Snowflake for
+        (see docs/DESIGN.md), so a cold cache is repaired by asking Snowflake for
         the schema names directly rather than waiting on another scope to
         finish first. The SCHEMAS scope is also requested so the tree
         benefits from this too, not just the fallback fan-out.

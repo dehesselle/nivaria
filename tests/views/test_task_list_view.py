@@ -63,7 +63,7 @@ async def test_the_task_list_view_lists_every_cached_task(repo) -> None:
 
 
 async def test_the_state_column_shows_snowflakes_own_wording_unmodified(repo) -> None:
-    """DESIGN.md's "mirror Snowflake, don't reinterpret it" rule -- the raw
+    """docs/DESIGN.md's "mirror Snowflake, don't reinterpret it" rule -- the raw
     show_tasks.state value is shown verbatim, not relabelled."""
     put_task(repo, "REFRESH_ORDERS", state="suspended")
     scope = objects_scope(ObjectType.TASK, "MYDB", "PUBLIC")

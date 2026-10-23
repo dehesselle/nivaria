@@ -33,7 +33,7 @@ def _local(value: str) -> datetime:
     intact (an aware `datetime`'s default adapter includes it), so a value
     with an offset is a real instant and `astimezone()` converts it
     correctly. A naive value (no offset -- not expected from the sources this
-    app reads today, but not verified either, see DESIGN.md's "Known gaps")
+    app reads today, but not verified either, see docs/DESIGN.md "Accepted design gaps")
     is presumed already local per `datetime.astimezone`'s own documented
     behaviour, so it passes through with the same wall-clock numbers rather
     than being silently reinterpreted as some other zone.

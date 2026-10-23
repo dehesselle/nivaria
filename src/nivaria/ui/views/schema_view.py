@@ -1,6 +1,6 @@
 """Detail view for a schema or database node: Grants and Tags.
 
-Neither a schema nor a database has an ObjectType (see SchemaRef / DESIGN.md's
+Neither a schema nor a database has an ObjectType (see SchemaRef / docs/DESIGN.md's
 "Choosing a hit"), so neither fits the ObjectView/CategoryView registry --
 there is exactly one view per node type here, not one of several types
 sharing a lookup, so DetailPane constructs SchemaView/DatabaseView directly
@@ -11,7 +11,7 @@ ON SCHEMA`/`SHOW GRANTS ON DATABASE`, metadata-layer, no warehouse needed,
 rendered one row per grantee by `grants.py`, the same as the Table view's) and
 **Tags** (INFORMATION_SCHEMA.TAG_REFERENCES, an ordinary SELECT that needs a
 running warehouse and so degrades to blank without one, the same dual-source
-pattern table_stats/information_schema_tables established -- see DESIGN.md's
+pattern table_stats/information_schema_tables established -- see docs/DESIGN.md's
 "second source" section). The shared machinery lives in _GrantsTagsView;
 SchemaView and DatabaseView differ only in which scopes they read and how
 they're re-pointed to a new object -- not enough difference to justify two
@@ -26,7 +26,7 @@ APPLICATION ROLE -- deliberately not filtered down to just roles, since all
 of those are legitimate grantees. SHOW GRANTS ON <object> itself only ever
 returns what the active role owns, has been granted MANAGE GRANTS on, or
 reaches via ACCOUNTADMIN/SECURITYADMIN -- a short or empty Grants table is
-expected under a lesser role, not a fetch bug (see DESIGN.md "Known gaps").
+expected under a lesser role, not a fetch bug (see docs/DESIGN.md "A second source").
 """
 
 from __future__ import annotations

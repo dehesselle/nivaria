@@ -11,7 +11,7 @@ the tree's own category count -- no new fetch scope for those. "Last
 Scheduled" and "Last Run State" are this app's columns sourced from an
 ordinary `SELECT`
 against SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY instead of `SHOW` (see
-DESIGN.md's dual-source note): `SHOW TASKS` carries no run-history data at
+docs/DESIGN.md "A second source"): `SHOW TASKS` carries no run-history data at
 all. That SELECT needs a running warehouse and elevated privileges, unlike
 everything else in this view, so it lives in its own scope
 (`task_activity_scope`) with its own freshness -- a session missing either
@@ -19,7 +19,7 @@ just leaves those two columns blank (see `Repository.fail_pass`) while the
 SHOW-sourced columns keep rendering whatever was cached before.
 
 Three columns here are Snowflake's own words, kept rather than smoothed over
--- DESIGN.md's "mirror Snowflake, don't reinterpret it" rule:
+-- docs/DESIGN.md's "mirror Snowflake, don't reinterpret it" rule:
 
 * "State" is `show_tasks.state` (started/suspended): whether the task is
   enabled at all.

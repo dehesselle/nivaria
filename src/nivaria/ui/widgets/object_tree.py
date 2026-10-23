@@ -144,7 +144,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
         Unlike the old single-database set_database, this does not
         unconditionally wipe the tree: root's children now flow through the
         same _desired/_apply diff every other level already uses (see
-        DESIGN.md "The cursor must not move"), so picking the same set again
+        docs/DESIGN.md "The cursor must not move"), so picking the same set again
         is a no-op, adding a database appends a node without disturbing the
         rest, and removing one moves the cursor clear of it first -- all for
         free, the same machinery already built for schema/object children.

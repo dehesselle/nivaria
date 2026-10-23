@@ -542,11 +542,9 @@ def test_a_verified_snowflake_column_survives_a_round_trip(repo) -> None:
     assert "is_immutable" not in stored
 
 
-def test_table_stats_columns_round_trip_but_are_unverified(repo) -> None:
-    """Unlike test_a_verified_snowflake_column_survives_a_round_trip's SHOW
-    TABLES columns, this shape comes from Snowflake's published
-    INFORMATION_SCHEMA.TABLES documentation, not a probed live account -- see
-    DESIGN.md "Known gaps"."""
+def test_table_stats_columns_survive_a_round_trip(repo) -> None:
+    """INFORMATION_SCHEMA.TABLES' LAST_DDL/LAST_ALTERED, under the names a
+    live account returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     from nivaria.models import table_stats_scope
 
     scope = table_stats_scope("MYDB", "PUBLIC")
@@ -568,10 +566,10 @@ def test_table_stats_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["LAST_ALTERED"] == "2026-01-02 00:00:00"
 
 
-def test_view_stats_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
-    the exact same INFORMATION_SCHEMA.TABLES statement, just filtered to
-    TABLE_TYPE = 'VIEW' instead of 'BASE TABLE'."""
+def test_view_stats_columns_survive_a_round_trip(repo) -> None:
+    """The same INFORMATION_SCHEMA.TABLES statement as
+    test_table_stats_columns_survive_a_round_trip, filtered to TABLE_TYPE =
+    'VIEW' instead of 'BASE TABLE', into its own mirror table."""
     from nivaria.models import view_stats_scope
 
     scope = view_stats_scope("MYDB", "PUBLIC")
@@ -593,10 +591,9 @@ def test_view_stats_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["LAST_ALTERED"] == "2026-01-02 00:00:00"
 
 
-def test_materialized_view_stats_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
-    this shape comes from Snowflake's published SHOW MATERIALIZED VIEWS
-    documentation, not a probed live account."""
+def test_materialized_view_stats_columns_survive_a_round_trip(repo) -> None:
+    """SHOW MATERIALIZED VIEWS' rows/bytes, under the names a live account
+    returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     from nivaria.models import materialized_view_stats_scope
 
     scope = materialized_view_stats_scope("MYDB", "PUBLIC")
@@ -618,10 +615,9 @@ def test_materialized_view_stats_columns_round_trip_but_are_unverified(repo) -> 
     assert stored["bytes"] == 8192
 
 
-def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
-    this shape comes from Snowflake's published ACCOUNT_USAGE.COPY_HISTORY
-    documentation, not a probed live account -- see DESIGN.md "Known gaps"."""
+def test_pipe_activity_columns_survive_a_round_trip(repo) -> None:
+    """ACCOUNT_USAGE.COPY_HISTORY's columns, under the names a live account
+    returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     from nivaria.models import pipe_activity_scope
 
     scope = pipe_activity_scope("MYDB", "PUBLIC")
@@ -650,10 +646,9 @@ def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["TABLE_NAME"] == "ORDERS"
 
 
-def test_grants_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
-    this shape comes from Snowflake's published SHOW GRANTS documentation,
-    not a probed live account -- see DESIGN.md "Known gaps"."""
+def test_grants_columns_survive_a_round_trip(repo) -> None:
+    """SHOW GRANTS' columns, granted_by_role_type included, under the names a
+    live account returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     from nivaria.models import grants_scope
 
     scope = grants_scope("MYDB", "PUBLIC")
@@ -755,11 +750,9 @@ def test_an_object_level_and_a_schema_level_grants_scope_do_not_collide(repo) ->
     assert [r["grantee_name"] for r in repo.raw_rows(object_level)] == ["TABLE_ROLE"]
 
 
-def test_tag_references_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
-    this shape comes from Snowflake's published INFORMATION_SCHEMA.
-    TAG_REFERENCES documentation, not a probed live account -- see DESIGN.md
-    "Known gaps"."""
+def test_tag_references_columns_survive_a_round_trip(repo) -> None:
+    """INFORMATION_SCHEMA.TAG_REFERENCES' columns, under the names a live
+    account returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     from nivaria.models import tag_references_scope
 
     scope = tag_references_scope("MYDB", "PUBLIC")
@@ -860,7 +853,7 @@ def test_pipe_activity_table_can_hold_more_than_one_row_per_pipe(repo) -> None:
 
 def test_pipe_activity_history_columns_round_trip(repo) -> None:
     """The per-pipe backfill mirror -- same column shape as account_usage_
-    copy_history, same unverified-against-a-live-account caveat."""
+    copy_history, verified live alongside it on 2026-09-09."""
     scope = pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE")
     load(
         repo,
@@ -974,10 +967,9 @@ def test_pipe_target_table_reads_snowflakes_own_resolution(repo) -> None:
     )
 
 
-def test_pipe_history_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as the other two SELECT-backed mirrors: this shape comes
-    from Snowflake's published INFORMATION_SCHEMA.COPY_HISTORY documentation,
-    not a probed live account -- see DESIGN.md "Known gaps"."""
+def test_pipe_history_columns_survive_a_round_trip(repo) -> None:
+    """INFORMATION_SCHEMA.COPY_HISTORY's columns, under the names a live
+    account returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     from nivaria.models import pipe_history_scope
 
     scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
@@ -1000,10 +992,9 @@ def test_pipe_history_columns_round_trip_but_are_unverified(repo) -> None:
     assert stored["STATUS"] == "Loaded"
 
 
-def test_task_activity_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
-    this shape comes from Snowflake's published ACCOUNT_USAGE.TASK_HISTORY
-    documentation, not a probed live account -- see DESIGN.md "Known gaps"."""
+def test_task_activity_columns_survive_a_round_trip(repo) -> None:
+    """ACCOUNT_USAGE.TASK_HISTORY's columns, under the names a live account
+    returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     scope = task_activity_scope("MYDB", "PUBLIC")
     load(
         repo,
@@ -1064,7 +1055,7 @@ def test_task_activity_table_can_hold_more_than_one_task_per_run(repo) -> None:
 
 def test_task_activity_history_columns_round_trip(repo) -> None:
     """The per-task backfill mirror -- same column shape as account_usage_
-    task_history, same unverified-against-a-live-account caveat."""
+    task_history, verified live alongside it on 2026-09-09."""
     scope = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
     load(
         repo,
@@ -1106,10 +1097,9 @@ def test_task_activity_history_is_scoped_per_task_not_per_schema(repo) -> None:
     )
 
 
-def test_task_history_columns_round_trip_but_are_unverified(repo) -> None:
-    """Same caveat as the other two SELECT-backed mirrors: this shape comes
-    from Snowflake's published INFORMATION_SCHEMA.TASK_HISTORY documentation,
-    not a probed live account -- see DESIGN.md "Known gaps"."""
+def test_task_history_columns_survive_a_round_trip(repo) -> None:
+    """INFORMATION_SCHEMA.TASK_HISTORY's columns, under the names a live
+    account returned them on 2026-09-09 (docs/snowflake-behavior.md)."""
     from nivaria.models import task_history_scope
 
     scope = task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")

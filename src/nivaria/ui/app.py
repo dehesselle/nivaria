@@ -105,7 +105,7 @@ class NivariaApp(TerminalTitleMixin, App[None]):
         stopping the old state first to protect against.
 
         `FetchService.stop()` joins worker threads that cannot be
-        interrupted mid-query (see DESIGN.md), so it can genuinely block for
+        interrupted mid-query (see docs/DESIGN.md), so it can genuinely block for
         a couple of seconds. Both it and `ConnectionPool.close()` run off the
         event-loop thread so the UI can still repaint, behind a small
         "please wait" dialog that makes the wait visible instead of the app
@@ -235,7 +235,7 @@ class NivariaApp(TerminalTitleMixin, App[None]):
         """Wait for statements in flight before exiting; quit again to stop
         waiting.
 
-        A fetch worker cannot be interrupted mid-query (see DESIGN.md), and
+        A fetch worker cannot be interrupted mid-query (see docs/DESIGN.md), and
         one that outlived the app used to hop back into it after shutdown.
         """
         fetch = self.fetch
