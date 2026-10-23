@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from snowcone.gateway.pool import (
+from nivaria.gateway.pool import (
     CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
     OAUTH,
@@ -143,7 +143,7 @@ def test_connect_all_never_overrides_an_explicit_role_or_warehouse() -> None:
     assert pool.params.warehouse == "ETL_WH"
 
 
-def test_a_failure_to_connect_is_reported_as_a_snowcone_error() -> None:
+def test_a_failure_to_connect_is_reported_as_a_nivaria_error() -> None:
     connector = FakeConnector(fail_after=1)
     pool = ConnectionPool(ConnectParams(account="a", user="u"), 3, connector=connector)
     with pytest.raises(ConnectionError_):
@@ -168,7 +168,7 @@ def test_grow_reports_progress_against_the_new_total() -> None:
     assert seen == [(2, 3), (3, 3)]
 
 
-def test_a_failure_to_grow_is_reported_as_a_snowcone_error() -> None:
+def test_a_failure_to_grow_is_reported_as_a_nivaria_error() -> None:
     connector = FakeConnector(fail_after=1)
     pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
     pool.connect_all()

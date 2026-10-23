@@ -1,8 +1,0 @@
-.-----.-----.-----.--.--.--.----.-----.-----.-----.
-|__ --|     |  _  |  |  |  |  __|  _  |     |  -__|
-|_____|__|__|_____|________|____|_____|__|__|_____|
-
-version ${version}
-
-A TUI to browse and search objects in Snowflake,
-caching everything to maximize responsiveness.

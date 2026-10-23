@@ -5,7 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
-src/snowcone/version.py
+src/nivaria/version.py
 
 # Virtual environments
 .venv

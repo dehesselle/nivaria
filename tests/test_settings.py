@@ -1,8 +1,8 @@
-"""snowcone's own settings declarations.
+"""nivaria's own settings declarations.
 
 The registry, the store and the dialog are `tcoda`'s and are tested there; what
-matters here is that snowcone declares what it says it declares, and that the
-store is pointed at snowcone's config file.
+matters here is that nivaria declares what it says it declares, and that the
+store is pointed at nivaria's config file.
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from __future__ import annotations
 from tcoda.paths import settings_file as tcoda_settings_file
 from tcoda.settings import all_settings, config, configure
 
-from snowcone.paths import APP_NAME
-from snowcone.settings import (
+from nivaria.paths import APP_NAME
+from nivaria.settings import (
     CACHE_TTL,
     PAGE_SIZE,
     PIPE_HISTORY_FETCH_DAYS,
@@ -61,10 +61,10 @@ def test_a_ttl_of_zero_round_trips() -> None:
     assert config.get(CACHE_TTL) == 0
 
 
-def test_the_store_is_pointed_at_snowcones_own_config_file() -> None:
+def test_the_store_is_pointed_at_nivarias_own_config_file() -> None:
     """The conftest fixture re-points the store at tmp_path, so this asks the
-    same question the other way round: configuring for snowcone lands on
-    snowcone's config file. Resolving a path touches nothing on disk, and the
+    same question the other way round: configuring for nivaria lands on
+    nivaria's config file. Resolving a path touches nothing on disk, and the
     fixture restores isolation afterwards.
     """
     configure(APP_NAME)

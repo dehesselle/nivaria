@@ -6,9 +6,9 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 
-import snowcone.ui.app as app_module
-from snowcone.cache.repository import Repository
-from snowcone.models import (
+import nivaria.ui.app as app_module
+from nivaria.cache.repository import Repository
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     column_tag_references_scope,
@@ -28,9 +28,9 @@ from snowcone.models import (
     task_history_scope,
     view_stats_scope,
 )
-from snowcone.service.jobs import encode_data_preview
-from snowcone.ui.messages import ObjectOpened, ScopeNeeded
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.service.jobs import encode_data_preview
+from nivaria.ui.messages import ObjectOpened, ScopeNeeded
+from nivaria.ui.widgets.detail_pane import DetailPane
 
 
 class Harness(App[None]):

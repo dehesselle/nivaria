@@ -5,24 +5,24 @@ from __future__ import annotations
 import pytest
 from textual.app import App, ComposeResult
 
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import (
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     SchemaRef,
     objects_scope,
     schemas_scope,
 )
-from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.messages import (
+from nivaria.settings import CACHE_TTL, config
+from nivaria.ui.messages import (
     CategorySelected,
     DatabaseSelected,
     ObjectSelected,
     SchemaSelected,
     ScopeNeeded,
 )
-from snowcone.ui.widgets.object_tree import ObjectTree
+from nivaria.ui.widgets.object_tree import ObjectTree
 
 
 class Harness(App[None]):

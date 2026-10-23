@@ -11,14 +11,14 @@ from tcoda.widgets import MenuItem
 from textual.app import App
 from textual.widgets import Input, OptionList
 
-import snowcone.ui.app as app_module
-from snowcone import paths
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import databases_scope, roles_scope, warehouses_scope
-from snowcone.ui.screens.main import MainScreen
-from snowcone.ui.screens.picker import PickerDialog
-from snowcone.ui.widgets.status_bar import RoleLabel, WarehouseLabel
+import nivaria.ui.app as app_module
+from nivaria import paths
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import databases_scope, roles_scope, warehouses_scope
+from nivaria.ui.screens.main import MainScreen
+from nivaria.ui.screens.picker import PickerDialog
+from nivaria.ui.widgets.status_bar import RoleLabel, WarehouseLabel
 from tests.fakes import make_pool
 from tests.test_main_screen import RecordingFetch, load, settle
 
@@ -31,8 +31,8 @@ def repo(tmp_path) -> Repository:
 
 
 class Harness(App[None]):
-    """Stands in for SnowconeApp: MainScreen's role-switch path needs the app
-    to repoint it at a different identity's cache (see SnowconeApp.switch_repo
+    """Stands in for NivariaApp: MainScreen's role-switch path needs the app
+    to repoint it at a different identity's cache (see NivariaApp.switch_repo
     / restart_fetch), so this fake provides the same two methods, backed by a
     real per-identity Repository via the same paths.cache_file every real
     switch goes through -- which is what lets a test prove a role's cache
@@ -241,7 +241,7 @@ async def test_a_successful_role_switch_repoints_the_screen_at_a_new_cache(
     repo,
 ) -> None:
     """No clear_all, no wipe: a different Repository object entirely, backed
-    by that role's own file (see SnowconeApp.switch_repo)."""
+    by that role's own file (see NivariaApp.switch_repo)."""
     put_roles(repo, "SYSADMIN")
     pool, _ = make_pool(size=1)
     pool.connect_all()

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from textual.widgets import DataTable
 
-from snowcone.models import (
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     objects_scope,
     table_stats_scope,
 )
-from snowcone.ui.views.table_list_view import TableListView
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.ui.views.table_list_view import TableListView
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     load,

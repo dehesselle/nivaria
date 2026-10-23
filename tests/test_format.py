@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from snowcone.format import (
+from nivaria.format import (
     format_bytes,
     format_count,
     format_date,
@@ -43,7 +43,7 @@ def test_format_date_of_none_or_empty_is_blank() -> None:
 
 
 def test_format_date_falls_back_to_the_raw_value_when_it_does_not_parse() -> None:
-    """A timestamp snowcone cannot parse is still a value worth showing, same
+    """A timestamp nivaria cannot parse is still a value worth showing, same
     convention as desc_type's unparseable-type fallback."""
     assert format_date("not a timestamp") == "not a timestamp"
 

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, Static, TabbedContent
 
-from snowcone.models import (
+from nivaria.models import (
     SchemaRef,
     grants_scope,
     tag_references_scope,
 )
-from snowcone.ui.views.schema_view import DatabaseView, SchemaView
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.ui.views.schema_view import DatabaseView, SchemaView
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     put_grant,

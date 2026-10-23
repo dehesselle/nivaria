@@ -5,18 +5,18 @@ from __future__ import annotations
 import pytest
 from textual.widgets import Static
 
-from snowcone.models import (
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     Scope,
     ScopeType,
 )
-from snowcone.ui.views.base import registered_types, view_for
-from snowcone.ui.views.pipe_view import PipeView
-from snowcone.ui.views.table_view import TableView
-from snowcone.ui.views.task_view import TaskView
-from snowcone.ui.views.view_view import ViewView
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.ui.views.base import registered_types, view_for
+from nivaria.ui.views.pipe_view import PipeView
+from nivaria.ui.views.table_view import TableView
+from nivaria.ui.views.task_view import TaskView
+from nivaria.ui.views.view_view import ViewView
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     put_columns,
@@ -48,7 +48,7 @@ def test_registration_is_by_object_kind() -> None:
 def test_registering_a_duplicate_kind_is_refused() -> None:
     """Two views for one type means one silently wins; better to fail loudly
     at import time than to wonder which is showing."""
-    from snowcone.ui.views.base import ObjectView, register_view
+    from nivaria.ui.views.base import ObjectView, register_view
 
     with pytest.raises(ValueError):
 

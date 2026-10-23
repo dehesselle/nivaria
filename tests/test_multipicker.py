@@ -8,8 +8,8 @@ from pathlib import Path
 from textual.app import App
 from textual.widgets import Button, Input, OptionList
 
-import snowcone.ui.app as app_module
-from snowcone.ui.screens.multipicker import MultiPickerDialog
+import nivaria.ui.app as app_module
+from nivaria.ui.screens.multipicker import MultiPickerDialog
 
 
 class Harness(App[None]):

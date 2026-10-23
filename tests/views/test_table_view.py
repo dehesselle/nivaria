@@ -5,13 +5,13 @@ from __future__ import annotations
 from tcoda.widgets import DataTable as TcodaDataTable
 from textual.widgets import DataTable, Static, TabbedContent
 
-from snowcone.models import (
+from nivaria.models import (
     column_tag_references_scope,
     columns_scope,
     data_preview_scope,
     object_grants_scope,
 )
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     load,

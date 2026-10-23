@@ -6,15 +6,15 @@ from datetime import datetime, timedelta
 
 from textual.widgets import DataTable, Static, TabbedContent, TextArea
 
-from snowcone.models import (
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     task_activity_history_scope,
     task_history_scope,
 )
-from snowcone.settings import TASK_HISTORY_SHOW_DAYS, config
-from snowcone.ui.views.task_view import TaskView
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.settings import TASK_HISTORY_SHOW_DAYS, config
+from nivaria.ui.views.task_view import TaskView
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     put_task,

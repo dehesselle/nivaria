@@ -8,14 +8,14 @@ import pytest
 from tcoda.widgets import Countdown, Footer, FooterBinding
 from textual.app import App
 
-import snowcone.ui.app as app_module
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import ObjectType, databases_scope, objects_scope, schemas_scope
-from snowcone.settings import CACHE_TTL, config
-from snowcone.ui.screens.main import MainScreen
-from snowcone.ui.widgets.object_tree import ObjectTree
-from snowcone.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
+import nivaria.ui.app as app_module
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import ObjectType, databases_scope, objects_scope, schemas_scope
+from nivaria.settings import CACHE_TTL, config
+from nivaria.ui.screens.main import MainScreen
+from nivaria.ui.widgets.object_tree import ObjectTree
+from nivaria.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
 from tests.fakes import make_pool
 from tests.test_main_screen import RecordingFetch, put_schemas
 
@@ -407,7 +407,7 @@ async def test_the_sweep_refreshes_only_stale_visible_scopes(repo) -> None:
 async def test_the_sweep_requests_at_background_priority(repo) -> None:
     """Nothing it finds is urgent by definition; anything urgent was asked for
     interactively and must not be queued behind a sweep."""
-    from snowcone.service.jobs import Priority
+    from nivaria.service.jobs import Priority
 
     put_schemas(repo, "MYDB", "AAA")
     config.set(CACHE_TTL, 60)

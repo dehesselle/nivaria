@@ -1,4 +1,4 @@
-# snowcone
+# nivaria
 
 A Textual TUI for browsing and searching Snowflake objects.
 

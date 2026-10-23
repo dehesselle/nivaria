@@ -18,7 +18,7 @@ if sys.platform == "win32":
     import keyring
     import keyring.errors
 
-    from snowcone.gateway.credential_cache import DpapiFileKeyring, install
+    from nivaria.gateway.credential_cache import DpapiFileKeyring, install
 
 
 def test_a_stored_secret_round_trips(tmp_path) -> None:
@@ -74,7 +74,7 @@ def test_deleting_a_missing_entry_raises_the_keyring_contract_error(tmp_path) ->
 
 
 def test_a_missing_cache_file_means_no_entries_not_a_crash(tmp_path) -> None:
-    """Every store in snowcone degrades to empty rather than failing --
+    """Every store in nivaria degrades to empty rather than failing --
     consistent with ProfileStore and the sqlite cache."""
     cache = DpapiFileKeyring(tmp_path / "does-not-exist.json")
     assert cache.get_password("snowflake", "alice") is None

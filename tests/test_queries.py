@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from snowcone.gateway import queries
-from snowcone.gateway.queries import quote_identifier, quote_literal
-from snowcone.models import ObjectType
+from nivaria.gateway import queries
+from nivaria.gateway.queries import quote_identifier, quote_literal
+from nivaria.models import ObjectType
 
 
 def test_identifiers_are_double_quoted_to_preserve_case() -> None:

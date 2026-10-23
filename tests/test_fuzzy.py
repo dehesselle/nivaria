@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from snowcone.fuzzy import (
+from nivaria.fuzzy import (
     highlight,
     match,
     match_qualified,

@@ -1,6 +1,6 @@
 """SHOW COLUMNS -> INFORMATION_SCHEMA.COLUMNS mapping.
 
-The account snowcone was verified against runs with no warehouse, and
+The account nivaria was verified against runs with no warehouse, and
 INFORMATION_SCHEMA is an ordinary SELECT that needs one. SHOW COLUMNS is
 served by the metadata layer instead, but returns a different shape, so the
 mapping below is what keeps the cache mirror stable.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from snowcone.gateway.queries import map_show_columns, show_columns
+from nivaria.gateway.queries import map_show_columns, show_columns
 
 #: SHOW COLUMNS' data_type JSON next to what DESC TABLE printed for the same
 #: column, captured from a live account -- one column per declared type.
@@ -142,7 +142,7 @@ def test_position_restarts_for_each_table() -> None:
 
 
 def test_an_unparseable_data_type_degrades_rather_than_fails() -> None:
-    """A column snowcone cannot describe is still a column worth listing."""
+    """A column nivaria cannot describe is still a column worth listing."""
     mapped = map_show_columns([raw(data_type="not json at all")])[0]
     assert mapped["DATA_TYPE"] == "UNKNOWN"
     assert mapped["COLUMN_NAME"] == "ID"

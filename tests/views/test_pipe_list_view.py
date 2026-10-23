@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, TabbedContent
 
-from snowcone.models import (
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     objects_scope,
     pipe_activity_scope,
 )
-from snowcone.ui.views.pipe_list_view import PipeListView
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.ui.views.pipe_list_view import PipeListView
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     put_pipe,

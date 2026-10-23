@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from snowcone.ui.widgets.plan import Child, plan_children
+from nivaria.ui.widgets.plan import Child, plan_children
 
 
 def existing(*pairs: tuple[str, str]) -> list[tuple[str, str]]:

@@ -6,16 +6,16 @@ from datetime import datetime, timedelta
 
 from textual.widgets import DataTable, Static, TabbedContent, TextArea
 
-from snowcone.models import (
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     pipe_activity_history_scope,
     pipe_activity_scope,
     pipe_history_scope,
 )
-from snowcone.settings import PIPE_HISTORY_SHOW_DAYS, config
-from snowcone.ui.views.pipe_view import PipeView
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.settings import PIPE_HISTORY_SHOW_DAYS, config
+from nivaria.ui.views.pipe_view import PipeView
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     load,

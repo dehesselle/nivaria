@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from snowcone.gateway import sql_log
+from nivaria.gateway import sql_log
 
 
 class RaisingCursor:

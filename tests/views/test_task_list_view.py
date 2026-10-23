@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, TabbedContent
 
-from snowcone.models import (
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     objects_scope,
     task_activity_scope,
 )
-from snowcone.ui.views.base import registered_category_types
-from snowcone.ui.views.task_list_view import TaskListView
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.ui.views.base import registered_category_types
+from nivaria.ui.views.task_list_view import TaskListView
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
     put_table,

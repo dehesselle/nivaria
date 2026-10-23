@@ -5,9 +5,9 @@ from typing import Any
 
 import pytest
 
-from snowcone.gateway.gateway import PoolGateway
-from snowcone.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
-from snowcone.models import ObjectType
+from nivaria.gateway.gateway import PoolGateway
+from nivaria.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
+from nivaria.models import ObjectType
 from tests.fakes import CancelledError, MissingObjectError
 
 
@@ -609,12 +609,12 @@ def test_background_priority_retries_but_never_reconnects_unattended() -> None:
 
 def test_a_result_past_the_row_ceiling_is_abandoned() -> None:
     """The bound that applies to every statement, not just the ones somebody
-    remembered to cap. Snowflake has returned more than snowcone asked for
+    remembered to cap. Snowflake has returned more than nivaria asked for
     often enough that the per-statement limits are an expectation rather than
     a guarantee, and materialising an unbounded result pins a pool connection
     for as long as it takes."""
-    from snowcone.gateway.gateway import ResultTooLargeError
-    from snowcone.settings import ROW_CEILING, config
+    from nivaria.gateway.gateway import ResultTooLargeError
+    from nivaria.settings import ROW_CEILING, config
 
     config.set(ROW_CEILING, 100)
     gateway, connection, _ = make_gateway()
@@ -627,7 +627,7 @@ def test_a_result_past_the_row_ceiling_is_abandoned() -> None:
 def test_a_result_at_the_row_ceiling_is_still_returned() -> None:
     """The ceiling is a limit, not a threshold to stay under: a result of
     exactly N rows is a complete, legitimate answer."""
-    from snowcone.settings import ROW_CEILING, config
+    from nivaria.settings import ROW_CEILING, config
 
     config.set(ROW_CEILING, 100)
     gateway, connection, _ = make_gateway()
@@ -639,8 +639,8 @@ def test_an_over_ceiling_result_is_not_retried() -> None:
     """_fetch retries any failure once, which is right for a session the
     server dropped and wrong here: the statement will return just as much the
     second time, so the retry only pays for the damage twice."""
-    from snowcone.gateway.gateway import ResultTooLargeError
-    from snowcone.settings import ROW_CEILING, config
+    from nivaria.gateway.gateway import ResultTooLargeError
+    from nivaria.settings import ROW_CEILING, config
 
     config.set(ROW_CEILING, 10)
     gateway, connection, _ = make_gateway()
@@ -653,7 +653,7 @@ def test_an_over_ceiling_result_is_not_retried() -> None:
 def test_the_row_ceiling_can_be_switched_off() -> None:
     """0 disables it, per the setting's own description -- someone who knows
     what they are doing gets to decide the ceiling is in their way."""
-    from snowcone.settings import ROW_CEILING, config
+    from nivaria.settings import ROW_CEILING, config
 
     config.set(ROW_CEILING, 0)
     gateway, connection, _ = make_gateway()

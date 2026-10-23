@@ -1,15 +1,15 @@
 """One-off probe against a real Snowflake account.
 
-Self-contained: this file imports nothing from snowcone, only
+Self-contained: this file imports nothing from nivaria, only
 `snowflake-connector-python`. Copy this one file to the machine that can reach
 your account and run it there.
 
-It answers the two things snowcone's design assumes but cannot verify offline:
+It answers the two things nivaria's design assumes but cannot verify offline:
 
 1. Does `SHOW <objects> ... LIMIT n [FROM 'name']` keyset paging work, and does
    it page *correctly* -- no skipped or repeated rows? A silent correctness bug
    here would be worse than an outright syntax error.
-2. Which columns does each SHOW actually return? snowcone's cache mirrors these
+2. Which columns does each SHOW actually return? nivaria's cache mirrors these
    result sets column for column, and those column lists were written from
    documentation rather than observation.
 
@@ -228,7 +228,7 @@ def main() -> int:
     if args.authenticator == "username_password_mfa":
         kwargs["password"] = getpass.getpass("Snowflake password (not stored): ")
 
-    say(f"snowcone probe -- {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    say(f"nivaria probe -- {time.strftime('%Y-%m-%d %H:%M:%S')}")
     say(f"connecting as {args.user} via {args.authenticator} ...")
     started = time.time()
     try:

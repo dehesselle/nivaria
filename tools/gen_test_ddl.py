@@ -1,6 +1,6 @@
 """Generate DDL to populate a near-empty Snowflake sandbox with test objects.
 
-Self-contained: this file imports nothing from snowcone. It writes a single
+Self-contained: this file imports nothing from nivaria. It writes a single
 `.sql` file of `CREATE OR REPLACE` statements -- databases, schemas, tables
 with a mix of column types, and one pipe per table -- so a sandbox account
 with practically nothing in it becomes a realistic object tree to browse.

@@ -1,8 +1,8 @@
-"""snowcone's menu bar: the Snowcone and Connection menus.
+"""nivaria's menu bar: the Nivaria and Connection menus.
 
 The bar itself -- auto-hide, the staged bar/dropdown flow, mnemonics,
 separators, the F9 binding -- belongs to `tcoda` and is tested there. What is
-snowcone's is *what the menus offer* and what each entry actually does.
+nivaria's is *what the menus offer* and what each entry actually does.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ from tcoda.widgets import Menu, MenuBar, MenuItem
 from textual.app import App
 from textual.widgets import OptionList, Static
 
-import snowcone.ui.app as app_module
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.ui.screens.main import MainScreen
-from snowcone.version import __version__
+import nivaria.ui.app as app_module
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.ui.screens.main import MainScreen
+from nivaria.version import __version__
 
 
 class Harness(App[None]):
@@ -58,8 +58,8 @@ async def settle(pilot, rounds: int = 3) -> None:
         await asyncio.sleep(0.02)
 
 
-async def open_snowcone_menu(pilot) -> None:
-    """F9, then enter the armed menu -- Snowcone, since it's leftmost."""
+async def open_nivaria_menu(pilot) -> None:
+    """F9, then enter the armed menu -- Nivaria, since it's leftmost."""
     await pilot.press("f9")
     await settle(pilot)
     await pilot.press("enter")
@@ -77,19 +77,19 @@ async def open_connection_menu(pilot) -> None:
 # ------------------------------------------------------------------ contents
 
 
-async def test_there_are_two_menus_snowcone_and_connection(repo) -> None:
+async def test_there_are_two_menus_nivaria_and_connection(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         titles = [menu.title_text for menu in app.screen.query(Menu)]
-        assert titles == ["Snowcone", "Connection"]
+        assert titles == ["Nivaria", "Connection"]
 
 
-async def test_the_snowcone_menu_offers_the_documented_entries(repo) -> None:
+async def test_the_nivaria_menu_offers_the_documented_entries(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        menu = app.screen.query_one("#snowcone-menu", Menu)
+        menu = app.screen.query_one("#nivaria-menu", Menu)
         labels = [item.label for item in menu.query(MenuItem)]
         assert labels == ["About ...", "Settings ...", "Quit"]
 
@@ -122,11 +122,11 @@ async def test_the_hidden_key_bindings_are_advertised_as_shortcuts(repo) -> None
         assert shortcuts["quit"] == "ctrl+Q"
 
 
-async def test_the_snowcone_menu_separators_group_the_entries(repo) -> None:
+async def test_the_nivaria_menu_separators_group_the_entries(repo) -> None:
     """Two dividers: about, then settings, then quit."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_snowcone_menu(pilot)
+        await open_nivaria_menu(pilot)
         option_list = app.screen.query_one(OptionList)
         assert [option.id for option in option_list.options] == [
             "about",
@@ -169,9 +169,9 @@ async def test_the_bar_lays_out_as_a_title_plus_the_trailing_label(repo) -> None
         # sometimes still finds title's region at (0, 0) -- flaky.
         await pilot.pause()
         await pilot.pause()
-        title = app.screen.query_one("#snowcone-menu", Menu)
-        # "Snowcone" plus the 2-cell padding either side, on the bar's one row.
-        assert (title.region.width, title.region.height) == (12, 1)
+        title = app.screen.query_one("#nivaria-menu", Menu)
+        # "Nivaria" plus the 2-cell padding either side, on the bar's one row.
+        assert (title.region.width, title.region.height) == (11, 1)
         trailing = app.screen.query_one("#menubar-trailing", Static)
         assert trailing.region.right == 120
         assert trailing.region.height == 1
@@ -192,20 +192,20 @@ async def test_open_reopens_the_connect_dialog(repo) -> None:
 async def test_about_opens_the_about_dialog(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_snowcone_menu(pilot)
+        await open_nivaria_menu(pilot)
         await pilot.press("a")
         await settle(pilot)
         assert isinstance(app.screen, AboutDialog)
         # The version moved here from the menu bar's trailing text (see
         # `test_the_bar_lays_out_as_a_title_plus_the_trailing_label`).
-        header = app.screen.query_one("#about-header", Static)
-        assert __version__ in str(header.render())
+        body = app.screen.query_one("#about-body Static", Static)
+        assert __version__ in str(body.render())
 
 
 async def test_settings_opens_the_settings_dialog(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_snowcone_menu(pilot)
+        await open_nivaria_menu(pilot)
         await pilot.press("s")
         await settle(pilot)
         assert isinstance(app.screen, SettingsDialog)
@@ -227,7 +227,7 @@ async def test_prewarm_without_a_database_says_so_instead_of_priming(repo) -> No
 async def test_quit_exits_the_app(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
-        await open_snowcone_menu(pilot)
+        await open_nivaria_menu(pilot)
         await pilot.press("q")
         await settle(pilot)
     assert app.is_running is False

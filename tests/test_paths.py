@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from snowcone.paths import read_json, write_json_atomic
+from nivaria.paths import read_json, write_json_atomic
 
 
 def test_write_json_atomic_creates_parent_dirs(tmp_path) -> None:

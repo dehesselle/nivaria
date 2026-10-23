@@ -6,19 +6,19 @@ import threading
 from tcoda.widgets import FooterBinding
 from textual.widgets import Input
 
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import (
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import (
     databases_scope,
     grants_scope,
     roles_scope,
     tag_references_scope,
     warehouses_scope,
 )
-from snowcone.ui.app import SnowconeApp
-from snowcone.ui.screens.closing import ClosingDialog
-from snowcone.ui.screens.connect import ConnectScreen
-from snowcone.ui.screens.main import MainScreen
+from nivaria.ui.app import NivariaApp
+from nivaria.ui.screens.closing import ClosingDialog
+from nivaria.ui.screens.connect import ConnectScreen
+from nivaria.ui.screens.main import MainScreen
 from tests.fakes import FakeConnector
 
 
@@ -35,7 +35,7 @@ _GONE = "SQL compilation error:\nSchema 'MYDB.GONE' does not exist or not author
 async def test_a_dropped_object_is_reported_as_a_warning_not_an_error() -> None:
     """The fetch service is already clearing it out of the tree; nothing is
     broken that the user has to act on."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         app._report_fetch_failure(grants_scope("MYDB", "GONE"), _GONE, True)
@@ -53,7 +53,7 @@ async def test_a_dropped_object_is_reported_as_a_warning_not_an_error() -> None:
 
 async def test_one_dropped_object_failing_several_scopes_toasts_once() -> None:
     """Opening a dropped schema fails its Grants and its Tags together."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         app._report_fetch_failure(grants_scope("MYDB", "GONE"), _GONE, True)
@@ -65,7 +65,7 @@ async def test_one_dropped_object_failing_several_scopes_toasts_once() -> None:
 async def test_the_app_opens_the_connect_screen_first() -> None:
     """Nothing can be browsed before a pool exists, and opening that pool is
     where the MFA prompts happen."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         assert isinstance(pilot.app.screen, ConnectScreen)
@@ -74,7 +74,7 @@ async def test_the_app_opens_the_connect_screen_first() -> None:
 async def test_connecting_hands_over_to_the_browser() -> None:
     """The default pool size is more than one, so this also exercises
     confirming the extra connections on the way to the browser."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = pilot.app.screen
@@ -92,7 +92,7 @@ async def test_connecting_hands_over_to_the_browser() -> None:
 async def test_connect_open_menu_item_reopens_the_connect_dialog() -> None:
     """Get back to the connect dialog without restarting the app, e.g. to
     switch accounts mid-session."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = pilot.app.screen
@@ -116,12 +116,12 @@ async def test_connect_open_menu_item_reopens_the_connect_dialog() -> None:
 class RecordingFetch:
     """A minimal FetchService stand-in that records when, and against which
     screen state, it was told to stop -- used to prove
-    SnowconeApp.open_connect fully quiesces the outgoing identity before
+    NivariaApp.open_connect fully quiesces the outgoing identity before
     MainScreen is repointed at a new one, the same discipline
     MainScreen._switch_role already uses for a role switch (see DESIGN.md).
     """
 
-    def __init__(self, app: SnowconeApp) -> None:
+    def __init__(self, app: NivariaApp) -> None:
         self._app = app
         self.stopped = False
         #: Whether the MainScreen still on the stack (possibly under a modal)
@@ -154,13 +154,13 @@ class RecordingFetch:
         self.stopped = True
 
 
-def _use_recording_fetch(app: SnowconeApp) -> None:
+def _use_recording_fetch(app: NivariaApp) -> None:
     """Swap FetchService for RecordingFetch on this instance, so a test can
     observe reconnect ordering/timing with no real worker threads.
 
     An instance attribute, not a subclass: Textual resolves an inherited
     `CSS_PATH` relative to whichever module actually defines the class, so a
-    `SnowconeApp` subclass declared in this test file would otherwise go
+    `NivariaApp` subclass declared in this test file would otherwise go
     looking for `app.tcss` next to this file instead of the real one.
     """
     app._make_fetch = lambda pool: RecordingFetch(app)  # type: ignore[method-assign]
@@ -198,7 +198,7 @@ async def test_reconnecting_stops_the_old_fetch_before_the_screen_points_at_a_ne
     swap -- firing SQL for a database that may not even exist in the new
     account. Stopping the old fetch first, the way a role switch already
     does, closes that window."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     _use_recording_fetch(app)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -231,7 +231,7 @@ async def test_reconnecting_shows_a_please_wait_dialog_while_the_old_session_clo
     again -- has already happened. Recording every screen open_connect
     pushes proves it happened without depending on catching one exact
     frame."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     _use_recording_fetch(app)
     pushed: list[type] = []
     real_push_screen = app.push_screen
@@ -263,7 +263,7 @@ async def test_reconnecting_prefetches_the_new_identitys_databases_warehouses_an
     """Same as at startup and after a role switch: the new identity's cache
     file may have nothing in it yet, and without asking up front the first
     open of each picker only requested the list and closed again."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     _use_recording_fetch(app)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -282,7 +282,7 @@ async def test_reconnecting_prefetches_the_new_identitys_databases_warehouses_an
 
 
 async def test_quitting_the_connect_screen_exits() -> None:
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         await pilot.press("escape")
@@ -296,7 +296,7 @@ async def test_quitting_mid_fetch_waits_behind_a_dialog_until_the_fetch_returns(
     """Regression: a fetch worker that outlived the app hopped back into it
     and raised "App is not running". Its statement cannot be interrupted, so
     quit waits it out, visibly."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     _use_recording_fetch(app)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -318,7 +318,7 @@ async def test_quitting_mid_fetch_waits_behind_a_dialog_until_the_fetch_returns(
 
 async def test_a_second_quit_while_waiting_exits_at_once() -> None:
     """A long query should not hold the app hostage."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     _use_recording_fetch(app)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -335,7 +335,7 @@ async def test_a_second_quit_while_waiting_exits_at_once() -> None:
 
 
 async def test_quitting_with_nothing_running_exits_without_a_dialog() -> None:
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     _use_recording_fetch(app)
     pushed: list[type] = []
     real_push_screen = app.push_screen
@@ -363,7 +363,7 @@ async def test_a_call_from_a_thread_after_the_app_exited_is_dropped() -> None:
 
     run_async rather than run_test: only a real run clears the loop that
     Textual's own check looks at, as it is after quitting."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
 
     async def quit_at_once(pilot) -> None:
         await pilot.pause()
@@ -394,7 +394,7 @@ def test_a_cache_update_after_shutdown_does_not_crash_the_app() -> None:
     raised ScreenStackError from a background thread's call_from_thread,
     surfacing as an unhandled backtrace on the way out instead of a quiet
     exit."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     assert app.screen_stack == []
     app._post_cache_updated(databases_scope(), True)  # must not raise
 
@@ -402,7 +402,7 @@ def test_a_cache_update_after_shutdown_does_not_crash_the_app() -> None:
 async def test_the_cache_is_not_opened_until_an_identity_is_known() -> None:
     """Which file to open depends on the connection's account and role (see
     paths.cache_file), so unlike before, nothing is prepared at bare startup."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         assert app.repo is None
@@ -411,7 +411,7 @@ async def test_the_cache_is_not_opened_until_an_identity_is_known() -> None:
 async def test_the_cache_is_prepared_once_connected(tmp_path) -> None:
     """The UI reads only the cache, so it has to exist before the browser
     screen can ask it anything -- which is as soon as a pool exists."""
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         screen = pilot.app.screen
@@ -435,7 +435,7 @@ def _repo(tmp_path) -> Repository:
 
 
 async def test_the_main_screen_has_its_two_panes(tmp_path) -> None:
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.app.push_screen(MainScreen(_repo(tmp_path)))
         await pilot.pause()
@@ -445,14 +445,14 @@ async def test_the_main_screen_has_its_two_panes(tmp_path) -> None:
 
 
 async def test_the_command_palette_binding_is_hidden_from_the_footer(tmp_path) -> None:
-    """The footer's right corner is snowcone's own status indicators, so
+    """The footer's right corner is nivaria's own status indicators, so
     Textual's ctrl+p key must not claim it.
 
     tcoda's footer needs no setting for that: ctrl+p is an app binding like any
     other and is declared `show=False`, so it is only ever rendered if the app
     asks for it by name in `pinned=`.
     """
-    app = SnowconeApp(connector=FakeConnector())
+    app = NivariaApp(connector=FakeConnector())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.app.push_screen(MainScreen(_repo(tmp_path)))
         for _ in range(4):

@@ -7,7 +7,7 @@ from hatchling.builders.sdist import SdistBuilder
 # Where a copy of tcoda's package sources lives inside our own sdist, so the
 # wheel-from-sdist build phase has something to pull from once the sibling
 # checkout below is no longer around (sdists must be self-contained). Placed
-# next to src/snowcone, matching this project's own src layout.
+# next to src/nivaria, matching this project's own src layout.
 _TCODA_IN_SDIST = "src/tcoda"
 
 
@@ -37,7 +37,7 @@ class CustomBuildHook(BuildHookInterface):
                 f"{tcoda_in_sdist} exists"
             )
 
-        # The wheel installs packages flat, same as src/snowcone -> snowcone.
+        # The wheel installs packages flat, same as src/nivaria -> nivaria.
         target = _TCODA_IN_SDIST if self.target_name == "sdist" else "tcoda"
         build_data.setdefault("force_include", {})[str(source)] = target
 

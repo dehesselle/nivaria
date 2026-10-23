@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import (
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import (
     CacheState,
     ObjectType,
     columns_scope,
@@ -17,8 +17,8 @@ from snowcone.models import (
     schemas_scope,
     tag_references_scope,
 )
-from snowcone.service.fetch import FetchService
-from snowcone.service.jobs import FetchJob, Priority, fetch_page
+from nivaria.service.fetch import FetchService
+from nivaria.service.jobs import FetchJob, Priority, fetch_page
 from tests.fakes import FakeGateway
 
 
@@ -73,7 +73,7 @@ def test_columns_are_fetched_in_one_shot() -> None:
     """A single table's columns are small and bounded, so paging them would
     only add round trips."""
     gateway = FakeGateway(columns={("MYDB", "PUBLIC", "ORDERS"): ["ID", "TOTAL"]})
-    from snowcone.models import columns_scope
+    from nivaria.models import columns_scope
 
     page = fetch_page(gateway, columns_scope("MYDB", "PUBLIC", "ORDERS"), None, limit=1)
     assert len(page.rows) == 2
@@ -82,7 +82,7 @@ def test_columns_are_fetched_in_one_shot() -> None:
 
 def test_warehouses_and_roles_are_fetched_in_one_shot() -> None:
     """Small, flat, unpaged lists -- like columns, not like the object mirrors."""
-    from snowcone.models import roles_scope, warehouses_scope
+    from nivaria.models import roles_scope, warehouses_scope
 
     gateway = FakeGateway(warehouses=["COMPUTE_WH"], roles=["SYSADMIN", "PUBLIC"])
     page = fetch_page(gateway, warehouses_scope(), None, limit=1)
@@ -96,7 +96,7 @@ def test_warehouses_and_roles_are_fetched_in_one_shot() -> None:
 
 def test_table_stats_is_fetched_in_one_shot() -> None:
     """A schema's table count is bounded, like columns -- no paging needed."""
-    from snowcone.models import table_stats_scope
+    from nivaria.models import table_stats_scope
 
     gateway = FakeGateway(
         table_stats={
@@ -118,7 +118,7 @@ def test_table_stats_is_fetched_in_one_shot() -> None:
 
 def test_view_stats_is_fetched_in_one_shot() -> None:
     """A schema's view count is bounded, same reasoning as table_stats."""
-    from snowcone.models import view_stats_scope
+    from nivaria.models import view_stats_scope
 
     gateway = FakeGateway(
         view_stats={
@@ -141,7 +141,7 @@ def test_view_stats_is_fetched_in_one_shot() -> None:
 def test_materialized_view_stats_is_fetched_in_one_shot() -> None:
     """A schema's materialized-view count is bounded, same reasoning as
     table_stats/view_stats."""
-    from snowcone.models import materialized_view_stats_scope
+    from nivaria.models import materialized_view_stats_scope
 
     gateway = FakeGateway(
         materialized_view_stats={
@@ -167,7 +167,7 @@ def test_schema_level_grants_are_fetched_in_one_shot() -> None:
     """A schema's grant list is bounded, like table_stats -- no paging needed,
     and a schema scope dispatches to show_grants_on_schema, not the
     database-level call."""
-    from snowcone.models import grants_scope
+    from nivaria.models import grants_scope
 
     gateway = FakeGateway(
         grants_schema={
@@ -185,7 +185,7 @@ def test_schema_level_grants_are_fetched_in_one_shot() -> None:
 def test_an_objects_grants_are_fetched_in_one_shot() -> None:
     """A scope naming one object dispatches to show_grants_on_object, with
     that object's type."""
-    from snowcone.models import ObjectRef, ObjectType, object_grants_scope
+    from nivaria.models import ObjectRef, ObjectType, object_grants_scope
 
     gateway = FakeGateway(
         grants_object={
@@ -206,7 +206,7 @@ def test_an_objects_grants_are_fetched_in_one_shot() -> None:
 def test_database_level_grants_are_fetched_in_one_shot() -> None:
     """schema=None on the scope means database-level -- dispatches to
     show_grants_on_database instead."""
-    from snowcone.models import grants_scope
+    from nivaria.models import grants_scope
 
     gateway = FakeGateway(
         grants_database={
@@ -222,7 +222,7 @@ def test_database_level_grants_are_fetched_in_one_shot() -> None:
 
 
 def test_schema_level_tag_references_are_fetched_in_one_shot() -> None:
-    from snowcone.models import tag_references_scope
+    from nivaria.models import tag_references_scope
 
     gateway = FakeGateway(
         tag_references_schema={
@@ -238,7 +238,7 @@ def test_schema_level_tag_references_are_fetched_in_one_shot() -> None:
 
 
 def test_database_level_tag_references_are_fetched_in_one_shot() -> None:
-    from snowcone.models import tag_references_scope
+    from nivaria.models import tag_references_scope
 
     gateway = FakeGateway(
         tag_references_database={
@@ -255,7 +255,7 @@ def test_database_level_tag_references_are_fetched_in_one_shot() -> None:
 
 def test_pipe_activity_is_fetched_in_one_shot() -> None:
     """A schema's pipe count is bounded, same reasoning as table_stats."""
-    from snowcone.models import pipe_activity_scope
+    from nivaria.models import pipe_activity_scope
 
     gateway = FakeGateway(
         pipe_activity={
@@ -285,7 +285,7 @@ def test_pipe_activity_history_is_fetched_in_one_shot() -> None:
     """One pipe's full backfill is likewise bounded and unpaged -- no
     pipe_target needed, unlike pipe_history below: ACCOUNT_USAGE.COPY_HISTORY
     filters by PIPE_NAME directly."""
-    from snowcone.models import pipe_activity_history_scope
+    from nivaria.models import pipe_activity_history_scope
 
     gateway = FakeGateway(
         pipe_activity_history={
@@ -316,7 +316,7 @@ def test_pipe_activity_history_is_fetched_in_one_shot() -> None:
 def test_pipe_history_is_fetched_in_one_shot_given_its_resolved_target() -> None:
     """One pipe's near-real-time history is likewise bounded and unpaged --
     same reasoning as pipe_activity above."""
-    from snowcone.models import pipe_history_scope
+    from nivaria.models import pipe_history_scope
 
     gateway = FakeGateway(
         pipe_history={
@@ -348,7 +348,7 @@ def test_pipe_history_without_a_resolved_target_raises() -> None:
     table itself -- see FetchService._resolve_pipe_target, the caller that
     is supposed to supply `pipe_target`. A caller that forgets is a bug, not
     a silent no-op, so this raises rather than fetching nothing quietly."""
-    from snowcone.models import pipe_history_scope
+    from nivaria.models import pipe_history_scope
 
     gateway = FakeGateway()
     with pytest.raises(ValueError):
@@ -362,7 +362,7 @@ def test_pipe_history_without_a_resolved_target_raises() -> None:
 
 def test_task_activity_is_fetched_in_one_shot() -> None:
     """A schema's task count is bounded, same reasoning as pipe_activity."""
-    from snowcone.models import task_activity_scope
+    from nivaria.models import task_activity_scope
 
     gateway = FakeGateway(
         task_activity={
@@ -386,7 +386,7 @@ def test_task_activity_is_fetched_in_one_shot() -> None:
 def test_task_activity_history_is_fetched_in_one_shot() -> None:
     """One task's full backfill is likewise bounded and unpaged -- no
     resolution needed, same reasoning as pipe_activity_history."""
-    from snowcone.models import task_activity_history_scope
+    from nivaria.models import task_activity_history_scope
 
     gateway = FakeGateway(
         task_activity_history={
@@ -416,7 +416,7 @@ def test_task_history_is_fetched_in_one_shot_with_no_target_resolution() -> None
     """Unlike pipe_history, this needs no `pipe_target`-style extra parameter
     at all: DATABASE_NAME/SCHEMA_NAME/TASK_NAME come straight off the scope,
     so calling fetch_page with nothing extra must simply succeed."""
-    from snowcone.models import task_history_scope
+    from nivaria.models import task_history_scope
 
     gateway = FakeGateway(
         task_history={
@@ -911,7 +911,7 @@ def test_a_stopped_service_starts_no_queued_job(repo) -> None:
 
 def test_the_shutdown_sentinel_sorts_ahead_of_real_work() -> None:
     """Stopping has to be prompt, not queued behind everything outstanding."""
-    from snowcone.service.jobs import SHUTDOWN
+    from nivaria.service.jobs import SHUTDOWN
 
     urgent = FetchJob(priority=Priority.INTERACTIVE, scope=databases_scope())
     assert SHUTDOWN < urgent
@@ -943,7 +943,7 @@ def load_schemas(repo, gateway) -> None:
 
 def test_one_prime_fills_every_schemas_scope(repo) -> None:
     """The measured win: one statement instead of a round trip per schema."""
-    from snowcone.models import prime_scope
+    from nivaria.models import prime_scope
 
     gateway = prime_gateway()
     load_schemas(repo, gateway)
@@ -967,7 +967,7 @@ def test_one_prime_fills_every_schemas_scope(repo) -> None:
 
 
 def test_a_prime_costs_one_round_trip_not_one_per_schema(repo) -> None:
-    from snowcone.models import prime_scope
+    from nivaria.models import prime_scope
 
     gateway = prime_gateway()
     load_schemas(repo, gateway)
@@ -991,7 +991,7 @@ def test_a_prime_costs_one_round_trip_not_one_per_schema(repo) -> None:
 def test_a_schema_with_no_objects_still_completes_a_pass(repo) -> None:
     """Otherwise the node would read as 'never fetched' and the tree would
     keep asking for it, so it would never settle."""
-    from snowcone.models import prime_scope
+    from nivaria.models import prime_scope
 
     gateway = prime_gateway()
     load_schemas(repo, gateway)
@@ -1009,7 +1009,7 @@ def test_a_schema_with_no_objects_still_completes_a_pass(repo) -> None:
 def test_a_prime_announces_each_schema_it_filled(repo) -> None:
     """The tree routes updates by scope, so a prime has to name the scopes it
     touched rather than only itself."""
-    from snowcone.models import prime_scope
+    from nivaria.models import prime_scope
 
     gateway = prime_gateway()
     load_schemas(repo, gateway)
@@ -1031,7 +1031,7 @@ def test_duplicate_names_across_schemas_are_all_kept(repo) -> None:
     """Regression: object names repeat across schemas, so keyset paging by
     name across a whole database silently drops every duplicate after the
     first. The prime therefore fetches unpaged."""
-    from snowcone.models import prime_scope
+    from nivaria.models import prime_scope
 
     schemas = [f"S{i}" for i in range(5)]
     gateway = FakeGateway(
@@ -1064,7 +1064,7 @@ def test_duplicate_names_across_schemas_are_all_kept(repo) -> None:
 def test_a_result_at_the_show_cap_falls_back_to_per_schema(repo) -> None:
     """At the cap the result is truncated and cannot be safely resumed, so
     correctness wins over the round-trip saving."""
-    from snowcone.models import prime_scope
+    from nivaria.models import prime_scope
 
     schemas = ["AAA", "BBB"]
     gateway = FakeGateway(
@@ -1097,15 +1097,15 @@ def test_a_prime_scope_has_no_mirror_table_of_its_own(repo) -> None:
     """It is a fetch strategy, not a set of rows."""
     import pytest as _pytest
 
-    from snowcone.cache.repository import spec_for
-    from snowcone.models import prime_scope
+    from nivaria.cache.repository import spec_for
+    from nivaria.models import prime_scope
 
     with _pytest.raises(ValueError):
         spec_for(prime_scope(ObjectType.TABLE, "MYDB"))
 
 
 def test_a_failing_prime_is_reported(repo) -> None:
-    from snowcone.models import prime_scope
+    from nivaria.models import prime_scope
 
     class Boom(FakeGateway):
         def show_objects_in_database(self, *args, **kwargs):
@@ -1126,7 +1126,7 @@ def test_a_failing_prime_is_reported(repo) -> None:
 def test_columns_are_fetched_without_a_warehouse(repo) -> None:
     """SHOW COLUMNS, not INFORMATION_SCHEMA: the verified account has no
     warehouse, and a SELECT would fail there."""
-    from snowcone.models import columns_scope
+    from nivaria.models import columns_scope
 
     gateway = FakeGateway(columns={("MYDB", "PUBLIC", "ORDERS"): ["ID", "TOTAL"]})
     scope = columns_scope("MYDB", "PUBLIC", "ORDERS")
@@ -1141,7 +1141,7 @@ def test_columns_are_fetched_without_a_warehouse(repo) -> None:
 
 
 def test_table_stats_scope_reaches_the_right_gateway_call(repo) -> None:
-    from snowcone.models import table_stats_scope
+    from nivaria.models import table_stats_scope
 
     gateway = FakeGateway(
         table_stats={
@@ -1168,7 +1168,7 @@ def test_table_stats_scope_reaches_the_right_gateway_call(repo) -> None:
 
 
 def test_view_stats_scope_reaches_the_right_gateway_call(repo) -> None:
-    from snowcone.models import view_stats_scope
+    from nivaria.models import view_stats_scope
 
     gateway = FakeGateway(
         view_stats={
@@ -1195,7 +1195,7 @@ def test_view_stats_scope_reaches_the_right_gateway_call(repo) -> None:
 
 
 def test_materialized_view_stats_scope_reaches_the_right_gateway_call(repo) -> None:
-    from snowcone.models import materialized_view_stats_scope
+    from nivaria.models import materialized_view_stats_scope
 
     gateway = FakeGateway(
         materialized_view_stats={
@@ -1225,7 +1225,7 @@ def test_a_failing_table_stats_fetch_keeps_previously_cached_stats(repo) -> None
     """ "A failed pass does not sweep" for this scope specifically -- a session
     that loses its warehouse mid-browse must not blank out timestamps that
     were already fetched successfully."""
-    from snowcone.models import table_stats_scope
+    from nivaria.models import table_stats_scope
 
     gateway = FakeGateway(
         table_stats={
@@ -1259,7 +1259,7 @@ def test_a_failing_table_stats_fetch_keeps_previously_cached_stats(repo) -> None
 
 
 def test_pipe_activity_scope_reaches_the_right_gateway_call(repo) -> None:
-    from snowcone.models import pipe_activity_scope
+    from nivaria.models import pipe_activity_scope
 
     gateway = FakeGateway(
         pipe_activity={
@@ -1295,7 +1295,7 @@ def test_a_failing_pipe_activity_fetch_keeps_previously_cached_activity(repo) ->
     """ "A failed pass does not sweep" for this scope specifically -- losing
     the ACCOUNT_USAGE grant or the warehouse mid-browse must not blank out
     activity that was already fetched successfully."""
-    from snowcone.models import pipe_activity_scope
+    from nivaria.models import pipe_activity_scope
 
     gateway = FakeGateway(
         pipe_activity={
@@ -1335,7 +1335,7 @@ def test_a_failing_pipe_activity_fetch_keeps_previously_cached_activity(repo) ->
 
 
 def test_pipe_activity_history_scope_reaches_the_right_gateway_call(repo) -> None:
-    from snowcone.models import pipe_activity_history_scope
+    from nivaria.models import pipe_activity_history_scope
 
     gateway = FakeGateway(
         pipe_activity_history={
@@ -1372,7 +1372,7 @@ def test_pipe_history_resolves_its_target_from_cached_pipe_activity(repo) -> Non
     whatever PIPE_ACTIVITY already has cached, Snowflake's own resolution --
     an opportunistic read of a sibling scope's cache, the same pattern
     _fan_out_columns_by_schema already uses for SCHEMAS."""
-    from snowcone.models import pipe_activity_scope, pipe_history_scope
+    from nivaria.models import pipe_activity_scope, pipe_history_scope
 
     activity_scope = pipe_activity_scope("MYDB", "PUBLIC")
     history_scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
@@ -1433,7 +1433,7 @@ def test_pipe_history_fails_gracefully_with_no_pipe_activity_data_cached(repo) -
     pipe-activity scope has never been fetched, or this pipe genuinely has no
     load history at all. This must fail the one scope, not crash the worker
     thread and strand every later job (see FetchService._execute)."""
-    from snowcone.models import pipe_history_scope
+    from nivaria.models import pipe_history_scope
 
     scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
     errors: list[str] = []
@@ -1451,7 +1451,7 @@ def test_pipe_history_fails_gracefully_with_no_pipe_activity_data_cached(repo) -
 
 
 def test_task_activity_scope_reaches_the_right_gateway_call(repo) -> None:
-    from snowcone.models import task_activity_scope
+    from nivaria.models import task_activity_scope
 
     gateway = FakeGateway(
         task_activity={
@@ -1482,7 +1482,7 @@ def test_a_failing_task_activity_fetch_keeps_previously_cached_activity(repo) ->
     """Same "a failed pass does not sweep" guarantee as pipe_activity's own
     test -- losing the ACCOUNT_USAGE grant or the warehouse mid-browse must
     not blank out activity that was already fetched successfully."""
-    from snowcone.models import task_activity_scope
+    from nivaria.models import task_activity_scope
 
     gateway = FakeGateway(
         task_activity={
@@ -1517,7 +1517,7 @@ def test_a_failing_task_activity_fetch_keeps_previously_cached_activity(repo) ->
 
 
 def test_task_activity_history_scope_reaches_the_right_gateway_call(repo) -> None:
-    from snowcone.models import task_activity_history_scope
+    from nivaria.models import task_activity_history_scope
 
     gateway = FakeGateway(
         task_activity_history={
@@ -1548,7 +1548,7 @@ def test_task_history_scope_reaches_the_right_gateway_call(repo) -> None:
     """Unlike pipe_history, this needs no sibling scope to resolve a target
     from first -- DATABASE_NAME/SCHEMA_NAME/TASK_NAME come straight off the
     scope, so requesting it alone is enough to complete the pass."""
-    from snowcone.models import task_history_scope
+    from nivaria.models import task_history_scope
 
     gateway = FakeGateway(
         task_history={
@@ -1594,7 +1594,7 @@ def columns_prime_gateway() -> FakeGateway:
 def test_one_columns_prime_fills_every_tables_columns_scope(repo) -> None:
     """The measured win, one level deeper than the object prime: one
     statement instead of a round trip per table."""
-    from snowcone.models import columns_prime_scope, columns_scope
+    from nivaria.models import columns_prime_scope, columns_scope
 
     gateway = columns_prime_gateway()
     load_schemas(repo, gateway)
@@ -1615,7 +1615,7 @@ def test_one_columns_prime_fills_every_tables_columns_scope(repo) -> None:
 
 
 def test_a_columns_prime_costs_one_round_trip_not_one_per_table(repo) -> None:
-    from snowcone.models import columns_prime_scope, columns_scope
+    from nivaria.models import columns_prime_scope, columns_scope
 
     gateway = columns_prime_gateway()
     load_schemas(repo, gateway)
@@ -1637,8 +1637,8 @@ def test_a_columns_prime_costs_one_round_trip_not_one_per_table(repo) -> None:
 
 def test_a_columns_prime_scope_has_no_mirror_table_of_its_own(repo) -> None:
     """Same as the object prime: it is a fetch strategy, not a set of rows."""
-    from snowcone.cache.repository import spec_for
-    from snowcone.models import columns_prime_scope
+    from nivaria.cache.repository import spec_for
+    from nivaria.models import columns_prime_scope
 
     with pytest.raises(ValueError):
         spec_for(columns_prime_scope("MYDB"))
@@ -1648,7 +1648,7 @@ def test_a_truncated_columns_prime_falls_back_to_per_schema(repo) -> None:
     """At the cap the result is truncated and cannot be safely resumed, so
     correctness wins over the round-trip saving -- same reasoning as the
     object prime's fallback."""
-    from snowcone.models import columns_prime_scope, columns_scope
+    from nivaria.models import columns_prime_scope, columns_scope
 
     schemas = ["AAA", "BBB"]
     gateway = FakeGateway(
@@ -1684,7 +1684,7 @@ def test_a_columns_prime_repairs_a_cold_schema_list_before_falling_back(repo) ->
     normally read can still be empty. Rather than leaning on another scope to
     have finished first (there is no dependency graph -- see DESIGN.md), the
     fallback asks Snowflake for the schema names directly."""
-    from snowcone.models import columns_prime_scope, columns_scope, schemas_scope
+    from nivaria.models import columns_prime_scope, columns_scope, schemas_scope
 
     schemas = ["AAA", "BBB"]
     gateway = FakeGateway(
@@ -1719,7 +1719,7 @@ def test_a_columns_prime_repairs_a_cold_schema_list_before_falling_back(repo) ->
 def test_a_schema_still_truncated_falls_back_to_per_table(repo) -> None:
     """The last-resort tier: even one schema's columns can overflow the SHOW
     cap, so that schema falls back further to the ordinary per-table fetch."""
-    from snowcone.models import columns_prime_scope, columns_scope, objects_scope
+    from nivaria.models import columns_prime_scope, columns_scope, objects_scope
 
     tables = [f"T{i:03d}" for i in range(11)]
     gateway = FakeGateway(
@@ -1758,7 +1758,7 @@ def test_a_schema_still_truncated_falls_back_to_per_table(repo) -> None:
 
 
 def test_a_failing_columns_prime_is_reported(repo) -> None:
-    from snowcone.models import columns_prime_scope
+    from nivaria.models import columns_prime_scope
 
     class Boom(FakeGateway):
         def show_columns_in_database(self, *args, **kwargs):
@@ -1790,7 +1790,7 @@ def test_a_show_that_ignores_limit_is_not_paged_forever(repo) -> None:
     "there is more", re-issue with FROM '<last name>', get the identical
     result back, and never terminate -- pinning a worker and a pool connection
     re-querying forever. One statement, one complete pass."""
-    from snowcone.models import objects_scope
+    from nivaria.models import objects_scope
 
     pipes = [f"PIPE_{i:04d}" for i in range(25)]
     gateway = FakeGateway(objects={("MYDB", "PUBLIC", ObjectType.PIPE): pipes})
@@ -1819,7 +1819,7 @@ def test_a_stuck_cursor_completes_the_pass_rather_than_failing_it(repo) -> None:
     advance means the page was the whole result, so the rows are complete and
     current. Failing would throw away a good result to report a paging quirk.
     """
-    from snowcone.models import objects_scope
+    from nivaria.models import objects_scope
 
     gateway = FakeGateway(
         objects={("MYDB", "PUBLIC", ObjectType.TASK): ["T1", "T2", "T3"]}
@@ -1845,8 +1845,8 @@ def test_a_result_that_never_ends_stops_at_the_page_budget(repo) -> None:
     result never comes back short. Nothing else bounds the chain, so the page
     budget does -- and it fails the pass rather than finishing one, because
     unlike a stuck cursor this really is an incomplete result."""
-    from snowcone.models import databases_scope
-    from snowcone.settings import MAX_PAGES_PER_PASS, config
+    from nivaria.models import databases_scope
+    from nivaria.settings import MAX_PAGES_PER_PASS, config
 
     class NeverEndingGateway(FakeGateway):
         """Every page is full, and every page has a new last name."""
@@ -1876,8 +1876,8 @@ def test_a_failed_page_budget_leaves_the_rows_that_were_already_there(repo) -> N
     """Same rule as any other failed pass: no sweep, so what was on screen
     stays on screen. A half-fetched scope must not look emptier than the last
     good one."""
-    from snowcone.models import databases_scope
-    from snowcone.settings import MAX_PAGES_PER_PASS, config
+    from nivaria.models import databases_scope
+    from nivaria.settings import MAX_PAGES_PER_PASS, config
 
     class NeverEndingGateway(FakeGateway):
         def show_databases(self, *, after=None, limit=1000, allow_reconnect=True):
@@ -1931,8 +1931,8 @@ def test_a_history_at_its_row_cap_is_recorded_as_truncated(repo) -> None:
     days on a real account. It is capped, and a capped pass has to say so:
     the table would otherwise just stop, indistinguishable from a complete
     one."""
-    from snowcone.models import pipe_activity_history_scope
-    from snowcone.settings import HISTORY_MAX_ROWS, config
+    from nivaria.models import pipe_activity_history_scope
+    from nivaria.settings import HISTORY_MAX_ROWS, config
 
     config.set(HISTORY_MAX_ROWS, 10)
     gateway = FakeGateway(
@@ -1953,8 +1953,8 @@ def test_a_history_at_its_row_cap_is_recorded_as_truncated(repo) -> None:
 def test_a_history_inside_its_row_cap_is_not_recorded_as_truncated(repo) -> None:
     """The common case, and the one that decides whether the note above is
     noise: an ordinary pipe's history must not claim to be capped."""
-    from snowcone.models import pipe_activity_history_scope
-    from snowcone.settings import HISTORY_MAX_ROWS, config
+    from nivaria.models import pipe_activity_history_scope
+    from nivaria.settings import HISTORY_MAX_ROWS, config
 
     config.set(HISTORY_MAX_ROWS, 100)
     gateway = FakeGateway(
@@ -1974,8 +1974,8 @@ def test_the_history_row_cap_reaches_the_statement(repo) -> None:
     """Read at the point of use, like every other setting -- a cap that only
     took effect on restart would be worse than none, since the reason to reach
     for it is a history that is hurting right now."""
-    from snowcone.models import task_activity_history_scope
-    from snowcone.settings import HISTORY_MAX_ROWS, config
+    from nivaria.models import task_activity_history_scope
+    from nivaria.settings import HISTORY_MAX_ROWS, config
 
     config.set(HISTORY_MAX_ROWS, 42)
     gateway = FakeGateway()
@@ -1999,7 +1999,7 @@ def test_a_data_preview_is_folded_into_one_json_object_per_row() -> None:
     import json
     from decimal import Decimal
 
-    from snowcone.models import data_preview_scope
+    from nivaria.models import data_preview_scope
 
     gateway = FakeGateway(
         data_preview={
@@ -2028,8 +2028,8 @@ def test_a_data_preview_is_folded_into_one_json_object_per_row() -> None:
 
 
 def test_a_data_preview_at_its_row_limit_is_truncated() -> None:
-    from snowcone.models import data_preview_scope
-    from snowcone.settings import DATA_PREVIEW_ROWS, config
+    from nivaria.models import data_preview_scope
+    from nivaria.settings import DATA_PREVIEW_ROWS, config
 
     config.set(DATA_PREVIEW_ROWS, 3)
     gateway = FakeGateway(
@@ -2044,8 +2044,8 @@ def test_a_data_preview_at_its_row_limit_is_truncated() -> None:
 def test_a_data_preview_is_asked_for_with_the_configured_timeout() -> None:
     """A view's preview runs the view's own query, so the gateway is told
     how long it may take before Snowflake is asked to cancel it."""
-    from snowcone.models import data_preview_scope
-    from snowcone.settings import DATA_PREVIEW_TIMEOUT, config
+    from nivaria.models import data_preview_scope
+    from nivaria.settings import DATA_PREVIEW_TIMEOUT, config
 
     config.set(DATA_PREVIEW_TIMEOUT, 7)
     gateway = FakeGateway(data_preview={("MYDB", "PUBLIC", "V"): [{"ID": 1}]})
@@ -2054,8 +2054,8 @@ def test_a_data_preview_is_asked_for_with_the_configured_timeout() -> None:
 
 
 def test_a_data_preview_inside_its_row_limit_is_the_whole_table() -> None:
-    from snowcone.models import data_preview_scope
-    from snowcone.settings import DATA_PREVIEW_ROWS, config
+    from nivaria.models import data_preview_scope
+    from nivaria.settings import DATA_PREVIEW_ROWS, config
 
     config.set(DATA_PREVIEW_ROWS, 3)
     gateway = FakeGateway(

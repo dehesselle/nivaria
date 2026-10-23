@@ -11,10 +11,10 @@ import pytest
 from textual.app import App
 from textual.widgets import Input, OptionList
 
-import snowcone.ui.app as app_module
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import (
+import nivaria.ui.app as app_module
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     SchemaRef,
@@ -22,7 +22,7 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.ui.screens.search import MAX_RESULTS, SearchDialog
+from nivaria.ui.screens.search import MAX_RESULTS, SearchDialog
 
 
 @pytest.fixture

@@ -8,16 +8,16 @@ from tcoda.dialogs import ConfirmDialog
 from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 
-import snowcone.ui.app as app_module
-from snowcone.gateway.pool import (
+import nivaria.ui.app as app_module
+from nivaria.gateway.pool import (
     CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
     OAUTH,
     USERNAME_PASSWORD_MFA,
 )
-from snowcone.profiles import Profile, ProfileStore
-from snowcone.ui.screens.connect import ConnectScreen, RecentList
-from snowcone.ui.screens.connecting import ConnectingDialog
+from nivaria.profiles import Profile, ProfileStore
+from nivaria.ui.screens.connect import ConnectScreen, RecentList
+from nivaria.ui.screens.connecting import ConnectingDialog
 from tests.fakes import FakeConnector
 
 

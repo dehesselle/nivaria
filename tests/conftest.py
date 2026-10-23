@@ -24,7 +24,7 @@ def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """
     from tcoda.settings import configure
 
-    from snowcone import paths
+    from nivaria import paths
 
     monkeypatch.setattr(paths, "config_dir", lambda: tmp_path / "config")
     monkeypatch.setattr(paths, "cache_dir", lambda: tmp_path / "cache")
@@ -41,5 +41,5 @@ def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     configure(path=tmp_path / "config" / "settings.json")
     yield
     # Put the real app config back, so a later non-test import of
-    # snowcone.settings is not left pointing at a deleted tmp_path.
+    # nivaria.settings is not left pointing at a deleted tmp_path.
     configure(paths.APP_NAME)

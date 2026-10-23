@@ -4,9 +4,9 @@ import time
 
 import pytest
 
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import (
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import (
     CacheState,
     ObjectType,
     columns_scope,
@@ -445,7 +445,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
     """schema.sql and the TableSpecs are two hand-written lists of the same
     columns. A column in a spec but not the DDL fails only when that object
     type is first fetched, which could be days after the typo."""
-    from snowcone.cache.repository import (
+    from nivaria.cache.repository import (
         _COLUMNS,
         _DATABASES,
         _GRANTS,
@@ -492,8 +492,8 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
 
 
 def test_every_object_kind_has_a_mirror_table(repo) -> None:
-    from snowcone.cache.repository import _OBJECT_TABLES
-    from snowcone.models import ObjectType
+    from nivaria.cache.repository import _OBJECT_TABLES
+    from nivaria.models import ObjectType
 
     assert set(_OBJECT_TABLES) == set(ObjectType)
 
@@ -527,7 +527,7 @@ def test_a_verified_snowflake_column_survives_a_round_trip(repo) -> None:
                 "is_iceberg": "N",
                 "is_dynamic": "N",
                 "owner_role_type": "ROLE",
-                # Columns snowcone does not mirror, present in the real result.
+                # Columns nivaria does not mirror, present in the real result.
                 "search_optimization_progress": None,
                 "enable_schema_evolution": "N",
                 "is_immutable": "N",
@@ -547,7 +547,7 @@ def test_table_stats_columns_round_trip_but_are_unverified(repo) -> None:
     TABLES columns, this shape comes from Snowflake's published
     INFORMATION_SCHEMA.TABLES documentation, not a probed live account -- see
     DESIGN.md "Known gaps"."""
-    from snowcone.models import table_stats_scope
+    from nivaria.models import table_stats_scope
 
     scope = table_stats_scope("MYDB", "PUBLIC")
     load(
@@ -572,7 +572,7 @@ def test_view_stats_columns_round_trip_but_are_unverified(repo) -> None:
     """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
     the exact same INFORMATION_SCHEMA.TABLES statement, just filtered to
     TABLE_TYPE = 'VIEW' instead of 'BASE TABLE'."""
-    from snowcone.models import view_stats_scope
+    from nivaria.models import view_stats_scope
 
     scope = view_stats_scope("MYDB", "PUBLIC")
     load(
@@ -597,7 +597,7 @@ def test_materialized_view_stats_columns_round_trip_but_are_unverified(repo) -> 
     """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
     this shape comes from Snowflake's published SHOW MATERIALIZED VIEWS
     documentation, not a probed live account."""
-    from snowcone.models import materialized_view_stats_scope
+    from nivaria.models import materialized_view_stats_scope
 
     scope = materialized_view_stats_scope("MYDB", "PUBLIC")
     load(
@@ -622,7 +622,7 @@ def test_pipe_activity_columns_round_trip_but_are_unverified(repo) -> None:
     """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
     this shape comes from Snowflake's published ACCOUNT_USAGE.COPY_HISTORY
     documentation, not a probed live account -- see DESIGN.md "Known gaps"."""
-    from snowcone.models import pipe_activity_scope
+    from nivaria.models import pipe_activity_scope
 
     scope = pipe_activity_scope("MYDB", "PUBLIC")
     load(
@@ -654,7 +654,7 @@ def test_grants_columns_round_trip_but_are_unverified(repo) -> None:
     """Same caveat as test_table_stats_columns_round_trip_but_are_unverified:
     this shape comes from Snowflake's published SHOW GRANTS documentation,
     not a probed live account -- see DESIGN.md "Known gaps"."""
-    from snowcone.models import grants_scope
+    from nivaria.models import grants_scope
 
     scope = grants_scope("MYDB", "PUBLIC")
     load(
@@ -682,7 +682,7 @@ def test_grants_columns_round_trip_but_are_unverified(repo) -> None:
 def test_a_schema_level_and_a_database_level_grants_scope_do_not_collide(repo) -> None:
     """The same physical table holds both -- _scope in the key must actually
     keep them apart."""
-    from snowcone.models import grants_scope
+    from nivaria.models import grants_scope
 
     schema_level = grants_scope("MYDB", "PUBLIC")
     database_level = grants_scope("MYDB")
@@ -719,7 +719,7 @@ def test_a_schema_level_and_a_database_level_grants_scope_do_not_collide(repo) -
 
 
 def test_an_object_level_and_a_schema_level_grants_scope_do_not_collide(repo) -> None:
-    from snowcone.models import ObjectRef, ObjectType, grants_scope, object_grants_scope
+    from nivaria.models import ObjectRef, ObjectType, grants_scope, object_grants_scope
 
     schema_level = grants_scope("MYDB", "PUBLIC")
     object_level = object_grants_scope(
@@ -760,7 +760,7 @@ def test_tag_references_columns_round_trip_but_are_unverified(repo) -> None:
     this shape comes from Snowflake's published INFORMATION_SCHEMA.
     TAG_REFERENCES documentation, not a probed live account -- see DESIGN.md
     "Known gaps"."""
-    from snowcone.models import tag_references_scope
+    from nivaria.models import tag_references_scope
 
     scope = tag_references_scope("MYDB", "PUBLIC")
     load(
@@ -782,7 +782,7 @@ def test_tag_references_columns_round_trip_but_are_unverified(repo) -> None:
 
 
 def test_a_multi_value_tag_keeps_every_value(repo) -> None:
-    from snowcone.models import tag_references_scope
+    from nivaria.models import tag_references_scope
 
     scope = tag_references_scope("MYDB", "PUBLIC")
     tag = {
@@ -796,7 +796,7 @@ def test_a_multi_value_tag_keeps_every_value(repo) -> None:
 
 
 def test_a_multi_value_column_tag_keeps_every_value(repo) -> None:
-    from snowcone.models import column_tag_references_scope
+    from nivaria.models import column_tag_references_scope
 
     scope = column_tag_references_scope("MYDB", "PUBLIC", "ORDERS")
     tag = {
@@ -978,7 +978,7 @@ def test_pipe_history_columns_round_trip_but_are_unverified(repo) -> None:
     """Same caveat as the other two SELECT-backed mirrors: this shape comes
     from Snowflake's published INFORMATION_SCHEMA.COPY_HISTORY documentation,
     not a probed live account -- see DESIGN.md "Known gaps"."""
-    from snowcone.models import pipe_history_scope
+    from nivaria.models import pipe_history_scope
 
     scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
     load(
@@ -1110,7 +1110,7 @@ def test_task_history_columns_round_trip_but_are_unverified(repo) -> None:
     """Same caveat as the other two SELECT-backed mirrors: this shape comes
     from Snowflake's published INFORMATION_SCHEMA.TASK_HISTORY documentation,
     not a probed live account -- see DESIGN.md "Known gaps"."""
-    from snowcone.models import task_history_scope
+    from nivaria.models import task_history_scope
 
     scope = task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
     load(

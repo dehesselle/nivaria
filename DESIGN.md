@@ -1,8 +1,8 @@
-# snowcone — design
+# nivaria — design
 
 A terminal UI for browsing and searching Snowflake objects quickly.
 
-This document describes how snowcone works and why. It is the context a new
+This document describes how nivaria works and why. It is the context a new
 working session needs before changing anything. It deliberately avoids file
 layout and code: read the modules for those.
 
@@ -49,7 +49,7 @@ Use these names when discussing changes.
 ```
 
 `F1` slides the **Log panel** down over the top third, showing every
-statement snowcone sends; `F1` again hides it. See "The SQL log".
+statement nivaria sends; `F1` again hides it. See "The SQL log".
 
 `/` opens the **Search modal** over this screen, at roughly 90 % of the
 terminal:
@@ -69,13 +69,13 @@ terminal:
 
 | Name | What it is |
 |---|---|
-| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcoda`'s `MenuBar` (see "Shared widgets" below); snowcone only declares what is in it, inline in `MainScreen.compose`. Two menus. **Snowcone** (`s`), the app-identity menu, leftmost: **About ...** (`a`) -- a `tcoda.widgets.AboutMenuItem` reading `ui/about.txt` (see "Shared widgets" below for why that's a real filesystem path, not just an `importlib.resources` handle) -- then a separator, **Settings ...** (`s`) -- a `tcoda.widgets.SettingsMenuItem`, which opens the dialog itself, so snowcone wires nothing for it -- then another separator and **Quit** (`q`, `Ctrl+Q` shown right-aligned), which runs `app.quit`. **Connection** (`c`), the session menu: **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming". Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
+| **Menu bar** | Midnight-Commander style: hidden except while in use, opened by `F9` or by clicking a title. The bar itself -- the staged bar-only/dropdown flow, mnemonics, separators, the `F9` binding -- is `tcoda`'s `MenuBar` (see "Shared widgets" below); nivaria only declares what is in it, inline in `MainScreen.compose`. Two menus. **Nivaria** (`n`), the app-identity menu, leftmost: **About ...** (`a`) -- a `tcoda.widgets.AboutMenuItem` reading `ui/about.txt` (see "Shared widgets" below for why that's a real filesystem path, not just an `importlib.resources` handle) -- then a separator, **Settings ...** (`s`) -- a `tcoda.widgets.SettingsMenuItem`, which opens the dialog itself, so nivaria wires nothing for it -- then another separator and **Quit** (`q`, `Ctrl+Q` shown right-aligned), which runs `app.quit`. **Connection** (`c`), the session menu: **Open...** (`o`, `Ctrl+O` shown right-aligned) to reopen the connect dialog and swap in whatever pool it returns, then a separator, **Databases ...** (`d`, `Ctrl+D` shown right-aligned) to open a **multi-select** fuzzy picker (`MultiPickerDialog`, see "The Object tree" below) over cached databases, **Warehouse ...** (`w`, `Ctrl+W`) and **Role ...** (`r`, `Ctrl+R`) to open the still-single-select fuzzy picker (`PickerDialog`) over cached warehouses/roles, applying the choice session-wide (see below), and **Pre-warm cache** (`p`) to fill the column cache of whatever database the cursor is currently under, in the background -- see "Column cache priming". Choosing an entry posts `MenuItem.Pressed`, handled with `@on(MenuItem.Pressed, "#database")` on `MainScreen`, which hands off to the same `@work` wrapper the matching key binding uses -- a plain message handler has no worker context, and `push_screen_wait` needs one. A `shortcut` label advertises a key binding that already does the same thing, independent of `mnemonic` (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W` all stay live as key bindings but are hidden from the footer (`show=False`) -- the menu's `shortcut` label is where they're advertised, keeping the footer down to the bindings someone would reach for without having opened the menu first. |
 | **Object tree** | The browser. One top-level node per selected database, each showing its own schema count directly (`MYDB (12)`) and expanding straight into schemas -- → schema → `Tables (n)` / `Views (n)` / … → object. No border title: several databases can be selected at once, so there is no longer one canonical database to name there. `ctrl+d` opens the **Databases picker**, a multi-select fuzzy modal over cached databases -- every selection gets its own top-level node, and search (below) runs across all of them. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database (column search is currently disabled, see "Known gaps"), opened by `/` at roughly 90 % of the screen -- search is the primary way to navigate a large database, so it gets a screenful of ranked matches rather than a sliver of the top pane. `enter` opens the highlighted hit and closes the modal; `escape` closes it without choosing. Choosing a hit reveals it in the tree as well as opening it, so it leaves you somewhere you can keep browsing from. |
 | **Detail pane** | Hosts exactly one detail view at a time, chosen by whatever node the cursor is on. Its shared right border with the Object tree is mouse-draggable, resizing both panes live. |
 | **Object view** | The per-type detail UI for one object (e.g. Table view, Pipe view). Owns its whole detail body. One of four view families the pane can host -- see "Detail views" below for the other three. |
 | **Status footer** | Key bindings on the left; **Role**/**Warehouse** labels, **Countdown** and **Pool gauge** in the right corner. Textual's command-palette key is suppressed so the corner is ours. |
-| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen: every statement snowcone sends, live. `tcoda`'s `LogViewer`, fed by `gateway/sql_log.py` -- see "The SQL log" below. |
+| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen: every statement nivaria sends, live. `tcoda`'s `LogViewer`, fed by `gateway/sql_log.py` -- see "The SQL log" below. |
 
 The tree/Detail split starts at 25 % / 75 % of the width, in `fr` units, and
 is now genuinely resizable: dragging `ObjectTree`'s right border (the same
@@ -112,19 +112,19 @@ Two derived layers sit on top, and only these two:
 
 - a **uniform object view** used by search, flattening every type to
   `(database, schema, name, kind)` — `kind` there is Snowflake's own column
-  name, kept because this layer still mirrors; snowcone's own word for the
+  name, kept because this layer still mirrors; nivaria's own word for the
   same idea is `ObjectType` (see "Vocabulary" below);
 - the **freshness ledger**, below.
 
 Bookkeeping columns are underscore-prefixed so they can never collide with a
 Snowflake column name.
 
-### Vocabulary: Snowflake's words, and where snowcone's differ
+### Vocabulary: Snowflake's words, and where nivaria's differ
 
 Snowflake's own terms are used throughout, in identifiers as well as prose,
 and column headers follow the same rule (see "Column headers mirror
-Snowflake"). Where snowcone needs a name Snowflake has none for, it is
-obviously snowcone's: `Scope`, `CacheState`, `NodeType`, the `_`-prefixed
+Snowflake"). Where nivaria needs a name Snowflake has none for, it is
+obviously nivaria's: `Scope`, `CacheState`, `NodeType`, the `_`-prefixed
 bookkeeping columns.
 
 The one place the two collide is **type**. Snowflake's docs, `GRANT ... ON
@@ -135,7 +135,7 @@ literally named `kind` — `SHOW DATABASES` returns `STANDARD`/`IMPORTED
 DATABASE` in it, `SHOW TABLES` a per-row detail — and those are mirrored
 under that name, unchanged, because the mirror layer never renames anything.
 So `kind` in `schema.sql`, in `search.sql` and in a `TableSpec.columns` tuple
-is always Snowflake's column; `type` everywhere else is snowcone's word for
+is always Snowflake's column; `type` everywhere else is nivaria's word for
 the concept. `Repository.search_corpus` is the one function that crosses the
 seam, reading `row["kind"]` into an `ObjectType`.
 
@@ -160,7 +160,7 @@ This used to say the schema list's "own next pass" would remove the node,
 and that was true but useless: the next pass was the TTL sweep, up to
 `CACHE_TTL` away and postponed by every navigation, so a schema dropped in
 Snowsight stayed in the tree and failed every visit with an error toast. A
-drop made elsewhere is invisible to snowcone until a statement trips over it,
+drop made elsewhere is invisible to nivaria until a statement trips over it,
 so tripping over it is the trigger. "Does not exist" is recognised by the
 driver's error number (2003), not its message text, which varies by object
 kind; it is reported as a warning rather than an error, and identical
@@ -185,7 +185,7 @@ has a far cheaper fix.
 
 That fix: `SHOW` output is filtered by role, so the whole cache — not one
 table, not one scope type, all of it — is only ever valid for the role that
-was active while it was built. So instead of tagging rows, snowcone keeps a
+was active while it was built. So instead of tagging rows, nivaria keeps a
 **separate sqlite file per (account, role)** (`paths.cache_file`), and treats
 switching roles as switching *which file* `Repository` points at, the same way
 `open_connect` already swaps in a whole new `ConnectionPool`. Within one file,
@@ -204,9 +204,9 @@ is deliberately excluded from the key: `SHOW` needs no warehouse (see below),
 so nothing it returns can vary with which one is active.
 
 Because the identity is not known until a connection exists, the cache is not
-opened at app startup — `SnowconeApp.on_mount` no longer creates a `Repository`
+opened at app startup — `NivariaApp.on_mount` no longer creates a `Repository`
 before the connect dialog even runs. It is opened once a pool exists
-(`SnowconeApp.switch_repo`), and re-opened by the same call after a role
+(`NivariaApp.switch_repo`), and re-opened by the same call after a role
 switch or a reconnect. `MainScreen.set_repo` (and the matching method on
 `ObjectTree` and `DetailPane`) is what repoints a widget at a different
 `Repository` object entirely; it resets browsing state exactly like a fresh
@@ -272,7 +272,7 @@ either never reaches a cache file that already exists — the first write to an
 added column would simply fail. Every edit therefore bumps `SCHEMA_VERSION` in
 `cache/db.py`, which is stamped into the file as sqlite's `user_version`. On
 open, a file carrying any other version is deleted together with its `-wal`
-and `-shm` and rebuilt empty. snowcone is pre-1.0 with no
+and `-shm` and rebuilt empty. nivaria is pre-1.0 with no
 backward-compatibility policy, so nothing is migrated; the cache refills
 itself like a first start. A test pins a digest of both scripts to the
 version, so changing a script without the bump fails the suite.
@@ -296,7 +296,7 @@ app exits, and a reconnect or role switch starts without them.
 Deleting previews from the file instead was the first version, and it was
 not enough. SQLite leaves deleted content in free pages and in the `-wal`
 file until something overwrites it, so the rows stayed recoverable from disk
-after snowcone could no longer read them. The ledger entry had to be deleted
+after nivaria could no longer read them. The ledger entry had to be deleted
 alongside the rows, too, or it would read as a preview fetched and found
 empty.
 
@@ -360,7 +360,7 @@ is not valid DDL, so keeping it would put a type name in the cache that no
 Snowflake statement accepts. A live comparison of all three sources (SHOW,
 `INFORMATION_SCHEMA`, `DESC TABLE`) found no other differences in the type
 name. A type that cannot be parsed degrades to
-"unknown"; a column snowcone cannot describe is still a column worth listing.
+"unknown"; a column nivaria cannot describe is still a column worth listing.
 
 What `INFORMATION_SCHEMA.COLUMNS` cannot do is describe a type in full. It has
 no field for a BINARY's length (every length field is NULL for it), DECFLOAT's
@@ -368,7 +368,7 @@ fixed precision of 38, a VECTOR's element type and dimension, or a structured
 type's elements and fields. SHOW's JSON carries all of that, so the mirror
 gains one column of its own: `_desc_type`, the type exactly as `DESC TABLE`
 prints it (`NUMBER(38,0)`, `VECTOR(INT, 768)`, `OBJECT(a VARCHAR(16777216)
-NOT NULL, b FLOAT)`). The underscore marks the column as snowcone's, not
+NOT NULL, b FLOAT)`). The underscore marks the column as nivaria's, not
 Snowflake's, because no Snowflake field holds this value, but the rendering
 itself is Snowflake's. The column list shows it as Type. The rendering rules
 come from live `DESC TABLE` output, and `tests/data/show_column_types.json`
@@ -829,7 +829,7 @@ can move it.
    somebody remembered to cap. It reads the cursor in batches and raises
    `ResultTooLargeError` past the ceiling, which routes through the ordinary
    worker boundary to `fail_pass`: no sweep, yesterday's rows stay on screen,
-   the error is visible. Be clear about what it buys — it bounds what snowcone
+   the error is visible. Be clear about what it buys — it bounds what nivaria
    *materialises* and hands the connection back early. It does not stop
    Snowflake from having produced the result. `PoolGateway._fetch`'s blind
    one-shot retry re-raises it explicitly rather than repeating a statement
@@ -1004,7 +1004,7 @@ Fetch workers are not the only threads that can outlive the app: the connect
 dialog's connection attempt, pool growth and a role or warehouse switch cannot
 be interrupted either, and quitting does not wait for those. Each ends by
 hopping back with `call_from_thread`, which Textual answers with "App is not
-running" once the app is gone. `SnowconeApp.call_from_thread` drops the call
+running" once the app is gone. `NivariaApp.call_from_thread` drops the call
 instead when the app has stopped running: the result is for a UI that no
 longer exists.
 
@@ -1057,8 +1057,8 @@ browser every time the access token expires.
 > ceiling. macOS Keychain has no equivalent restriction, so this is
 > Windows-only.
 
-**snowcone stores no password anywhere.** Each remembered identity is a
-`Profile` (`snowcone/profiles.py`, on disk at `recent.json`): account, user,
+**nivaria stores no password anywhere.** Each remembered identity is a
+`Profile` (`nivaria/profiles.py`, on disk at `recent.json`): account, user,
 authenticator, role, warehouse and an optional display name, plus the databases last selected for that
 identity's Object tree (see "The Object tree" above) -- UI state riding on
 the same record because it is naturally scoped to the same identity, which is
@@ -1432,7 +1432,7 @@ the table well past what its content needs. Instead, each header tooltips the
 field it shows, in the cache's own upper-case vocabulary: "Ordinal" is
 `ORDINAL_POSITION`, "Nullable" is `IS_NULLABLE`, "Default" is
 `COLUMN_DEFAULT`, and so on, so a user can confirm the column is Snowflake's
-and not a term snowcone made up. Type and Tags have no tooltip, because no
+and not a term nivaria made up. Type and Tags have no tooltip, because no
 single Snowflake name would be true of them. Type is `DESC TABLE`'s full
 rendering (see "`SHOW`, because it needs no warehouse"), which is more than
 `DATA_TYPE` alone. `DATA_TYPE_ALIAS` was rejected: it is
@@ -1444,11 +1444,11 @@ cache actually has.
 
 Type and Tags are computed, but only restate what the cache holds. There is
 exactly one *inferred* column in the app, one that stands in for a Snowflake
-value snowcone never reads, and it is called out as such in
+value nivaria never reads, and it is called out as such in
 `pipe_list_view.py`: the Pipes (n) Status tab's **Execution State**, which
 is `RUNNING` when `invalid_reason` is empty and `STOPPED` when it is not.
 Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`' `executionState`,
-which snowcone never queries — it is a per-pipe function call, so covering a
+which nivaria never queries — it is a per-pipe function call, so covering a
 schema with it would cost one round trip per pipe. The column earns its place
 because an empty `invalid_reason` cell alone reads as "nothing fetched"
 rather than "this pipe is fine", but only two of `executionState`'s values
@@ -1520,7 +1520,7 @@ every load that is actually running first.
 
 None of the three corpora carry live staleness tracking, for the same reason:
 there is no widget left mounted for a cache update to mark them stale while
-the dialog is open. `SnowconeApp` routes `CacheUpdated` to `self.screen`,
+the dialog is open. `NivariaApp` routes `CacheUpdated` to `self.screen`,
 which while the modal is open is the modal itself, not `MainScreen`, so a
 background update would not reach a live corpus here any more than it
 reaches the tree or detail pane while any other modal (the database picker,
@@ -1700,12 +1700,12 @@ consults no warehouse, so nothing about the cache needs to change when it does.
 
 `F1` slides a log panel down over the top third of the screen; `F1` again
 hides it. It is `tcoda`'s `LogViewer` (see "Shared widgets"), mounted in
-`MainScreen.compose` with its defaults, so snowcone wires nothing for it: the
+`MainScreen.compose` with its defaults, so nivaria wires nothing for it: the
 widget installs its own key binding and its own screen layer, owns a rolling
 in-memory buffer that exists whether or not the panel is mounted, and offers
 level and source filters of its own.
 
-What snowcone contributes is the content. **`gateway/sql_log.py` logs every
+What nivaria contributes is the content. **`gateway/sql_log.py` logs every
 statement before it is sent**, not after, and that ordering is the point:
 `cursor.query` — the driver's public "what did I run" attribute — is only
 populated once `execute()` has already returned, which answers nothing about
@@ -1742,8 +1742,8 @@ Values are read **at the point of use**, never cached, so a change takes effect
 without a restart.
 
 All of that machinery -- `Setting`, the registry, `ConfigStore`, the dialog --
-is `tcoda`'s (see "Shared widgets" below). `snowcone/settings.py` is only the
-declarations plus the one `configure("snowcone")` call that tells the shared
+is `tcoda`'s (see "Shared widgets" below). `nivaria/settings.py` is only the
+declarations plus the one `configure("nivaria")` call that tells the shared
 store which app's config file to use; the store resolves that path lazily, on
 first read, so importing the module touches no disk.
 
@@ -1765,7 +1765,7 @@ on the next `restart_fetch` (a reconnect or a role switch). Not deliberate,
 just unfixed — and worth knowing when lowering it to reproduce a paging
 problem.
 
-**Settings ...** (Snowcone menu) opens a modal listing every registered
+**Settings ...** (Nivaria menu) opens a modal listing every registered
 `Setting`, grouped under a heading per `Setting.group`, each editable in
 place. **OK** validates and writes, then closes; **Apply** does the same but
 leaves the dialog open; **Cancel**/escape discard, confirming first if
@@ -1777,7 +1777,7 @@ discarding it or falling back to the default -- that fallback exists for a
 hand-edited settings.json, not for a mistake made in the dialog itself.
 
 `tcoda`'s dialog also supports per-instance settings and callback-only action
-rows, which snowcone declares none of; they exist for the sibling app the
+rows, which nivaria declares none of; they exist for the sibling app the
 dialog originally came from.
 
 ---
@@ -1786,7 +1786,7 @@ dialog originally came from.
 
 The menu bar, the settings system, the log panel (`LogViewer`, see "The SQL
 log"), the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
-and the terminal's window title (`TerminalTitleMixin` on `SnowconeApp`) live
+and the terminal's window title (`TerminalTitleMixin` on `NivariaApp`) live
 in **`tcoda`** ("Textual coda"), a sibling project shared with
 `snakecam` and `vc`. They were extracted because the same code had been
 copied into three apps and had already started to drift.
@@ -1795,7 +1795,7 @@ It is consumed as an editable path dependency (`[tool.uv.sources]` in
 `pyproject.toml`), so an edit there is live here with no reinstall.
 
 > **`tcoda` must never appear in `[project.dependencies]`.** It is not published
-> anywhere, so a built snowcone wheel instead bundles a copy of its sources
+> anywhere, so a built nivaria wheel instead bundles a copy of its sources
 > directly (`hatch_build.py`, triggered as a custom build hook on both the
 > `sdist` and `wheel` targets — see the hook's own comments for how it locates
 > a source copy for each). `[tool.uv.sources]`'s path override only takes
@@ -1809,7 +1809,7 @@ It is consumed as an editable path dependency (`[tool.uv.sources]` in
 > honors for the local venv but which never becomes part of a built
 > distribution's metadata.
 
-Three things about it are worth knowing from inside snowcone:
+Three things about it are worth knowing from inside nivaria:
 
 - **`tcoda` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
   than in a stylesheet -- a library cannot rely on a consumer's `CSS_PATH`.
@@ -1925,7 +1925,7 @@ which turned out not to be worth chasing — see the last bullet below:
   SELECT 1`, three manually triggered runs): `SCHEDULED_TIME`,
   `COMPLETED_TIME`, `STATE` and, on the runs that failed (the sandbox's
   `SYSADMIN` role turned out to lack `USAGE` on warehouse `WH` — an account
-  setup gap, not a snowcone one), `ERROR_CODE`/`ERROR_MESSAGE` all came back
+  setup gap, not a nivaria one), `ERROR_CODE`/`ERROR_MESSAGE` all came back
   real and non-null. `QUERY_ID`/`QUERY_START_TIME` stayed `NULL` on every
   run, but that's consistent with the task failing before a query was ever
   submitted, not a sign the columns don't populate on success — not chased

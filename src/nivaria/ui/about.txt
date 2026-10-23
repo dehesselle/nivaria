@@ -1,0 +1,9 @@
+              __                  __
+       .-----|__.--.--.---.-.----|__.---.-.
+       |     |  |  |  |  _  |   _|  |  _  |
+       |__|__|__|\___/|___._|__| |__|___._|
+
+       version ${version}
+
+  A TUI to browse and search objects in Snowflake,
+  caching everything to maximize responsiveness.

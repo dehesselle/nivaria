@@ -1,5 +1,5 @@
 [project]
-name = "snowcone"
+name = "nivaria"
 dynamic = ["version"]
 description = "A TUI for quickly browsing and searching Snowflake objects"
 readme = "README.md"
@@ -20,14 +20,14 @@ dependencies = [
 tcoda = { path = "../tcoda", editable = true }
 
 [project.scripts]
-snowcone = "snowcone:main"
+nivaria = "nivaria:main"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.hooks.vcs]
-version-file = "src/snowcone/version.py"
+version-file = "src/nivaria/version.py"
 
 [tool.hatch.build.targets.sdist.hooks.custom]
 

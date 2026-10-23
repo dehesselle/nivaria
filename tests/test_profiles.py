@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from snowcone.gateway.pool import USERNAME_PASSWORD_MFA, ConnectParams
-from snowcone.profiles import Profile, ProfileStore
+from nivaria.gateway.pool import USERNAME_PASSWORD_MFA, ConnectParams
+from nivaria.profiles import Profile, ProfileStore
 
 
 def store(tmp_path) -> ProfileStore:
@@ -28,7 +28,7 @@ def test_entries_round_trip(tmp_path) -> None:
 
 
 def test_no_password_is_ever_written(tmp_path) -> None:
-    """The whole point of the store: snowcone holds no secret on disk."""
+    """The whole point of the store: nivaria holds no secret on disk."""
     profiles = store(tmp_path)
     params = ConnectParams(
         account="ACME",

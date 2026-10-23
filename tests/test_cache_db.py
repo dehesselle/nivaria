@@ -5,11 +5,11 @@ import sqlite3
 
 import pytest
 
-from snowcone.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database, MemoryDatabase
+from nivaria.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database, MemoryDatabase
 
 #: The SHA-256 of the schema scripts as of SCHEMA_VERSION 1. Change it only
 #: together with a bump of SCHEMA_VERSION.
-SCHEMA_DIGEST = "135b7c69049bd1374c059dda18b703ab1b03c002dee8205a5ca2329cd7b68581"
+SCHEMA_DIGEST = "b94d35b075d417578731251150944e7b0483d9f19db7726223f5809b2d38429a"
 
 
 def test_prepare_creates_the_file_and_its_parent_directory(tmp_path) -> None:

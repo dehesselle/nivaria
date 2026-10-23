@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from snowcone.models import (
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     Scope,

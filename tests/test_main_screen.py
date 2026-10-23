@@ -9,10 +9,10 @@ import pytest
 from textual.app import App
 from textual.widgets import Input
 
-import snowcone.ui.app as app_module
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
-from snowcone.models import (
+import nivaria.ui.app as app_module
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import (
     ObjectRef,
     ObjectType,
     Scope,
@@ -22,13 +22,13 @@ from snowcone.models import (
     objects_scope,
     schemas_scope,
 )
-from snowcone.profiles import Profile, ProfileStore
-from snowcone.ui.messages import ScopeNeeded
-from snowcone.ui.screens.main import CacheUpdated, MainScreen
-from snowcone.ui.screens.multipicker import MultiPickerDialog
-from snowcone.ui.screens.picker import PickerDialog
-from snowcone.ui.views.schema_view import DatabaseView, SchemaView
-from snowcone.ui.widgets.object_tree import ObjectTree
+from nivaria.profiles import Profile, ProfileStore
+from nivaria.ui.messages import ScopeNeeded
+from nivaria.ui.screens.main import CacheUpdated, MainScreen
+from nivaria.ui.screens.multipicker import MultiPickerDialog
+from nivaria.ui.screens.picker import PickerDialog
+from nivaria.ui.views.schema_view import DatabaseView, SchemaView
+from nivaria.ui.widgets.object_tree import ObjectTree
 from tests.fakes import make_pool
 
 
@@ -687,7 +687,7 @@ async def test_switching_database_clears_the_detail_pane(repo) -> None:
 async def test_the_sweep_covers_the_detail_pane_too(repo) -> None:
     """The pane's columns scope is on screen, so it is exactly the sort of
     thing the sweep exists to keep fresh."""
-    from snowcone.settings import CACHE_TTL, config
+    from nivaria.settings import CACHE_TTL, config
 
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")
@@ -737,7 +737,7 @@ async def test_the_sweep_covers_the_detail_pane_too(repo) -> None:
 
 
 async def test_slash_opens_the_search_modal(repo) -> None:
-    from snowcone.ui.screens.search import SearchDialog
+    from nivaria.ui.screens.search import SearchDialog
 
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:

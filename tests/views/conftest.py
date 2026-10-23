@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from snowcone.cache.db import Database
-from snowcone.cache.repository import Repository
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
 
 
 @pytest.fixture

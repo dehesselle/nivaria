@@ -11,9 +11,9 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from snowcone.gateway import queries
-from snowcone.gateway.pool import ConnectionPool, ConnectParams
-from snowcone.models import ObjectType
+from nivaria.gateway import queries
+from nivaria.gateway.pool import ConnectionPool, ConnectParams
+from nivaria.models import ObjectType
 
 Row = dict[str, Any]
 

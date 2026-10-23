@@ -10,9 +10,9 @@ from __future__ import annotations
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable
 
-from snowcone.format import format_timestamp_full
-from snowcone.models import ObjectType, objects_scope
-from snowcone.ui.widgets.detail_pane import DetailPane
+from nivaria.format import format_timestamp_full
+from nivaria.models import ObjectType, objects_scope
+from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import Harness, put_pipe, put_pipe_activity
 
 
