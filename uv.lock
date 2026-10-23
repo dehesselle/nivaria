@@ -970,6 +970,7 @@ source = { editable = "." }
 dependencies = [
     { name = "platformdirs" },
     { name = "snowflake-connector-python", extra = ["secure-local-storage"] },
+    { name = "tcoda" },
     { name = "textual" },
 ]
 
@@ -977,7 +978,6 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "tcoda" },
     { name = "textual-dev" },
     { name = "wonderwords" },
 ]
@@ -986,6 +986,7 @@ dev = [
 requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "snowflake-connector-python", extras = ["secure-local-storage"], specifier = ">=4.7.3" },
+    { name = "tcoda", specifier = ">=0.8.0,<0.9" },
     { name = "textual", specifier = ">=8.2.8,<9" },
 ]
 
@@ -993,7 +994,6 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
-    { name = "tcoda", editable = "../tcoda" },
     { name = "textual-dev", specifier = ">=1.8.0" },
     { name = "wonderwords", specifier = ">=3.0.1" },
 ]
@@ -1343,22 +1343,15 @@ wheels = [
 
 [[package]]
 name = "tcoda"
-source = { editable = "../tcoda" }
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "platformdirs" },
     { name = "textual" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "platformdirs", specifier = ">=4.11.0" },
-    { name = "textual", specifier = ">=8.2.8,<9" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/6a/00/2131fbcd6610d339f59634bf6e6e921c9dc5da9079da0f8369f97d164fa3/tcoda-0.8.0.tar.gz", hash = "sha256:031f8fa82c082e4f6c7bcae7b7276c71f15095ce6686ace2f529489c1ca5b8cb", size = 118733, upload-time = "2026-10-23T19:35:32.566Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/e7/e649634f675396bc8c9c2e4f517fe9f4697bce21224e0b94519f85ad3b73/tcoda-0.8.0-py3-none-any.whl", hash = "sha256:93c42df5e5dbf7ae5638b35b80435c29a34f7d0b8b146ceca391f20d14653161", size = 80821, upload-time = "2026-10-23T19:35:31.116Z" },
 ]
 
 [[package]]

@@ -1791,23 +1791,13 @@ in **`tcoda`** ("Textual coda"), a sibling project shared with
 `snakecam` and `vc`. They were extracted because the same code had been
 copied into three apps and had already started to drift.
 
-It is consumed as an editable path dependency (`[tool.uv.sources]` in
-`pyproject.toml`), so an edit there is live here with no reinstall.
-
-> **`tcoda` must never appear in `[project.dependencies]`.** It is not published
-> anywhere, so a built nivaria wheel instead bundles a copy of its sources
-> directly (`hatch_build.py`, triggered as a custom build hook on both the
-> `sdist` and `wheel` targets — see the hook's own comments for how it locates
-> a source copy for each). `[tool.uv.sources]`'s path override only takes
-> effect inside this project's own `uv sync`/lock resolution; it does nothing
-> for a plain `pip install`/`uv pip install` of the built wheel elsewhere. If
-> `tcoda` were listed as a real dependency, any such install would resolve it
-> against PyPI instead — where it either fails to resolve or, should anyone
-> ever claim the name, silently shadows the bundled copy with the wrong
-> package. `tcoda` is
-> therefore listed only under `[dependency-groups] dev`, which `uv sync`
-> honors for the local venv but which never becomes part of a built
-> distribution's metadata.
+It is an ordinary runtime dependency, installed from PyPI and bounded to one
+minor series in `pyproject.toml`. There is deliberately no `[tool.uv.sources]`
+path entry pointing at the sibling checkout: the lock and the tests must run
+against the release a published nivaria wheel will actually pull in, not
+whatever `../tcoda` happens to contain. To try unreleased tcoda changes,
+`just local-tcoda <command>` overlays an editable `../tcoda` for that one
+command without touching `pyproject.toml` or `uv.lock`.
 
 Three things about it are worth knowing from inside nivaria:
 
@@ -1838,9 +1828,8 @@ Three things about it are worth knowing from inside nivaria:
 
 - **uv** manages the project and the virtualenv. Use `uv sync --all-groups` for
   dependencies and `uv add` to introduce one. The interpreter is the project
-  `.venv`. `tcoda` is an editable checkout of a sibling directory rather than a
-  released package, and is deliberately not a real dependency of the built
-  package -- see "Shared widgets".
+  `.venv`. `tcoda` comes from PyPI like everything else -- see "Shared
+  widgets" for testing against the sibling checkout.
 - **ruff** formats and lints, on **default settings with no configuration** —
   there is deliberately no `[tool.ruff]` section. Run `ruff format` and
   `ruff check` after changes and let the formatter decide. ruff is installed
