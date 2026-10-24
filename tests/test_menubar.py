@@ -105,7 +105,6 @@ async def test_the_connection_menu_offers_the_documented_entries(repo) -> None:
             "Databases ...",
             "Warehouse ...",
             "Role ...",
-            "Pre-warm cache",
         ]
 
 
@@ -136,7 +135,7 @@ async def test_the_nivaria_menu_separators_group_the_entries(repo) -> None:
 
 
 async def test_the_connection_menu_separators_group_the_entries(repo) -> None:
-    """One divider: connect, then the session/cache actions."""
+    """One divider: connect, then the session actions."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:
         await open_connection_menu(pilot)
@@ -146,7 +145,6 @@ async def test_the_connection_menu_separators_group_the_entries(repo) -> None:
             "database",
             "warehouse",
             "role",
-            "prewarm",
         ]
 
 
@@ -209,19 +207,6 @@ async def test_settings_opens_the_settings_dialog(repo) -> None:
         await pilot.press("s")
         await settle(pilot)
         assert isinstance(app.screen, SettingsDialog)
-
-
-async def test_prewarm_without_a_database_says_so_instead_of_priming(repo) -> None:
-    app = Harness(repo)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await open_connection_menu(pilot)
-        await pilot.press("p")
-        await settle(pilot)
-        assert isinstance(app.screen, MainScreen)
-        assert any(
-            "Select a database" in notification.message
-            for notification in app._notifications
-        )
 
 
 async def test_quit_exits_the_app(repo) -> None:

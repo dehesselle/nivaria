@@ -276,17 +276,6 @@ def test_the_task_history_function_argument_is_clamped_to_its_own_maximum() -> N
     assert statement.endswith("ORDER BY SCHEDULED_TIME DESC LIMIT 50000")
 
 
-def test_show_columns_in_a_database_or_schema_asks_for_no_page() -> None:
-    """SHOW COLUMNS ignores LIMIT outright -- a real IN DATABASE call returned
-    11511 rows against a LIMIT of 10000 -- so the builders take no paging
-    arguments at all rather than logging a bound Snowflake never applies."""
-    assert queries.show_columns_in_database("MYDB") == 'SHOW COLUMNS IN DATABASE "MYDB"'
-    assert (
-        queries.show_columns_in_schema("MYDB", "PUBLIC")
-        == 'SHOW COLUMNS IN SCHEMA "MYDB"."PUBLIC"'
-    )
-
-
 def test_show_grants_on_object_names_the_type_and_quotes_every_part() -> None:
     assert (
         queries.show_grants_on_object(ObjectType.TABLE, "MyDb", "PUBLIC", "Orders")

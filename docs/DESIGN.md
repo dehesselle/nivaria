@@ -557,9 +557,8 @@ no way to ask it for "this pipe's" history. Rather than parse the target out
 of the pipe's `COPY INTO` text, `Repository.pipe_target_table` reads it off
 whatever `PIPE_ACTIVITY` already has cached for that pipe — Snowflake's own
 resolution, already being fetched for the Pipes (n) list, not a guess. That
-is an opportunistic read of a sibling scope's cache, the same pattern
-`_fan_out_columns_by_schema` uses for `SCHEMAS`, not a dependency between
-scopes.
+is an opportunistic read of a sibling scope's cache, not a dependency
+between scopes.
 
 A pipe that has never loaded anything has no cached row to resolve a target
 from, and that is a normal, **permanent** state for plenty of real pipes, not
@@ -673,74 +672,6 @@ may not be complete — `SHOW` can return more than 10 000 rows (see
 [snowflake-behavior.md](snowflake-behavior.md#show-row-counts)) — and either
 way the answer is the same: fall back to a chunk small enough to trust whole.
 
-### Column cache priming
-
-A table's columns are fetched lazily by default — one `SHOW COLUMNS IN TABLE`
-per table, only when that table's detail view is opened (see "The Object
-tree" and the registry section below). That leaves most tables in a database
-with no cached columns at all, which is fine for the detail pane but means
-column names would be absent from search for anything nobody has personally
-opened — moot for the moment, since column search itself is disabled (see
-"Accepted design gaps"); this priming mechanism stays useful for the detail
-pane and is ready to serve search again once that is re-enabled.
-
-**Pre-warm cache** (Connection menu) fixes that on demand — there is no
-automatic trigger, since there was no good signal found for "the user wants
-this now" short of asking. Selecting it fires three background requests at
-once for whatever database the cursor is currently under (multiple databases
-can be selected, so this acts on the focused one, the same convention
-`action_refresh`/F5 uses): the table and view object lists (via the
-existing `DATABASE_PRIME` mechanism above) and a `COLUMNS_PRIME` scope. The
-first two exist so the third has schema and table names to fall back to, not
-as an afterthought — see below.
-
-`COLUMNS_PRIME` mirrors `DATABASE_PRIME` one level deeper, in three tiers:
-
-1. **Whole database, one round trip**: `SHOW COLUMNS IN DATABASE`, judged
-   against the same `PRIME_CHUNK_THRESHOLD` as `DATABASE_PRIME`.
-2. **Over the threshold → one round trip per schema**: `SHOW COLUMNS IN
-   SCHEMA`. This is the common case in practice, since columns multiply table
-   count — a database that fit under the threshold for `DATABASE_PRIME` can
-   easily blow it here.
-3. **A single schema still over it → one round trip per table**: the
-   already-existing lazy per-table fetch, just requested proactively instead
-   of on open.
-
-Unlike the object prime, a usable result needs no pre-seeding of empty
-scopes: a real table always has at least one column, so there is no
-"zero rows but still fetched" case to guard against the way an empty schema
-needs one.
-
-One cold-start edge case is handled directly rather than assumed away:
-priming may be the first request ever made against a database nobody has
-browsed this session, so the schema list the per-schema fallback needs to
-iterate can still be empty. Rather than requiring the `SCHEMAS` scope to have
-finished first — which would be the one dependency this architecture
-otherwise has none of (see "Scopes: the unit of everything") — that fallback
-asks Snowflake for the schema names directly when the cache has none, and
-separately requests the `SCHEMAS` scope so the tree benefits too. The deeper
-per-schema-still-too-big fallback is left depending on cache being warm by
-then, an accepted gap: it only matters for one schema large enough to
-overflow the cap by itself, and the menu action's own object-list priming is
-already running concurrently by the time it could matter.
-
-`SHOW COLUMNS` ignores `LIMIT`/`FROM` at every scope (see
-[snowflake-behavior.md](snowflake-behavior.md#keyset-paging)), and that costs
-the tiering nothing. Each tier issues exactly one call and reads
-`usable = len(rows) < threshold`, never a `FROM`-based continuation, so a tier
-that comes back at or over the threshold simply falls through to the next one:
-the tiers *are* the chunking mechanism here. The builders accept no
-`after`/`limit` at all, so paging cannot quietly be reintroduced.
-
-Priming always runs at **background** priority, the same tier as the
-staleness sweep: it can run for a while with nobody watching, so it must
-never jump ahead of interactive/visible work already queued, and it must
-never trigger an unattended reconnect (`allow_reconnect=False`, same rule as
-the sweep — see "The connection pool"). It draws on the same worker pool as
-ordinary browsing rather than a dedicated connection, so it competes for
-whatever is idle but can never grow the pool or lock out real interactive
-work.
-
 ### Verified and unverified paging
 
 `LIMIT n FROM 'name'` keyset paging is verified correct for databases, schemas,
@@ -751,8 +682,8 @@ unverified. The observations are in
 
 `ObjectType.pageable` is where that finding lives in the code, and the
 statement builders consult it: `show_objects`/`show_objects_in_database` emit
-no paging tail at all for an unpageable type, and `show_columns_in_database`/
-`show_columns_in_schema` take no `after`/`limit` arguments. A clause
+no paging tail at all for an unpageable type, and `show_columns` takes no
+`after`/`limit` arguments. A clause
 Snowflake ignores is worse than no clause, because the SQL log then shows a
 bound that was never applied.
 
@@ -1579,8 +1510,8 @@ Below `MIN_COLUMN_QUERY_LENGTH` characters (a plain module constant in
 `search.py`, not a Setting — a tuning knob for one machine's cache size, not
 a per-user preference), ranking skips the column corpus entirely; object and
 schema names are still matched at any length. A short, generic fragment
-scores against every cached column for little relevance benefit and, at a
-heavily pre-warmed scale, real per-keystroke latency. Even so, this only skips
+scores against every cached column for little relevance benefit and, with
+a large column cache, real per-keystroke latency. Even so, this only skips
 queries shorter than the constant — a longer fragment still costs whatever
 ranking the full column corpus costs; the constant does not bound that.
 
@@ -1845,10 +1776,8 @@ Detail pane's own `fr` absorbs whatever is left.
 - Column search is implemented end to end at the repository layer
   (`Repository.search_column_corpus`) but its one call site in
   `SearchDialog.on_mount` is commented out — cross-database column search was
-  judged not ready. Re-enabling it is restoring one call, not writing code.
-- There is no automatic trigger for column cache priming — no good signal was
-  found for "the user wants this now" short of asking, so it is a manual menu
-  action.
+  judged not ready. Restoring that call alone would find only the columns of
+  tables someone has opened: nothing fills a database's columns in bulk.
 - `SHOW TASKS` is unverified for `LIMIT`/`FROM`. It is no hang risk either way
   — if it ignores both clauses, the cursor-progress guard completes the pass
   after a single repeat instead of looping — but verifying it would let

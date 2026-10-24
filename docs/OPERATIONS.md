@@ -61,8 +61,8 @@ days, since it only changes as data ages out of the 14-day
 `INFORMATION_SCHEMA` window; the Pipes list's activity columns use the same
 interval.
 
-**Pre-warm cache** and the background refresh share the connection pool with
-browsing at the lowest priority, so they never delay what you are doing.
+The background refresh shares the connection pool with browsing at the
+lowest priority, so it never delays what you are doing.
 
 Fetches are deduplicated and the newest request wins: a burst of expands or a
 fast scroll does not queue the same work twice. Switching database drops
@@ -106,7 +106,7 @@ before is still filled. A warehouse switch leaves the cache alone.
 | Rows in a data preview | data preview rows | 100 | The Data tab shows that many rows, in no particular order, and says so. |
 | Data preview runtime | data preview timeout | 15 s | Snowflake cancels the query; the Data tab shows the error and retries on the next background refresh while open. |
 | Pages per refresh | max pages per refresh | 50 | The refresh fails with an error rather than running on. |
-| Whole-database result size | prime chunk threshold | 10 000 | The fetch is redone per schema, then per table. |
+| Whole-database result size | prime chunk threshold | 10 000 | The fetch is redone per schema. |
 
 The defaults are starting points; raise or lower them in Settings if your
 account needs it. See [DESIGN.md](DESIGN.md#bounding-a-result) for why each

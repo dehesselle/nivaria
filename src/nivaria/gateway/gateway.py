@@ -130,14 +130,6 @@ class SnowflakeGateway(Protocol):
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
-    def show_columns_in_database(
-        self, database: str, *, allow_reconnect: bool = True
-    ) -> list[Row]: ...
-
-    def show_columns_in_schema(
-        self, database: str, schema: str, *, allow_reconnect: bool = True
-    ) -> list[Row]: ...
-
     def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]: ...
 
     def show_roles(self, *, allow_reconnect: bool = True) -> list[Row]: ...
@@ -448,24 +440,6 @@ class PoolGateway:
         )
         # Mapped here rather than in the cache, so the mirror only ever sees
         # the INFORMATION_SCHEMA shape no matter which statement produced it.
-        return queries.map_show_columns(rows)
-
-    def show_columns_in_database(
-        self, database: str, *, allow_reconnect: bool = True
-    ) -> list[Row]:
-        rows = self._fetch(
-            queries.show_columns_in_database(database),
-            allow_reconnect=allow_reconnect,
-        )
-        return queries.map_show_columns(rows)
-
-    def show_columns_in_schema(
-        self, database: str, schema: str, *, allow_reconnect: bool = True
-    ) -> list[Row]:
-        rows = self._fetch(
-            queries.show_columns_in_schema(database, schema),
-            allow_reconnect=allow_reconnect,
-        )
         return queries.map_show_columns(rows)
 
     def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]:

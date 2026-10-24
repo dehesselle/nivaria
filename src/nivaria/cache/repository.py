@@ -493,9 +493,6 @@ def spec_for(scope: Scope) -> TableSpec:
             # A prime is a fetch strategy, not a set of rows: it fills other
             # scopes' tables and owns none of its own.
             raise ValueError(f"{scope.type} has no mirror table")
-        case ScopeType.COLUMNS_PRIME:
-            # Same as DATABASE_PRIME: fills other tables' COLUMNS scopes.
-            raise ValueError(f"{scope.type} has no mirror table")
 
 
 @dataclass(frozen=True)

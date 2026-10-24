@@ -398,11 +398,6 @@ def fetch_page(
             raise ValueError(
                 "a prime scope is fetched by fetch_database, not fetch_page"
             )
-        case ScopeType.COLUMNS_PRIME:
-            raise ValueError(
-                "a columns-prime scope is fetched by fetch_columns_database/"
-                "fetch_columns_schema, not fetch_page"
-            )
 
     if len(rows) < limit or not rows:
         return Page(rows)
@@ -494,47 +489,5 @@ def fetch_database(
         after=None,
         limit=cap,
         allow_reconnect=allow_reconnect,
-    )
-    return rows, len(rows) < cap
-
-
-def fetch_columns_database(
-    gateway: SnowflakeGateway,
-    scope: Scope,
-    *,
-    allow_reconnect: bool = True,
-) -> tuple[list[dict[str, Any]], bool]:
-    """Every column of every table/view in a database. Returns (rows, usable).
-
-    Same shape and same chunk-threshold reasoning as `fetch_database`, and
-    this is the call that shows why that reasoning had to change: SHOW
-    COLUMNS ignores LIMIT outright, so its response size is whatever the
-    database holds. The threshold is a size decision here, nothing more.
-    """
-    assert scope.database is not None
-    cap = config.get(PRIME_CHUNK_THRESHOLD)
-    rows = gateway.show_columns_in_database(
-        scope.database, allow_reconnect=allow_reconnect
-    )
-    return rows, len(rows) < cap
-
-
-def fetch_columns_schema(
-    gateway: SnowflakeGateway,
-    scope: Scope,
-    *,
-    allow_reconnect: bool = True,
-) -> tuple[list[dict[str, Any]], bool]:
-    """Every column of every table/view in one schema. Returns (rows, usable).
-
-    The smaller chunk when `fetch_columns_database` came back over the
-    threshold -- see there. `usable=False` here falls back further still,
-    to one job per table.
-    """
-    assert scope.database is not None
-    assert scope.schema is not None
-    cap = config.get(PRIME_CHUNK_THRESHOLD)
-    rows = gateway.show_columns_in_schema(
-        scope.database, scope.schema, allow_reconnect=allow_reconnect
     )
     return rows, len(rows) < cap

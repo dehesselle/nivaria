@@ -7,7 +7,6 @@ from nivaria.models import (
     ObjectType,
     Scope,
     ScopeType,
-    columns_prime_scope,
     columns_scope,
     containing_scopes,
     data_preview_scope,
@@ -212,12 +211,10 @@ def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
         (schemas_scope("MYDB"), [databases_scope()]),
         (grants_scope("MYDB"), [databases_scope()]),
         (prime_scope(ObjectType.TABLE, "MYDB"), [databases_scope()]),
-        (columns_prime_scope("MYDB"), [databases_scope()]),
         (grants_scope("MYDB", "S"), [schemas_scope("MYDB")]),
         (tag_references_scope("MYDB", "S"), [schemas_scope("MYDB")]),
         (objects_scope(ObjectType.PIPE, "MYDB", "S"), [schemas_scope("MYDB")]),
         (table_stats_scope("MYDB", "S"), [schemas_scope("MYDB")]),
-        (columns_prime_scope("MYDB", "S"), [schemas_scope("MYDB")]),
         (
             columns_scope("MYDB", "S", "T"),
             [

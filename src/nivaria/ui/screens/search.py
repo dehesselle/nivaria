@@ -36,7 +36,7 @@ path alone waits for every (live) load first.
 
 Ranking itself also skips the column corpus below `MIN_COLUMN_QUERY_LENGTH`
 characters: a short, generic fragment scores against every cached column for
-little relevance benefit and, at a heavily pre-warmed scale (270k columns
+little relevance benefit and, with a large column cache (270k columns
 measured), real per-keystroke latency -- see that constant for the number.
 """
 
@@ -80,8 +80,8 @@ MAX_RESULTS = 200
 
 #: Below this many characters, ranking skips the column corpus entirely --
 #: object names are still matched at any length. A short, generic fragment
-#: scores against every cached column for little relevance benefit and, on a
-#: heavily pre-warmed database, real latency: measured at 270k cached columns,
+#: scores against every cached column for little relevance benefit and, with
+#: a large column cache, real latency: measured at 270k cached columns,
 #: a 4-character query ("col1") alone cost ~450ms of ranking. A plain module
 #: constant rather than a Setting on purpose -- this is a tuning knob for a
 #: specific machine's cache size, not a per-user preference worth a UI entry.

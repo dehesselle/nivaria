@@ -396,35 +396,6 @@ class FakeGateway:
             for name in self.columns.get((database, schema, table), [])
         ]
 
-    def show_columns_in_database(
-        self, database: str, *, allow_reconnect: bool = True
-    ) -> list[Row]:
-        """Every column of every table in `database`, raw-shaped like the fake
-        `show_columns` above, so `map_show_columns` is exercised for real.
-
-        Returns everything, with nothing to page or cap by, because that is
-        what the real statement does -- SHOW COLUMNS ignores LIMIT outright.
-        The caller chunks on the response's size instead.
-        """
-        self.calls.append(("show_columns_in_database", (database,)))
-        raw: list[dict[str, Any]] = []
-        for db, schema, table in sorted(self.columns):
-            if db != database:
-                continue
-            raw.extend(self._raw_columns(db, schema, table))
-        return queries.map_show_columns(raw)
-
-    def show_columns_in_schema(
-        self, database: str, schema: str, *, allow_reconnect: bool = True
-    ) -> list[Row]:
-        self.calls.append(("show_columns_in_schema", (database, schema)))
-        raw: list[dict[str, Any]] = []
-        for db, sch, table in sorted(self.columns):
-            if db != database or sch != schema:
-                continue
-            raw.extend(self._raw_columns(db, sch, table))
-        return queries.map_show_columns(raw)
-
     def show_warehouses(self, *, allow_reconnect: bool = True) -> list[Row]:
         self.calls.append(("show_warehouses", ()))
         return [{"name": name, "comment": ""} for name in sorted(self.warehouses)]

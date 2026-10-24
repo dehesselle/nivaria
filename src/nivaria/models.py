@@ -62,10 +62,6 @@ class ScopeType(StrEnum):
     #: scope in one database from a single statement. It exists as a scope so
     #: the scheduler can deduplicate and cancel it like any other work.
     DATABASE_PRIME = "prime"
-    #: Not a set of rows of its own, same as DATABASE_PRIME: a request to fill
-    #: many tables' COLUMNS scopes from one statement, either for a whole
-    #: database (schema is None) or for one schema's fallback chunk.
-    COLUMNS_PRIME = "columns_prime"
     #: A schema's tables' LAST_DDL/LAST_ALTERED, sourced by a real SELECT
     #: against INFORMATION_SCHEMA.TABLES rather than SHOW -- the first
     #: deliberate exception to SHOW-only (see docs/DESIGN.md). Scoped to
@@ -219,10 +215,6 @@ class Scope:
             case ScopeType.DATABASE_PRIME:
                 assert self.object_type is not None
                 return f"{self.object_type.plural}@{self.database}"
-            case ScopeType.COLUMNS_PRIME:
-                if self.schema is None:
-                    return f"columns_prime:{self.database}"
-                return f"columns_prime:{self.database}.{self.schema}"
             case ScopeType.TABLE_STATS:
                 return f"table_stats:{self.database}.{self.schema}"
             case ScopeType.VIEW_STATS:
@@ -312,10 +304,6 @@ def filling_prime(scope: Scope) -> Scope | None:
     return prime_scope(scope.object_type, scope.database)
 
 
-def columns_prime_scope(database: str, schema: str | None = None) -> Scope:
-    return Scope(ScopeType.COLUMNS_PRIME, database=database, schema=schema)
-
-
 def table_stats_scope(database: str, schema: str) -> Scope:
     return Scope(ScopeType.TABLE_STATS, database=database, schema=schema)
 
@@ -366,7 +354,7 @@ def task_history_scope(database: str, schema: str, task: str) -> Scope:
 
 def grants_scope(database: str, schema: str | None = None) -> Scope:
     # schema=None means a database-level grants scope, schema set means
-    # schema-level -- the same optional-schema convention COLUMNS_PRIME uses.
+    # schema-level.
     return Scope(ScopeType.GRANTS, database=database, schema=schema)
 
 
@@ -425,9 +413,7 @@ def containing_scopes(scope: Scope) -> list[Scope]:
             assert scope.schema is not None
             assert scope.object_type is not None
             return [objects_scope(scope.object_type, scope.database, scope.schema)]
-        case ScopeType.GRANTS | ScopeType.TAG_REFERENCES | ScopeType.COLUMNS_PRIME if (
-            scope.schema is None
-        ):
+        case ScopeType.GRANTS | ScopeType.TAG_REFERENCES if scope.schema is None:
             return [databases_scope()]
         case (
             ScopeType.OBJECTS
@@ -438,7 +424,6 @@ def containing_scopes(scope: Scope) -> list[Scope]:
             | ScopeType.TASK_ACTIVITY
             | ScopeType.GRANTS
             | ScopeType.TAG_REFERENCES
-            | ScopeType.COLUMNS_PRIME
         ):
             assert scope.database is not None
             return [schemas_scope(scope.database)]

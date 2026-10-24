@@ -197,7 +197,7 @@ PRIME_CHUNK_THRESHOLD = Setting(
     label="prime chunk threshold",
     description=(
         "How large a whole-database prime result has to be before it is "
-        "refetched in smaller chunks (per schema, then per table) instead of "
+        "refetched per schema instead of "
         "being used as-is. Raising it keeps big databases on the cheaper "
         "single round trip; lowering it chunks sooner."
     ),

@@ -171,33 +171,6 @@ def show_columns(database: str, schema: str, table: str) -> str:
     return f"SHOW COLUMNS IN TABLE {target}"
 
 
-def show_columns_in_database(database: str) -> str:
-    """Every column of every table/view in a database, in one statement.
-
-    Mirrors `show_objects_in_database`'s rationale: SHOW is metadata-layer, so
-    this needs no warehouse either. Verified live against a 614-table/
-    11511-column database (see docs/DESIGN.md, "Column cache priming").
-
-    Deliberately takes no `after`/`limit`: both are a confirmed no-op for this
-    statement, and it used to accept them anyway, which put a `LIMIT 10000`
-    into the SQL log for a call that returned 11511 rows. There is no partial
-    result to ask for here -- one call is the whole database's columns, or
-    nothing. `jobs.fetch_columns_database` decides on the row count alone
-    whether that response was too big to be worth using as-is.
-    """
-    return f"SHOW COLUMNS IN DATABASE {quote_identifier(database)}"
-
-
-def show_columns_in_schema(database: str, schema: str) -> str:
-    """Every column of every table/view in one schema, in one statement.
-
-    The smaller chunk when `show_columns_in_database` came back too big -- see
-    there, including why this one takes no `after`/`limit` either.
-    """
-    target = f"{quote_identifier(database)}.{quote_identifier(schema)}"
-    return f"SHOW COLUMNS IN SCHEMA {target}"
-
-
 def table_stats(database: str) -> str:
     """LAST_DDL/LAST_ALTERED for every base table in a schema.
 

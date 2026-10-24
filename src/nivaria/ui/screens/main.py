@@ -33,12 +33,10 @@ from nivaria.cache.repository import Repository
 from nivaria.gateway.pool import ConnectionPool
 from nivaria.models import (
     ObjectRef,
-    ObjectType,
     SchemaRef,
     Scope,
     ScopeType,
     Warehouse,
-    columns_prime_scope,
     databases_scope,
     filling_prime,
     prime_scope,
@@ -142,7 +140,6 @@ class MainScreen(Screen):
                     "Warehouse ...", id="warehouse", mnemonic="w", shortcut="ctrl+W"
                 )
                 yield MenuItem("Role ...", id="role", mnemonic="r", shortcut="ctrl+R")
-                yield MenuItem("Pre-warm cache", id="prewarm", mnemonic="p")
         yield LogViewer(show_key=False)
         tree = ObjectTree(self.repo, id="tree")
         tree.border_title = "Databases"
@@ -324,10 +321,6 @@ class MainScreen(Screen):
     @on(MenuItem.Pressed, "#role")
     def _menu_role(self) -> None:
         self._pick_role()
-
-    @on(MenuItem.Pressed, "#prewarm")
-    def _menu_prewarm(self) -> None:
-        self.prewarm_cache()
 
     # --------------------------------------------------------------- routing
 
@@ -561,33 +554,6 @@ class MainScreen(Screen):
         )
         if chosen is not None and chosen != current:
             self._switch_role(chosen)
-
-    def prewarm_cache(self) -> None:
-        """Warm columns for whatever database the cursor is under, from the
-        Connection menu.
-
-        Multiple databases can be selected now, so this acts on the one the
-        cursor is currently within -- the same "whatever's under cursor"
-        convention `action_refresh` already uses -- rather than requiring
-        exactly one database ever be selected.
-
-        Fires the table/view object primes alongside the columns prime,
-        rather than the columns prime alone: the columns-prime fallback tiers
-        need schema and table/view names to fan out into, and there is no
-        automatic trigger for this yet, so a database nobody has browsed this
-        session may have none of that cached. Background priority throughout,
-        the same tier as the staleness sweep: this can run for a while with
-        nobody watching, so it must never jump ahead of interactive/visible
-        work or trigger an unattended reconnect.
-        """
-        database = self.focused_scope().database
-        if self.pool is None or database is None:
-            self.notify("Select a database first", severity="warning")
-            return
-        self._request(prime_scope(ObjectType.TABLE, database), Priority.BACKGROUND)
-        self._request(prime_scope(ObjectType.VIEW, database), Priority.BACKGROUND)
-        self._request(columns_prime_scope(database), Priority.BACKGROUND)
-        self.notify(f"Pre-warming cache for {database}...", timeout=3)
 
     @work(thread=True)
     def _switch_warehouse(self, warehouse: str) -> None:

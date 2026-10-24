@@ -111,7 +111,7 @@ across sessions.
 **Nivaria** (`n`): **About ...** (`a`), **Settings ...** (`s`), **Quit** (`q`).
 
 **Connection** (`c`): **Open...** (`o`), **Databases ...** (`d`),
-**Warehouse ...** (`w`), **Role ...** (`r`), **Pre-warm cache** (`p`).
+**Warehouse ...** (`w`), **Role ...** (`r`).
 
 A letter in parentheses selects the entry while its menu is open.
 
@@ -133,9 +133,6 @@ cursor to it.
 changes what Snowflake lets you see, so nivaria switches to that role's own
 cache; switching back later finds it still filled. See
 [OPERATIONS.md](OPERATIONS.md#switching-role-or-warehouse).
-
-**Pre-warm cache** fetches the column lists of every table in the database the
-cursor is under, in the background, so later visits need no fetch.
 
 ## Search
 
@@ -225,7 +222,7 @@ role switch.
 | data preview timeout (seconds) | 15 | How long a Data tab query may run before it is cancelled. `0` means no limit. |
 | max pages per refresh | 50 | Pages one refresh may fetch before it gives up with an error. |
 | result row ceiling | 200000 | Most rows read from any single statement before it is abandoned with an error. `0` disables it. |
-| prime chunk threshold | 10000 | Result size above which a whole-database fetch is redone per schema, then per table. |
+| prime chunk threshold | 10000 | Result size above which a whole-database fetch is redone per schema. |
 
 Settings live in `settings.json` (see
 [OPERATIONS.md](OPERATIONS.md#files-on-disk)); only values that differ from
