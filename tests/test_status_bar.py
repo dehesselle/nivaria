@@ -20,7 +20,7 @@ from nivaria.ui.screens.main import MainScreen
 from nivaria.ui.widgets.object_tree import ObjectTree
 from nivaria.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
 from tests.fakes import make_pool
-from tests.test_main_screen import RecordingFetch, put_schemas
+from tests.test_main_screen import RecordingFetch, put_schemas, put_tables, settle
 
 
 @pytest.fixture
@@ -604,6 +604,44 @@ async def test_the_sweep_requests_at_background_priority(repo) -> None:
             app.screen._sweep()
             await pilot.pause()
         assert dict(fetch.requests)["schemas:MYDB"] == int(Priority.BACKGROUND)
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_the_sweep_refreshes_a_schema_listing_through_the_database_prime(
+    repo,
+) -> None:
+    """Expanded schemas were filled by one prime and go stale together;
+    requesting each on its own would cost a round trip per schema and
+    category."""
+    put_schemas(repo, "MYDB", "AAA", "BBB")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    put_tables(repo, "MYDB", "BBB", "ITEMS")
+    config.set(CACHE_TTL, 60)
+    try:
+        fetch = RecordingFetch()
+        app = Harness(repo, fetch)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            screen.set_databases(["MYDB"])
+            await pilot.pause()
+            tree = screen.query_one(ObjectTree)
+            database = tree.root.children[0]
+            database.expand()
+            await pilot.pause()
+            for schema in database.children:
+                schema.expand()
+            await settle(pilot)
+            fetch.requests.clear()
+            fetch.busy.clear()
+            age_by(repo, objects_scope(ObjectType.TABLE, "MYDB", "AAA"), 120)
+            age_by(repo, objects_scope(ObjectType.TABLE, "MYDB", "BBB"), 120)
+            screen._sweep()
+            await pilot.pause()
+        assert "tables@MYDB" in fetch.scopes
+        assert "tables:MYDB.AAA" not in fetch.scopes
+        assert "tables:MYDB.BBB" not in fetch.scopes
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
 

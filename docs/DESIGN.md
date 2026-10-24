@@ -1086,7 +1086,8 @@ The countdown is therefore computed, not run as a timer. On every tick,
 `Repository.next_due` works out from the ledger how long until the first
 watched scope goes stale, and the countdown shows that. When it reaches zero,
 `MainScreen._sweep` requests every watched scope that is stale, at background
-priority. Those are then busy and drop out, so the countdown moves on to
+priority. A stale schema listing is requested as its database prime, like any
+other request for one (see "Database priming"). Those are then busy and drop out, so the countdown moves on to
 whichever scope is due next: it jumps up after a sweep, and down when a view
 shows a scope that is close to its TTL. Navigation and `F5` affect it only
 through the ledger. A fixed timer restarted at `CACHE_TTL` cannot keep the

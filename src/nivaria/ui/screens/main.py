@@ -86,6 +86,25 @@ TICK = 0.3
 ABOUT_PATH = files("nivaria.ui").joinpath("about.txt")
 
 
+def _requestable(scope: Scope) -> Scope:
+    """What to actually ask the fetch service for when `scope` is needed.
+
+    A whole schema's objects are cheaper to fetch for the entire database at
+    once -- one statement instead of a round trip per schema -- so an objects
+    request is upgraded to a database-wide prime.
+
+    The upgrade tests the scope's own type, not whether it happens to carry
+    both an object type and a database. Several SELECT-backed scopes could
+    plausibly share that shape; only OBJECTS actually means "a SHOW listing
+    for one schema", which is the only thing a SHOW prime can stand in for.
+    """
+    if scope.type is not ScopeType.OBJECTS:
+        return scope
+    assert scope.object_type is not None
+    assert scope.database is not None
+    return prime_scope(scope.object_type, scope.database)
+
+
 class MainScreen(Screen):
     # No F9 here: `MenuBar` installs its own binding on whichever screen it
     # is mounted on, so the key and its footer entry come with the widget.
@@ -268,8 +287,12 @@ class MainScreen(Screen):
         ttl = config.get(CACHE_TTL)
         if ttl <= 0:
             return
+        # The expanded schemas were filled by one prime and go stale
+        # together, so requesting each as itself would be a round trip per
+        # schema and category. Several of them naming the same prime queue it
+        # once: FetchService.request deduplicates.
         for scope in self.repo.stale_scopes(ttl, self._idle_watched()):
-            self._request(scope, Priority.BACKGROUND)
+            self._request(_requestable(scope), Priority.BACKGROUND)
 
     @property
     def tree(self) -> ObjectTree:
@@ -369,26 +392,9 @@ class MainScreen(Screen):
         self.detail.show(ref)
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
-        """The tree found something missing or stale.
-
-        A whole schema's objects are cheaper to fetch for the entire database
-        at once -- one statement instead of a round trip per schema -- so an
-        objects request is upgraded to a database-wide prime.
-
-        The upgrade tests the scope's own type, not whether it happens to
-        carry both an object type and a database. Several SELECT-backed
-        scopes could plausibly share that shape; only OBJECTS actually means
-        "a SHOW listing for one schema", which is the only thing a SHOW
-        prime can stand in for.
-        """
-        scope = event.scope
+        """The tree found something missing or stale."""
         priority = Priority.INTERACTIVE if event.interactive else Priority.VISIBLE
-        if scope.type is ScopeType.OBJECTS:
-            assert scope.object_type is not None
-            assert scope.database is not None
-            self._request(prime_scope(scope.object_type, scope.database), priority)
-            return
-        self._request(scope, priority)
+        self._request(_requestable(event.scope), priority)
 
     def _request(self, scope: Scope, priority: Priority) -> None:
         if self.fetch is not None:
