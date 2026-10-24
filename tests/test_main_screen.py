@@ -42,6 +42,10 @@ class RecordingFetch:
 
     def request(self, scope, priority) -> bool:
         self.requests.append((scope.key, int(priority)))
+        # Queued work stays busy until a test lands it, as a real queue's
+        # does: the countdown leaves busy scopes out, and a request that
+        # never counted as busy would read as overdue on every tick.
+        self.busy.add(scope.key)
         return True
 
     def cancel_where(self, predicate) -> list:
@@ -863,7 +867,7 @@ async def test_a_search_jump_above_the_highlighted_object_settles_on_the_hit(
     that table's line, and Textual re-highlights a node whose line shifted.
     When a highlight also revealed, that re-highlight queued a cursor move
     of its own, and the two moves chased each other forever: the tree
-    scrolled by itself and the countdown never got past a restart."""
+    scrolled by itself and the detail pane kept being re-pointed."""
     put_schemas(repo, "MYDB", "AAA", "ZZZ")
     put_tables(repo, "MYDB", "AAA", *[f"A{i:02d}" for i in range(20)])
     put_tables(repo, "MYDB", "ZZZ", *[f"Z{i:02d}" for i in range(20)])
@@ -878,13 +882,20 @@ async def test_a_search_jump_above_the_highlighted_object_settles_on_the_hit(
 
         screen._select(ObjectRef(ObjectType.TABLE, "MYDB", "AAA", "A05"))
         await settle(pilot)
-        restarted_at = screen._last_sweep_at
+        shown: list[ObjectRef] = []
+        show = screen.detail.show
+
+        def recording_show(ref: ObjectRef):
+            shown.append(ref)
+            return show(ref)
+
+        screen.detail.show = recording_show
         await settle(pilot)
 
         tree = screen.query_one(ObjectTree)
         assert tree.cursor_node.data.key == "A05"
         assert screen.detail.ref.name == "A05"
-        assert screen._last_sweep_at == restarted_at
+        assert shown == []
 
 
 async def test_enter_on_a_list_row_moves_the_tree_cursor_to_that_object(

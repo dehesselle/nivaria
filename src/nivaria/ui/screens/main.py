@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from importlib.resources import files
 from math import ceil
-from time import monotonic
 from typing import ClassVar
 
 from tcoda.widgets import (
@@ -41,6 +40,7 @@ from nivaria.models import (
     Warehouse,
     columns_prime_scope,
     databases_scope,
+    filling_prime,
     prime_scope,
     roles_scope,
     warehouses_scope,
@@ -113,12 +113,6 @@ class MainScreen(Screen):
         self.pool = pool
         self.profiles = profiles or ProfileStore()
         self.databases: list[str] = []
-        #: Wall-clock time the staleness sweep last ran (or was deferred to,
-        #: by a navigation that just showed something new -- see
-        #: `_restart_countdown`). CACHE_TTL is both the sweep's interval and
-        #: the footer countdown's length: there is deliberately no second,
-        #: independent poll interval.
-        self._last_sweep_at = monotonic()
 
     def compose(self) -> ComposeResult:
         # The nesting is the DOM structure, not style: a Menu is a child of
@@ -226,9 +220,7 @@ class MainScreen(Screen):
         ]
         # The countdown runs its own spinner off this, so there is no frame
         # counter to drive from here any more.
-        countdown.refreshing = self.fetch is not None and any(
-            self.fetch.is_busy(scope) for scope in watched
-        )
+        countdown.refreshing = any(self._busy(scope) for scope in watched)
 
         # Read at the point of use, so changing it in settings takes effect
         # without a restart.
@@ -240,25 +232,37 @@ class MainScreen(Screen):
         if ttl <= 0:
             return
 
-        elapsed = monotonic() - self._last_sweep_at
-        if elapsed >= ttl:
+        # Derived from the ledger on every tick rather than run as a timer:
+        # a timer restarted at the full TTL ran out just before a refresh it
+        # had itself triggered went stale, so that data waited a second TTL.
+        due = self.repo.next_due(ttl, self._idle_watched())
+        if due is not None and due <= 0:
             self._sweep()
-            self._last_sweep_at = monotonic()
-            elapsed = 0.0
-        countdown.remaining = max(0, ceil(ttl - elapsed))
+            due = self.repo.next_due(ttl, self._idle_watched())
+        countdown.remaining = ttl if due is None else max(0, ceil(due))
 
-    def _restart_countdown(self) -> None:
-        """Treat "just showed the user something new" like a sweep already
-        happened.
+    def _busy(self, scope: Scope) -> bool:
+        """Queued or mid-fetch, itself or through the prime that fills it."""
+        if self.fetch is None:
+            return False
+        prime = filling_prime(scope)
+        return self.fetch.is_busy(scope) or (
+            prime is not None and self.fetch.is_busy(prime)
+        )
 
-        Whatever view just got shown already asked interactively for
-        anything of its own that was stale (`_ScopedView.ensure`, called from
-        `update_content`), so there is nothing left for the countdown to warn
-        about until a fresh CACHE_TTL window elapses -- restarting it here is
-        what stops the footer implying a longer wait than what is actually
-        left.
+    def _idle_watched(self) -> list[Scope]:
+        """The scopes on screen that nothing is fetching yet.
+
+        What the sweep refreshes and the countdown promises about. A busy
+        scope's old fetched_at reads as overdue until its pass lands, which
+        the spinner covers; and requesting one a prime is filling would be
+        the per-schema round trip the prime exists to replace.
         """
-        self._last_sweep_at = monotonic()
+        return [
+            scope
+            for scope in [*self.tree.visible_scopes(), *self.detail.scopes()]
+            if not self._busy(scope)
+        ]
 
     def _sweep(self) -> None:
         """Refresh what is on screen and has gone stale, nothing else."""
@@ -267,8 +271,7 @@ class MainScreen(Screen):
         ttl = config.get(CACHE_TTL)
         if ttl <= 0:
             return
-        watched = [*self.tree.visible_scopes(), *self.detail.scopes()]
-        for scope in self.repo.stale_scopes(ttl, watched):
+        for scope in self.repo.stale_scopes(ttl, self._idle_watched()):
             self._request(scope, Priority.BACKGROUND)
 
     @property
@@ -342,7 +345,6 @@ class MainScreen(Screen):
         # that moves the cursor can answer another one forever -- see
         # docs/DESIGN.md "A highlight is not a jump".
         self.detail.show(event.ref)
-        self._restart_countdown()
 
     def on_object_opened(self, event: ObjectOpened) -> None:
         self._select(event.ref)
@@ -355,17 +357,14 @@ class MainScreen(Screen):
         # _select_category: the cursor is already on the schema node that
         # was just highlighted.
         self.detail.show_schema(event.ref)
-        self._restart_countdown()
 
     def on_database_selected(self, event: DatabaseSelected) -> None:
         self.detail.show_database(event.database)
-        self._restart_countdown()
 
     def _select_category(self, scope: Scope) -> None:
         # No tree.reveal(...) needed here, unlike _select: the cursor is
         # already on the category node that was just highlighted.
         self.detail.show_category(scope)
-        self._restart_countdown()
 
     def _select(self, ref: ObjectRef) -> None:
         # A search hit or an Enter in a list view leaves the tree somewhere
@@ -375,7 +374,6 @@ class MainScreen(Screen):
         # come here.
         self.tree.reveal(ref)
         self.detail.show(ref)
-        self._restart_countdown()
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         """The tree found something missing or stale.
@@ -673,4 +671,3 @@ class MainScreen(Screen):
             scope = databases_scope() if not self.databases else None
         if scope is not None:
             self._request(scope, Priority.INTERACTIVE)
-            self._restart_countdown()

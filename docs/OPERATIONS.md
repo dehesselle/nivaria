@@ -48,10 +48,11 @@ view's query.
 
 ## Background load
 
-nivaria refreshes only what is on screen. When the footer Countdown reaches
-zero (every **cache age** seconds, 900 by default), the parts of the screen
-older than that are fetched again at background priority. Navigating
-somewhere new restarts the countdown. Nothing else is fetched in the
+nivaria refreshes only what is on screen. The footer Countdown shows how long
+until the first part of the screen is older than **cache age** (900 seconds
+by default); at zero, every part of the screen that old is fetched again at
+background priority. Each part ages from its own last fetch, so refreshes
+come as each part runs out, not all at once. Nothing else is fetched in the
 background except the initial requests after connecting. A cache age of `0`
 stops background refreshing; `F5` still refreshes the node under the cursor.
 

@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from math import ceil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from tcoda.widgets import Countdown, Footer, FooterBinding
 from textual.app import App
 
+import nivaria.cache.repository as repository_module
 import nivaria.ui.app as app_module
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
-from nivaria.models import ObjectType, databases_scope, objects_scope, schemas_scope
+from nivaria.models import ObjectType, objects_scope, schemas_scope
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.screens.main import MainScreen
 from nivaria.ui.widgets.object_tree import ObjectTree
@@ -38,6 +41,25 @@ class Harness(App[None]):
 
     def on_mount(self) -> None:
         self.push_screen(MainScreen(self._repo, self._fetch, self._pool))
+
+
+class Clock:
+    """A hand-moved clock for the cache ledger, which the countdown reads."""
+
+    def __init__(self, now: float = 1_000_000.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch) -> Clock:
+    clock = Clock()
+    # The module's own reference, not time.time itself: Textual and asyncio
+    # run on the real clock and must keep doing so.
+    monkeypatch.setattr(repository_module, "time", SimpleNamespace(time=clock))
+    return clock
 
 
 def load(repo: Repository, scope, rows) -> None:
@@ -290,62 +312,135 @@ async def test_an_object_leaf_reports_the_list_it_came_from(repo) -> None:
         assert screen.focused_scope() == objects_scope(ObjectType.TABLE, "MYDB", "AAA")
 
 
-async def test_the_countdown_counts_down_from_the_ttl(repo) -> None:
-    load(repo, databases_scope(), [{"name": "MYDB", "comment": ""}])
-    config.set(CACHE_TTL, 60)
-    try:
-        app = Harness(repo, RecordingFetch())
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            app.screen._tick()
-            await pilot.pause()
-            remaining = app.screen.query_one(Countdown).remaining
-        assert 55 <= remaining <= 60
-    finally:
-        config.set(CACHE_TTL, CACHE_TTL.default)
+async def countdown_after_tick(app, pilot) -> int:
+    app.screen._tick()
+    await pilot.pause()
+    return app.screen.query_one(Countdown).remaining
 
 
-async def test_the_countdown_resets_once_the_sweep_runs(repo) -> None:
-    """Elapsed time since the last sweep drives `remaining` now, not any
-    individual cache row's own age -- once CACHE_TTL has passed, `_tick()`
-    runs the sweep itself and the countdown restarts at the full TTL."""
-    config.set(CACHE_TTL, 60)
-    try:
-        app = Harness(repo, RecordingFetch())
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            app.screen._last_sweep_at -= 120
-            app.screen._tick()
-            await pilot.pause()
-            remaining = app.screen.query_one(Countdown).remaining
-        assert 55 <= remaining <= 60
-    finally:
-        config.set(CACHE_TTL, CACHE_TTL.default)
-
-
-async def test_navigating_restarts_the_countdown(repo) -> None:
-    """Moving to a different category/object/schema/database must not leave
-    the footer implying a longer wait than what's actually left -- the view
-    just shown already asked interactively for its own stale data on the way
-    in (see PipeView._update_history and friends)."""
+async def test_the_countdown_shows_when_the_first_watched_scope_goes_stale(
+    repo, clock
+) -> None:
     put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHER", "BBB")
+    age_by(repo, schemas_scope("MYDB"), 20)
+    age_by(repo, schemas_scope("OTHER"), 45)
     config.set(CACHE_TTL, 60)
     try:
         app = Harness(repo, RecordingFetch())
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.set_databases(["MYDB", "OTHER"])
+            await pilot.pause()
+            assert await countdown_after_tick(app, pilot) == 15
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_with_nothing_watched_the_countdown_shows_the_full_ttl(repo) -> None:
+    config.set(CACHE_TTL, 60)
+    try:
+        app = Harness(repo, RecordingFetch())
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert await countdown_after_tick(app, pilot) == 60
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_a_scope_being_fetched_does_not_hold_the_countdown_at_zero(
+    repo, clock
+) -> None:
+    """Its old fetched_at reads as overdue until the pass lands; the spinner
+    covers that wait."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHER", "BBB")
+    age_by(repo, schemas_scope("MYDB"), 100)
+    age_by(repo, schemas_scope("OTHER"), 20)
+    config.set(CACHE_TTL, 60)
+    try:
+        fetch = RecordingFetch()
+        app = Harness(repo, fetch)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            # Showing MYDB stale requests it at once, and it stays queued.
+            app.screen.set_databases(["MYDB", "OTHER"])
+            await pilot.pause()
+            assert "schemas:MYDB" in fetch.busy
+            assert await countdown_after_tick(app, pilot) == 40
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_a_failed_refresh_does_not_hold_the_countdown_at_zero(
+    repo, clock
+) -> None:
+    """It keeps its old fetched_at, so counting it would pin the countdown at
+    zero and rerun the failing statement on every tick."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHER", "BBB")
+    failed = schemas_scope("MYDB")
+    age_by(repo, failed, 100)
+    repo.fail_pass(failed, repo.begin_pass(failed), "no warehouse")
+    age_by(repo, schemas_scope("OTHER"), 20)
+    config.set(CACHE_TTL, 60)
+    try:
+        fetch = RecordingFetch()
+        app = Harness(repo, fetch)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.set_databases(["MYDB", "OTHER"])
+            await pilot.pause()
+            # Showing it retried it at once; that retry failed too.
+            fetch.busy.clear()
+            fetch.requests.clear()
+            assert await countdown_after_tick(app, pilot) == 40
+            assert fetch.scopes == []
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_nothing_on_screen_goes_stale_before_the_countdown_reaches_zero(
+    repo, clock
+) -> None:
+    """A sweep's refresh lands a moment after the sweep. A countdown restarted
+    at the full TTL therefore ran out just before that data went stale,
+    skipped it, and left it on screen for nearly two TTLs."""
+    put_schemas(repo, "MYDB", "AAA")
+    scope = schemas_scope("MYDB")
+    config.set(CACHE_TTL, 60)
+    try:
+        fetch = RecordingFetch()
+        app = Harness(repo, fetch)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen._last_sweep_at -= 50
-            screen._tick()
+            screen.set_databases(["MYDB"])
             await pilot.pause()
-            before = app.screen.query_one(Countdown).remaining
-            assert before <= 15
+            fetch.requests.clear()
 
-            screen._select_category(objects_scope(ObjectType.TABLE, "MYDB", "AAA"))
-            screen._tick()
-            await pilot.pause()
-            after = app.screen.query_one(Countdown).remaining
-        assert after > before
+            def tick_until_requested() -> float:
+                for _ in range(200):
+                    clock.now += 1
+                    screen._tick()
+                    if scope.key in fetch.scopes:
+                        fetch.requests.clear()
+                        return clock.now
+                    due_in = ceil(60 - repo.entry(scope).age())
+                    shown = screen.query_one(Countdown).remaining
+                    assert shown <= due_in, (
+                        f"countdown shows {shown}s, data goes stale in {due_in}s"
+                    )
+                pytest.fail("the stale scope was never requested")
+
+            loaded = clock.now
+            assert tick_until_requested() == loaded + 60
+
+            clock.now += 2  # the refresh lands
+            load(repo, scope, [{"database_name": "MYDB", "name": "AAA", "comment": ""}])
+            fetch.busy.discard(scope.key)
+            landed = clock.now
+            assert tick_until_requested() == landed + 60
     finally:
         config.set(CACHE_TTL, CACHE_TTL.default)
 

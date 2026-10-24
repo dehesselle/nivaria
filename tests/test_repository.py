@@ -438,6 +438,37 @@ def test_task_activity_historys_ttl_override_outlasts_the_ordinary_sweep_interva
     assert repo.stale_scopes(0.01, [ordinary, history]) == [ordinary]
 
 
+def test_next_due_is_the_scope_closest_to_going_stale(repo) -> None:
+    load(repo, databases_scope(), db_rows("ACME"))
+    time.sleep(0.02)
+    load(repo, schemas_scope("MYDB"), [])
+    due = repo.next_due(900, [schemas_scope("MYDB"), databases_scope()])
+    assert due < repo.next_due(900, [schemas_scope("MYDB")])
+
+
+def test_next_due_counts_a_ttl_override(repo) -> None:
+    """A pipe's activity is aged on its own 13-day TTL, so it never pulls the
+    countdown down to the ordinary one."""
+    pipes = pipe_activity_scope("MYDB", "PUBLIC")
+    load(repo, pipes, [])
+    assert repo.next_due(900, [pipes]) > 12 * 86400
+
+
+def test_next_due_of_a_never_fetched_scope_is_now(repo) -> None:
+    assert repo.next_due(900, [databases_scope()]) == 0
+
+
+def test_next_due_leaves_out_a_failed_refresh(repo) -> None:
+    scope = databases_scope()
+    load(repo, scope, db_rows("ACME"))
+    repo.fail_pass(scope, repo.begin_pass(scope), "no warehouse")
+    assert repo.next_due(900, [scope]) is None
+
+
+def test_next_due_is_none_when_refreshing_is_off(repo) -> None:
+    assert repo.next_due(0, [databases_scope()]) is None
+
+
 # ------------------------------------------- schema.sql / TableSpec agreement
 
 

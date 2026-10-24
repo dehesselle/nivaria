@@ -608,13 +608,15 @@ caller's TTL, never shortens it, so an aggressively short `CACHE_TTL` setting
 is still honoured for every scope with no override, and a first-ever fetch
 (nothing cached yet) still happens immediately regardless.
 
-`scope_ttl` is reached only through **`models.is_stale(scope, age, ttl)`,
-which is the one place staleness is decided anywhere in the app.** All three
-callers go through it: `Repository.stale_scopes` (the background sweep),
-`_ScopedView.ensure` (a detail view's paint-time check) and
-`ObjectTree._ensure` (the tree's). Having one function is not tidiness: three
-separate checks drift, and a tree that snapshots `CACHE_TTL` at construction
-or skips `scope_ttl` ignores a settings change until restart.
+`scope_ttl` is reached only through **`models.due_in(scope, age, ttl)`,
+which is the one place staleness is decided anywhere in the app.** The footer
+countdown reads it directly (`Repository.next_due`); every yes/no check goes
+through `models.is_stale`, which is `due_in` reaching zero. Its three callers
+are `Repository.stale_scopes` (the background sweep), `_ScopedView.ensure` (a
+detail view's paint-time check) and `ObjectTree._ensure` (the tree's). Having
+one function is not tidiness: separate checks drift, and a tree that
+snapshots `CACHE_TTL` at construction or skips `scope_ttl` ignores a settings
+change until restart.
 
 `PIPE_ACTIVITY_HISTORY`'s own override is 13 days, one short of
 `INFORMATION_SCHEMA.COPY_HISTORY`'s 14-day retention rather than the full 14:
@@ -1109,33 +1111,53 @@ schema's tables cannot cause a whole-tree rebuild.
 
 ### The staleness sweep
 
-`CACHE_TTL` is both the sweep's interval and the footer countdown's length;
-there is no separate poll constant. When the countdown
-reaches zero, `MainScreen._sweep` asks which of the scopes **currently on
-screen** have exceeded `CACHE_TTL` and requests those at background priority,
-then the countdown restarts at `CACHE_TTL`. Scopes nobody is looking at are
-never refreshed this way; anything urgent was already requested
-interactively. A TTL of `0` disables the sweep entirely.
+The footer countdown makes one promise: **nothing on screen goes stale before
+it reaches zero.** "On screen" means the watched set: every scope the tree
+has materialised, collapsed or scrolled away included, plus the open detail
+view's. "Stale" is per scope, through `scope_ttl`, so pipe and task history
+age on their own longer TTLs.
 
-Navigating to something that changes what's on screen — a different
-database, schema, category or object — restarts the countdown immediately
-too (`MainScreen._restart_countdown`), rather than leaving the footer
-implying a longer wait than what's actually left. This does not also trigger
-`_sweep()` on the spot: the view just shown already asked interactively for
-anything of its own that was stale, on the way in (`_ScopedView.ensure`,
-called from `update_content`) — restarting the countdown only stops it from
-*over-promising*, since the freshness of what's newly on screen is already
-handled. Nothing fetches in the background between those two triggers
-(countdown reaching zero, or a navigation that changes what's shown) except
-the initial requests `MainScreen.on_mount` issues at startup.
+The countdown is therefore computed, not run as a timer. On every tick,
+`Repository.next_due` works out from the ledger how long until the first
+watched scope goes stale, and the countdown shows that. When it reaches zero,
+`MainScreen._sweep` requests every watched scope that is stale, at background
+priority. Those are then busy and drop out, so the countdown moves on to
+whichever scope is due next: it jumps up after a sweep, and down when a view
+shows a scope that is close to its TTL. Navigation and `F5` affect it only
+through the ledger. A fixed timer restarted at `CACHE_TTL` cannot keep the
+promise: a refresh lands a moment after the sweep that asked for it, so the
+next zero comes just before that data goes stale, skips it, and leaves it on
+screen for nearly two TTLs.
+
+Zero means requested, not fresh. Until a refresh lands, its data is up to one
+fetch's duration past its TTL, which is what the countdown's spinner shows.
+
+Two kinds of watched scope are left out of both the countdown and the sweep:
+
+- **Busy** scopes, queued or mid-fetch, either themselves or through the
+  prime that fills them (`models.filling_prime`). A busy scope's old
+  `fetched_at` reads as overdue until its pass lands, and requesting a
+  listing that a database prime is filling would be the per-schema round
+  trip the prime exists to replace.
+- **Failed** refreshes (`ERROR`). `fail_pass` keeps the old `fetched_at`, so
+  a failed scope would read as overdue forever, hold the countdown at zero,
+  and have the sweep rerun the failing statement on every tick. It is still
+  retried by any sweep another scope triggers, and when the user navigates
+  back to it.
+
+With nothing left to count, the countdown shows the full TTL. Scopes nobody
+is looking at are never refreshed this way; anything urgent was already
+requested interactively on the way in (`_ScopedView.ensure`,
+`ObjectTree._ensure`). Nothing else fetches in the background except the
+initial requests `MainScreen.on_mount` issues at startup. A TTL of `0`
+disables the sweep entirely.
 
 A view's paint-time check never re-requests the scope whose own update it is
 painting. A scope whose first fetch failed has no `fetched_at`, so it always
 reads as stale, and re-requesting it from the repaint its failure caused
 would make a failing statement (no warehouse, say) retry itself — looping or
 not depending on whether the worker left `FetchService._running` before the
-repaint ran. A failed scope is retried by the sweep, or when the user
-navigates back to it.
+repaint ran.
 
 ---
 
@@ -1220,8 +1242,8 @@ table and re-highlights it. If a highlight also revealed, that would queue a
 deferred cursor move back to the old table while the jump's own move was
 still pending. Each move highlights its node, each highlight would queue
 another move, and the two would alternate forever: the UI goes sluggish, the
-tree scrolls by itself, and the countdown freezes, because every selection
-restarts it. No Snowflake work is involved at all.
+tree scrolls by itself, and the detail pane is re-pointed on every move. No
+Snowflake work is involved at all.
 
 The tree also filters what it announces. It drops a highlight for a node the
 cursor has already left, because that move posts a highlight of its own and
@@ -1617,9 +1639,9 @@ Unlike the database picker, which only ever changes what a query is built to
 ask for, picking a warehouse or role actually rewrites the session: see
 "Switching warehouse or role mid-session" below.
 
-The Countdown is a global timer, deliberately: `CACHE_TTL` is both its length
-and the sweep's own interval (see "The staleness sweep"), so this is one
-clock, not a per-scope freshness readout. It has a fixed width, right-aligned,
+The Countdown is one number for the whole screen, not a per-scope freshness
+readout: the time until the first thing on screen goes stale (see "The
+staleness sweep"). It has a fixed width, right-aligned,
 no leading zeroes, so the digits do not shift as it counts down.
 
 The gauge is polled a few times a second rather than pushed from the pool. Pool

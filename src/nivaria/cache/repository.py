@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,6 +38,7 @@ from nivaria.models import (
     Scope,
     ScopeType,
     SFObject,
+    due_in,
     is_stale,
     pipe_activity_scope,
     schemas_scope,
@@ -865,20 +866,45 @@ class Repository:
         if ttl <= 0:
             return []
         now = time.time()
-        stale: list[Scope] = []
+        return [
+            scope
+            for scope, entry in self._entries(among)
+            # EMPTY short-circuits is_stale: a scope claimed by a pass that
+            # has not finished yet carries the previous pass's fetched_at, so
+            # it can read as fresh while holding no rows.
+            if entry.state is CacheState.EMPTY or is_stale(scope, entry.age(now), ttl)
+        ]
+
+    def next_due(self, ttl: float, among: Iterable[Scope]) -> float | None:
+        """Seconds until the first of `among` is due a background refresh.
+
+        What the footer countdown shows: nothing it watches goes stale before
+        this reaches zero. Zero or less for anything already due; None when
+        nothing counts, or when a `ttl` of 0 disables refreshing.
+
+        A failed refresh does not count. It keeps its old `fetched_at`, so it
+        would read as overdue forever, hold the countdown at zero, and have
+        the sweep rerun the failing statement on every tick.
+        """
+        if ttl <= 0:
+            return None
+        now = time.time()
+        due = [
+            0.0
+            if entry.state is CacheState.EMPTY
+            else due_in(scope, entry.age(now), ttl)
+            for scope, entry in self._entries(among)
+            if entry.state is not CacheState.ERROR
+        ]
+        return min((d for d in due if d is not None), default=None)
+
+    def _entries(self, among: Iterable[Scope]) -> Iterator[tuple[Scope, Entry]]:
+        """Each scope's ledger entry, read from whichever store holds it."""
         with self._db.connect() as cached, self._previews.connect() as previews:
             for scope in among:
                 store = self._store(scope)
                 connection = previews if store is self._previews else cached
-                entry = self._entry(connection, scope)
-                # EMPTY short-circuits is_stale: a scope claimed by a pass
-                # that has not finished yet carries the previous pass's
-                # fetched_at, so it can read as fresh while holding no rows.
-                if entry.state is CacheState.EMPTY or is_stale(
-                    scope, entry.age(now), ttl
-                ):
-                    stale.append(scope)
-        return stale
+                yield scope, self._entry(connection, scope)
 
     # --------------------------------------------------------------- writes
 

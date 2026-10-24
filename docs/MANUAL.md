@@ -196,10 +196,10 @@ or lacks the privilege; see
 
 - **Role** / **Warehouse**: the session's current role and warehouse.
   Warehouse can read `none`.
-- **Countdown**: seconds until the next background refresh of what is on
-  screen. It restarts when you navigate somewhere new, turns into a spinner
-  while something on screen is being refetched, and is blank when the cache
-  age setting is `0`.
+- **Countdown**: seconds until the first thing on screen is due a refresh;
+  nothing on screen goes stale before it reaches zero. It jumps as what is on
+  screen changes, turns into a spinner while something on screen is being
+  refetched, and is blank when the cache age setting is `0`.
 - **Pool gauge**: `(in use / total)` connections.
 
 ## Settings

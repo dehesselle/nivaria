@@ -298,6 +298,20 @@ def prime_scope(object_type: ObjectType, database: str) -> Scope:
     return Scope(ScopeType.DATABASE_PRIME, database=database, object_type=object_type)
 
 
+def filling_prime(scope: Scope) -> Scope | None:
+    """The prime whose one statement also fills `scope`, if any.
+
+    A prime writes other scopes' rows, never its own, so whether `scope` is
+    being fetched depends on that prime too. Only a DATABASE_PRIME stands in
+    for a request the UI makes (`MainScreen.on_scope_needed`).
+    """
+    if scope.type is not ScopeType.OBJECTS:
+        return None
+    assert scope.object_type is not None
+    assert scope.database is not None
+    return prime_scope(scope.object_type, scope.database)
+
+
 def columns_prime_scope(database: str, schema: str | None = None) -> Scope:
     return Scope(ScopeType.COLUMNS_PRIME, database=database, schema=schema)
 
@@ -483,7 +497,7 @@ def scope_ttl(scope: Scope, default: float) -> float:
     caller's own default, only ever slower -- an aggressive default TTL is
     still honoured for every scope that has no override.
 
-    Reached only through `is_stale` below, which is the single decision
+    Reached only through `due_in` below, which is the single decision
     every staleness check in the app goes through, so the override applies
     uniformly regardless of which path is asking.
     """
@@ -491,6 +505,24 @@ def scope_ttl(scope: Scope, default: float) -> float:
     if override is None:
         return default
     return max(default, override)
+
+
+def due_in(scope: Scope, age: float | None, ttl: float) -> float | None:
+    """Seconds until cached rows `age` seconds old are due a refetch.
+
+    Zero or less once they are, and None when they never will be because a
+    `ttl` of 0 disables *re*-freshing. Never fetched (`age is None`) is due
+    now, whatever the `ttl`: that only ever disables refreshing, never the
+    first fetch.
+
+    The footer countdown reads this directly; every yes/no staleness check
+    goes through `is_stale`, so both always agree.
+    """
+    if age is None:
+        return 0.0
+    if ttl <= 0:
+        return None
+    return scope_ttl(scope, ttl) - age
 
 
 def is_stale(scope: Scope, age: float | None, ttl: float) -> bool:
@@ -502,14 +534,9 @@ def is_stale(scope: Scope, age: float | None, ttl: float) -> bool:
     They drifted apart once already -- the tree was checking a TTL
     snapshotted at construction and skipping `scope_ttl` entirely -- which is
     why the decision lives here rather than being written out three times.
-
-    Never fetched (`age is None`) is always stale: it is maximally so, and a
-    `ttl` of 0 only disables *re*-freshing, never the first fetch.
     """
-    if age is None:
-        return True
-    effective = scope_ttl(scope, ttl) if ttl > 0 else ttl
-    return effective > 0 and age >= effective
+    remaining = due_in(scope, age, ttl)
+    return remaining is not None and remaining <= 0
 
 
 @dataclass(frozen=True)
