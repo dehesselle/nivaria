@@ -23,6 +23,7 @@ from enum import IntEnum
 from typing import Any
 
 from nivaria.gateway.gateway import SnowflakeGateway
+from nivaria.gateway.queries import MAX_PAGE_SIZE
 from nivaria.models import Scope, ScopeType
 from nivaria.settings import (
     DATA_PREVIEW_ROWS,
@@ -130,18 +131,28 @@ def fetch_page(
     gateway, not the repository, so it cannot look up cached data). The
     caller (`FetchService._execute`) resolves it before calling here; every
     other scope type ignores this parameter.
+
+    A continuation page asks for one row more than `limit`, because `SHOW
+    TASKS ... FROM 'name'` is inclusive: it starts with the cursor row itself,
+    where every other pageable SHOW starts after it. That echoed row is
+    dropped, and the spare row keeps a one-row page size moving forward.
+    Without it, the echo alone would fill the page and look like a stuck
+    cursor. An exclusive SHOW fills the spare row with a new one, which is
+    kept: trimming it would also trim a statement that ignores LIMIT, whose
+    page the stuck-cursor guard then takes for the whole result.
     """
+    asked = limit if cursor is None else min(limit + 1, MAX_PAGE_SIZE)
     match scope.type:
         case ScopeType.DATABASES:
             rows = gateway.show_databases(
-                after=cursor, limit=limit, allow_reconnect=allow_reconnect
+                after=cursor, limit=asked, allow_reconnect=allow_reconnect
             )
         case ScopeType.SCHEMAS:
             assert scope.database is not None
             rows = gateway.show_schemas(
                 scope.database,
                 after=cursor,
-                limit=limit,
+                limit=asked,
                 allow_reconnect=allow_reconnect,
             )
         case ScopeType.OBJECTS:
@@ -168,7 +179,7 @@ def fetch_page(
                 scope.database,
                 scope.schema,
                 after=cursor,
-                limit=limit,
+                limit=asked,
                 allow_reconnect=allow_reconnect,
             )
         case ScopeType.COLUMNS:
@@ -399,7 +410,10 @@ def fetch_page(
                 "a prime scope is fetched by fetch_database, not fetch_page"
             )
 
-    if len(rows) < limit or not rows:
+    full = len(rows) >= asked
+    if cursor is not None and rows and str(rows[0][NAME_COLUMN]) == cursor:
+        rows = rows[1:]
+    if not full or not rows:
         return Page(rows)
     return Page(rows, str(rows[-1][NAME_COLUMN]))
 
@@ -437,10 +451,17 @@ def _jsonable(value: Any) -> Any:
     """What the driver returns that JSON has no type for.
 
     A Decimal becomes a string rather than a float, which would lose a
-    NUMBER(38,x)'s digits. Bytes become upper-case hex, Snowflake's own
-    default BINARY_OUTPUT_FORMAT.
+    NUMBER(38,x)'s digits. It is written fixed-point when it has a
+    fractional part: `str()` spells -0.0000000001 as `-1E-10`, which is not
+    how a NUMBER(38,10) reads anywhere else. Only a positive exponent, which
+    a DECFLOAT such as 1.2E+100 has, keeps the E-notation Snowflake shows
+    too. Bytes become upper-case hex, Snowflake's own default
+    BINARY_OUTPUT_FORMAT.
     """
     if isinstance(value, Decimal):
+        exponent = value.as_tuple().exponent
+        if isinstance(exponent, int) and exponent <= 0:
+            return format(value, "f")
         return str(value)
     if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
         return value.isoformat()

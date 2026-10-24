@@ -33,6 +33,21 @@ with ~400 pipes hung the app for minutes.
 `SHOW COLUMNS IN DATABASE` returned 11 511 columns for 614 tables across 25
 schemas on the sandbox; one production schema alone has 6655 columns.
 
+## Pipe status
+
+`SYSTEM$PIPE_STATUS` takes one constant pipe name per call (see
+[snowflake-behavior.md](snowflake-behavior.md#pipe-execution-state)). On the
+sandbox, 2026-10-24:
+
+| Shape | Pipes | Time |
+| --- | --- | --- |
+| one statement per pipe | 27 | 2.5 s (~94 ms each) |
+| one `UNION ALL` statement, one call per pipe | 22 | 0.9 s |
+| one `UNION ALL` statement, one call per pipe | 587 | 14.5 s |
+
+Batching saves the round trips, but the server still spends ~25 ms per
+pipe.
+
 ## Search
 
 Corpus loads:

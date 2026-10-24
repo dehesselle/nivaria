@@ -492,7 +492,8 @@ def test_every_page_is_readable_as_soon_as_it_lands(repo) -> None:
         assert wait_until(lambda: len(counts) == 3)
     finally:
         service.stop()
-    assert counts == [10, 20, 25]
+    # A continuation page asks for one spare row (see jobs.fetch_page).
+    assert counts == [10, 21, 25]
 
 
 def test_a_failing_fetch_records_the_error_and_keeps_stale_rows(repo) -> None:
@@ -1637,11 +1638,49 @@ def test_a_show_that_ignores_limit_is_not_paged_forever(repo) -> None:
     assert [call[0] for call in gateway.calls].count("show_objects") == 1
 
 
+def test_a_continuation_page_drops_the_row_an_inclusive_from_repeats() -> None:
+    """SHOW TASKS ... FROM 'T2' starts with T2 itself on a live account. The
+    echoed row is not a new one, and the page still counts as full."""
+    from nivaria.models import objects_scope
+
+    gateway = FakeGateway(
+        objects={("MYDB", "PUBLIC", ObjectType.TASK): ["T1", "T2", "T3", "T4"]}
+    )
+    scope = objects_scope(ObjectType.TASK, "MYDB", "PUBLIC")
+    page = fetch_page(gateway, scope, "T2", limit=1)
+    assert [row["name"] for row in page.rows] == ["T3"]
+    assert page.cursor == "T3"
+
+
+@pytest.mark.parametrize("page_size", [1, 2, 4])
+def test_an_inclusive_from_pages_to_every_row_exactly_once(repo, page_size) -> None:
+    """Page size 1 is the case that matters: the echo alone would fill the
+    page, the cursor would not move, and the stuck-cursor guard would end
+    the pass after the first task."""
+    from nivaria.models import objects_scope
+
+    tasks = ["T1", "T2", "T3", "T4", "T5"]
+    gateway = FakeGateway(objects={("MYDB", "PUBLIC", ObjectType.TASK): tasks})
+    scope = objects_scope(ObjectType.TASK, "MYDB", "PUBLIC")
+    service = make_service(gateway, repo, page_size=page_size)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    entry = repo.entry(scope)
+    assert entry.error is None
+    assert repo.child_count(scope) == 5
+    # Every page moved the cursor on, so no page was a repeat.
+    cursors = [call[1][3] for call in gateway.calls if call[0] == "show_objects"]
+    assert len(cursors) == len(set(cursors))
+
+
 def test_a_stuck_cursor_completes_the_pass_rather_than_failing_it(repo) -> None:
-    """Deliberately a type the builder still pages -- TASK, whose LIMIT
-    support no probed account has had enough tasks to verify. Layer one only
-    covers the types already caught misbehaving; this is the guard that has to
-    hold for the next one, without anybody having to have found it first.
+    """Deliberately a type the builder still pages, standing in for the next
+    type nobody has caught ignoring LIMIT yet. Layer one only covers the
+    types already caught misbehaving; this is the guard that has to hold for
+    the next one, without anybody having to have found it first.
 
     Completing rather than failing is the point: a cursor that does not
     advance means the page was the whole result, so the rows are complete and
@@ -1853,6 +1892,29 @@ def test_a_data_preview_is_folded_into_one_json_object_per_row() -> None:
         "RAW": "01AB",
         "NOTE": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        ("-1E-10", "-0.0000000001"),
+        ("0E-10", "0.0000000000"),
+        ("1.2345E+100", "1.2345E+100"),
+    ],
+)
+def test_a_decimal_in_a_data_preview_reads_as_snowflake_writes_it(value, shown) -> None:
+    """A NUMBER(38,10) is fixed-point, so its small values are too. Only a
+    DECFLOAT's positive exponent keeps E-notation, as TO_VARCHAR does."""
+    import json
+    from decimal import Decimal
+
+    from nivaria.models import data_preview_scope
+
+    gateway = FakeGateway(
+        data_preview={("MYDB", "PUBLIC", "T"): [{"N": Decimal(value)}]}
+    )
+    page = fetch_page(gateway, data_preview_scope("MYDB", "PUBLIC", "T"), None, 1)
+    assert json.loads(page.rows[0]["_values"]) == {"N": shown}
 
 
 def test_a_data_preview_at_its_row_limit_is_truncated() -> None:

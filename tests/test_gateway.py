@@ -31,7 +31,9 @@ class RecordingCursor:
             self._owner.fail_times -= 1
             raise self._owner.error
         self._owner.executed.append((statement, params))
-        self.description = [(name,) for name in self._owner.columns]
+        self.description = [
+            (name, self._owner.type_codes.get(name)) for name in self._owner.columns
+        ]
         self._rows = list(self._owner.rows)
 
     def fetchmany(self, size: int) -> list[tuple[Any, ...]]:
@@ -59,6 +61,9 @@ class RecordingConnection:
         self.executed: list[tuple[str, tuple[Any, ...] | None]] = []
         self.columns: list[str] = ["name"]
         self.rows: list[tuple[Any, ...]] = [("ACME",)]
+        #: `cursor.description` type code per column, as the driver numbers
+        #: them; a column missing here reports None.
+        self.type_codes: dict[str, int] = {}
         self.closed_cursors = 0
         #: How many times a query still needs to fail before it succeeds, and
         #: how many times one was actually attempted -- together they let a
@@ -229,6 +234,34 @@ def test_only_the_data_preview_is_executed_with_a_timeout() -> None:
     gateway.show_databases()
     gateway.select_data_preview("MYDB", "PUBLIC", "V", 100, 15)
     assert connection.timeouts == [None, 15]
+
+
+def test_a_data_preview_drops_the_drivers_json_indentation() -> None:
+    """The driver hands VARIANT/OBJECT/ARRAY/GEOGRAPHY/GEOMETRY over as
+    indented JSON text, so a one-line Data cell would show mostly spaces. A
+    VARCHAR that only looks like JSON is the user's text and stays as it is."""
+    gateway, connection, _ = make_gateway()
+    indented = '{\n  "a": 1,\n  "b": [\n    true,\n    "x y"\n  ]\n}'
+    connection.columns = ["V", "A", "G", "S"]
+    connection.type_codes = {"V": 5, "A": 10, "G": 14, "S": 2}
+    connection.rows = [(indented, "[\n  1,\n  undefined\n]", None, indented)]
+    rows = gateway.select_data_preview("MYDB", "PUBLIC", "T", 100, 15)
+    assert rows == [
+        {
+            "V": '{"a":1,"b":[true,"x y"]}',
+            "A": "[1,undefined]",
+            "G": None,
+            "S": indented,
+        }
+    ]
+
+
+def test_only_the_data_preview_compacts_json() -> None:
+    gateway, connection, _ = make_gateway()
+    connection.columns = ["name"]
+    connection.type_codes = {"name": 5}
+    connection.rows = [("[\n  1\n]",)]
+    assert gateway.show_databases() == [{"name": "[\n  1\n]"}]
 
 
 def test_a_cancelled_query_is_not_retried() -> None:

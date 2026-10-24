@@ -38,6 +38,40 @@ class ResultTooLargeError(RuntimeError):
     """
 
 
+#: `cursor.description` type codes whose values the driver hands over as
+#: indented JSON text: VARIANT, OBJECT, ARRAY, GEOGRAPHY and GEOMETRY, as the
+#: driver's own FIELD_ID_TO_NAME numbers them. Spelled out rather than
+#: imported, because this module never imports the driver.
+_JSON_TEXT_TYPE_CODES = frozenset({5, 9, 10, 14, 15})
+
+
+def compact_json_text(text: str) -> str:
+    """The driver's indented JSON text with the whitespace between tokens
+    dropped, as Snowflake's own `TO_VARCHAR` spells it.
+
+    A scan rather than `json.loads`/`json.dumps`: a round trip would turn a
+    VARIANT's 30-digit number into a float, and it fails outright on the
+    `undefined` an ARRAY holds for a SQL NULL, which is not JSON.
+    """
+    out: list[str] = []
+    in_string = escaped = False
+    for char in text:
+        if in_string:
+            out.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+            out.append(char)
+        elif not char.isspace():
+            out.append(char)
+    return "".join(out)
+
+
 #: Snowflake's error number for "<object> does not exist or not authorized",
 #: printed as `002003 (02000)`.
 _MISSING_OBJECT_ERRNO = 2003
@@ -254,6 +288,20 @@ class SnowflakeGateway(Protocol):
     ) -> list[Row]: ...
 
 
+def _compact_json_columns(rows: list[Row], description: Any) -> None:
+    """Compact, in place, every value of a column whose type the driver
+    hands over as indented JSON text.
+
+    Only the Data tab asks for this. Its cells are one line of 40
+    characters, and the driver's indentation alone would fill one.
+    """
+    names = [d[0] for d in description if len(d) > 1 and d[1] in _JSON_TEXT_TYPE_CODES]
+    for row in rows:
+        for name in names:
+            if isinstance(row[name], str):
+                row[name] = compact_json_text(row[name])
+
+
 class PoolGateway:
     """A gateway that borrows a pool connection per call.
 
@@ -271,6 +319,7 @@ class PoolGateway:
         *,
         timeout: int | None = None,
         allow_reconnect: bool = True,
+        compact_json: bool = False,
     ) -> list[Row]:
         # One retry, against a freshly-acquired connection, covers what a
         # checkout-time is_closed() check cannot see: a session Snowflake
@@ -281,7 +330,11 @@ class PoolGateway:
         # an already-rare path.
         try:
             return self._fetch_once(
-                statement, params, timeout=timeout, allow_reconnect=allow_reconnect
+                statement,
+                params,
+                timeout=timeout,
+                allow_reconnect=allow_reconnect,
+                compact_json=compact_json,
             )
         except ResultTooLargeError:
             # A failure the retry above must not repeat: it is a property of
@@ -294,7 +347,11 @@ class PoolGateway:
                 # again.
                 raise
             return self._fetch_once(
-                statement, params, timeout=timeout, allow_reconnect=allow_reconnect
+                statement,
+                params,
+                timeout=timeout,
+                allow_reconnect=allow_reconnect,
+                compact_json=compact_json,
             )
 
     def _fetch_once(
@@ -304,6 +361,7 @@ class PoolGateway:
         *,
         timeout: int | None,
         allow_reconnect: bool,
+        compact_json: bool,
     ) -> list[Row]:
         healthy: Exception | None = None
         with self._pool.acquire(allow_reconnect=allow_reconnect) as connection:
@@ -319,7 +377,10 @@ class PoolGateway:
                 else:
                     cursor.execute(statement, timeout=timeout)
                 columns = [description[0] for description in cursor.description]
-                return self._collect(cursor, columns, statement)
+                rows = self._collect(cursor, columns, statement)
+                if compact_json:
+                    _compact_json_columns(rows, cursor.description)
+                return rows
             except Exception as error:
                 # Anything escaping this block makes the pool discard the
                 # connection and open a replacement -- right for a dead
@@ -557,6 +618,7 @@ class PoolGateway:
             queries.data_preview(database, schema, table, max_rows),
             timeout=timeout,
             allow_reconnect=allow_reconnect,
+            compact_json=True,
         )
 
     def pipe_activity(

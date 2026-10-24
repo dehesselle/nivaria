@@ -32,11 +32,12 @@ def _local(value: str) -> datetime:
     Snowflake timestamps round-trip through sqlite with their original offset
     intact (an aware `datetime`'s default adapter includes it), so a value
     with an offset is a real instant and `astimezone()` converts it
-    correctly. A naive value (no offset -- not expected from the sources this
-    app reads today, but not verified either, see docs/DESIGN.md "Accepted design gaps")
-    is presumed already local per `datetime.astimezone`'s own documented
-    behaviour, so it passes through with the same wall-clock numbers rather
-    than being silently reinterpreted as some other zone.
+    correctly. A naive value (no offset) is presumed already local per
+    `datetime.astimezone`'s own documented behaviour, so it passes through
+    with the same wall-clock numbers rather than being silently
+    reinterpreted as some other zone. None of the metadata sources nivaria
+    formats produces one: every timestamp they return is TIMESTAMP_LTZ,
+    verified live (docs/snowflake-behavior.md "Result types").
     """
     return datetime.fromisoformat(value).astimezone()
 

@@ -476,9 +476,10 @@ CREATE INDEX IF NOT EXISTS information_schema_task_history_scope
 -- set). Metadata layer, needs no warehouse. There is no natural single-
 -- column key (a grantee can hold several distinct privileges on the same
 -- object, and the same privilege/grantee pair can recur across separate
--- grant statements), so the composite key below is a best-effort choice,
--- same as account_usage_copy_history_detail's -- its uniqueness at scale has
--- not been checked against a live account.
+-- grant statements), so the key below is composite. Checked live on
+-- 2026-10-24: re-granting a privilege leaves its one row as it was, and
+-- re-granting it WITH GRANT OPTION replaces that row, so the key never saw
+-- a duplicate (docs/snowflake-behavior.md "SHOW GRANTS").
 --
 -- Column names verified live on 2026-09-09, and for SHOW GRANTS ON TABLE on
 -- 2026-10-14 (docs/snowflake-behavior.md). granted_by_role_type is

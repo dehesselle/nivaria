@@ -47,6 +47,10 @@ class ObjectType(StrEnum):
         discovered at runtime, so the statement builder can stop asking for
         something that does not work instead of the scheduler having to
         recover from it. See docs/DESIGN.md, "Bounding a result".
+
+        `SHOW TASKS` pages, verified live too, but its `FROM` is inclusive:
+        a page starts with the cursor row. `jobs.fetch_page` drops that echo,
+        so it is pageable all the same.
         """
         return self not in (ObjectType.PIPE, ObjectType.STAGE)
 

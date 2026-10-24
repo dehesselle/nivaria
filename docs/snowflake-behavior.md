@@ -11,10 +11,13 @@ holds the evidence. Timings are in [measurements.md](measurements.md).
 - **The reference account** (Snowflake 10.31.103): where the `SHOW` column
   sets were first verified. It runs with no warehouse at all, and everything
   `SHOW`-sourced works.
-- **The sandbox** (Snowflake 10.32.102): its
-  `RENETEST1`/`2`/`3` databases carry 614–657 tables and pipes each, built
-  for scale checks with `tools/gen_test_ddl.py`. Test objects created there
-  for verification are noted below.
+- **The sandbox** (Snowflake 10.32.102, 10.38.101
+  on 2026-10-24): its `RENETEST1`/`2`/`3` databases carry 587–657 tables and
+  pipes each, built for scale checks with `tools/gen_test_ddl.py`. The
+  session role is `SYSADMIN`, with secondary roles `ALL` (`ACCOUNTADMIN`
+  among them). Test objects created there for verification are noted below.
+  The 2026-10-24 round created everything in `RENETEST1.NIVARIA_PROBE_A`/`_B`
+  and dropped both schemas afterwards.
 - **A production account**: probed by handing queries to the user to run and
   relay counts back from, so no session acted on production directly.
 
@@ -55,14 +58,10 @@ partly by creating test data on the sandbox:
   numbers are in [measurements.md](measurements.md#history-volume).
 - `account_usage_task_history`(`_detail`): **confirmed** on production — 7
   task runs from 1 task over a 7-day window. `information_schema_task_history`
-  is **confirmed** by a task created on the sandbox
-  (`RENETEST1.ABIDING_NOUGAT.CLAUDE_VERIFY_TASK`, `AS SELECT 1`, three manual
-  runs, left in place): `SCHEDULED_TIME`, `COMPLETED_TIME`, `STATE` and, on
-  runs that failed because the sandbox's `SYSADMIN` lacks `USAGE` on warehouse
-  `WH`, `ERROR_CODE`/`ERROR_MESSAGE` all came back non-null.
-  `QUERY_ID`/`QUERY_START_TIME` stayed `NULL`, consistent with the task
-  failing before a query was submitted; not chased further, since the grant
-  needs `ACCOUNTADMIN`.
+  is **confirmed** by tasks created on the sandbox: `SCHEDULED_TIME`,
+  `COMPLETED_TIME`, `STATE` and, on failed runs, `ERROR_CODE`/`ERROR_MESSAGE`
+  all came back non-null. See [Task history](#task-history) for when
+  `QUERY_ID` is `NULL`.
 - `information_schema_tag_references`: **confirmed** on production — 3 tag
   references covering 3 tag names.
 - `granted_by_role_type` on `SHOW GRANTS` exists and reads `'ROLE'` on real
@@ -83,8 +82,18 @@ none.
 `LIMIT n FROM 'name'` was verified correct — same rows, same order as an
 unpaged fetch — for databases, schemas, tables and views (the latter on
 2026-09-09, against a schema with 63 views), at both `IN SCHEMA` and `IN
-DATABASE` scope. It is **unverified for tasks**: no account probed so far has
-had enough of them to page through.
+DATABASE` scope.
+
+**`SHOW TASKS` honours `LIMIT`, but its `FROM 'name'` is inclusive**: the
+page starts *with* the named task, where every type above starts after it.
+Sandbox, 2026-10-24, 23 suspended tasks in one schema with names chosen to
+stress ordering and quoting (`T_A`, `T_A1`, `T_A_1`, `"lower_task"`, `"WITH
+SPACE"`, `O'QUOTE`, ...): `LIMIT 5` returned 5 rows, and paging by the last
+name returned every task, in the unpaged order, with each page's first row
+repeating the previous page's last. `FROM 'O''QUOTE'` started with `O'QUOTE`.
+`SHOW TASKS IN DATABASE ... LIMIT 3 FROM 'T$DOLLAR'` behaved the same. The
+order is byte order on the name (`Mixed` < `O'QUOTE` < `T$DOLLAR` < `T0` <
+... < `lower_task` < `zz_last`).
 
 **`LIMIT`/`FROM` is a no-op for `SHOW PIPES`, `SHOW COLUMNS` and `SHOW
 STAGES`, at both `IN SCHEMA` and `IN DATABASE` scope.**
@@ -134,6 +143,16 @@ For a materialized view, `SHOW GRANTS ON VIEW` and `ON MATERIALIZED VIEW`
 returned the same rows on the sandbox (2026-10-14), with `granted_on` reading
 `MATERIALIZED_VIEW`.
 
+`SHOW GRANTS ON PIPE` and `ON TASK` return the same nine columns (sandbox,
+2026-10-24).
+
+A grant is one row, never two (sandbox, 2026-10-24). Granting the same
+privilege to the same role again leaves the row unchanged, `created_on`
+included. Granting it again `WITH GRANT OPTION` replaces the row, with
+`grant_option = 'true'` and a new `created_on`. Across all 86 grant rows on
+`RENETEST1`–`3` and their schemas, the `show_grants` key in `schema.sql`
+was unique.
+
 ## Tag references
 
 `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` reports a schema- or
@@ -149,11 +168,95 @@ those rows, every column shows its schema's tags as its own.
 columns for every overlapping load found `LAST_LOAD_TIME` the only one that
 differed, and `PIPE_RECEIVED_TIME` equal and non-NULL in every pair.
 
+On the sandbox (2026-10-24), three CSV files `PUT` to an internal stage and
+sent with `ALTER PIPE ... REFRESH` showed up in
+`INFORMATION_SCHEMA.COPY_HISTORY` 31 s later. Files loaded in one batch
+share one `LAST_LOAD_TIME` and one `PIPE_RECEIVED_TIME`, so `FILE_NAME` is
+what keeps `(FILE_NAME, LAST_LOAD_TIME)` unique. A file with a bad row read
+`STATUS = 'Load failed'`, `ROW_COUNT = 0`, with `FIRST_ERROR_MESSAGE` and
+`FIRST_ERROR_LINE_NUMBER = 2` set. The same file name `PUT` again with
+`OVERWRITE = TRUE` and new content, then refreshed, was not loaded again and
+added no row, so one pipe lists a file name at most once while Snowpipe's
+load metadata remembers it.
+
+`INFORMATION_SCHEMA.COPY_HISTORY`'s `TABLE_NAME` argument and
+`TASK_HISTORY`'s `DATABASE_NAME`/`SCHEMA_NAME`/`TASK_NAME` arguments accept a
+pyformat `%s` bind. The rows equalled those of the `quote_literal` spelling.
+
 ## Task history
 
 An unqualified `INFORMATION_SCHEMA.TASK_HISTORY(...)` resolves against the
 session's current database. With none set, it failed on a live account with
 "invalid identifier", regardless of the `DATABASE_NAME` argument.
+
+`QUERY_ID` and `QUERY_START_TIME` are `NULL` exactly when a run failed
+before a query was submitted (sandbox, 2026-10-24). Without the
+account-level `EXECUTE TASK` privilege on the owner role, every run fails
+that way, with `091089: Cannot execute task, EXECUTE TASK privilege must be
+granted to owner role`. That is what the sandbox's earlier test runs hit.
+`SYSADMIN` does hold `USAGE` on warehouse `WH`; the warehouse was never the
+cause. With `EXECUTE TASK` granted for the test and revoked afterwards:
+
+- runs of `AS SELECT 1` read `SUCCEEDED`, with both columns set;
+- runs of `AS SELECT 1/0` read `FAILED`, `100051: Division by zero`, also with
+  both columns set.
+
+Rows with a `NULL` `QUERY_ID` survive the `(_scope, QUERY_ID)` key. Two
+such runs stored as two rows, over two refresh passes, because SQLite
+treats `NULL`s in a key as distinct.
+
+## Pipe execution state
+
+`SYSTEM$PIPE_STATUS` takes one pipe, as a constant. A column reference, as
+in a `SELECT` over `INFORMATION_SCHEMA.PIPES`, fails with `argument 0 to
+function SYSTEM$PIPE_STATUS needs to be constant`. It needs no warehouse.
+Neither `SHOW PIPES` nor `INFORMATION_SCHEMA.PIPES` nor
+`ACCOUNT_USAGE.PIPES` has a state column. Timings are in
+[measurements.md](measurements.md#pipe-status).
+
+How `invalid_reason` relates to `executionState`, on the sandbox
+(2026-10-24):
+
+| What was done to the pipe | `invalid_reason` | `executionState` |
+| --- | --- | --- |
+| nothing | `NULL` | `RUNNING` |
+| `ALTER PIPE ... SET PIPE_EXECUTION_PAUSED = TRUE` | `NULL` | `PAUSED` |
+| its stage dropped | `Pipe is invalid because stage STG_GONE dropped.` | `STOPPED_STAGE_DROPPED` |
+| its named file format dropped | `NULL` | `RUNNING` |
+| its target table dropped | `NULL` | `RUNNING` |
+
+A paused pipe therefore reads exactly like a running one in `SHOW PIPES`.
+Dropping a file format or a target table goes unnoticed by Snowflake itself
+until a load is attempted.
+
+## Result types
+
+Every timestamp column nivaria reads from `SHOW` (databases, schemas, tables,
+views, pipes, stages, tasks, grants, warehouses, roles, materialized views),
+from `INFORMATION_SCHEMA.TABLES`, `COPY_HISTORY` and `TASK_HISTORY` is
+`TIMESTAMP_LTZ` (sandbox, 2026-10-24). The driver returns those as aware
+`datetime`s in the session's `TIMEZONE`, which on the sandbox is
+`America/Los_Angeles`, not the machine's. Only a user table's
+`TIMESTAMP_NTZ` column, in the Data tab, arrives naive.
+
+What the driver (snowflake-connector-python 4.7.3) returns for a Data tab's
+`SELECT *`:
+
+| Type | Python value |
+| --- | --- |
+| `NUMBER(p,s>0)`, `DECFLOAT` | `Decimal`; `DECFLOAT` is rounded to 28 significant digits (`1.234567890123456789012345678901234567e100` arrived as `1.234567890123456789012345679E+100`) |
+| `NUMBER(p,0)` | `int`, all 38 digits |
+| `FLOAT` | `float`, including `nan`, `inf`, `-inf` |
+| `DATE`, `TIME`, `TIMESTAMP_*` | `date`, `time`, `datetime`, cut to microseconds (`TIME(9)` `23:59:59.123456789` arrived as `23:59:59.123456`) |
+| `TIMESTAMP_TZ` | aware, with the value's own offset |
+| `BINARY` | `bytearray` |
+| `VARIANT`, `OBJECT`, `ARRAY`, `MAP`, structured types | `str` of indented JSON; a VARIANT string keeps its quotes, an `ARRAY`'s SQL `NULL` reads `undefined`, a VARIANT JSON `null` reads `null` |
+| `GEOGRAPHY`, `GEOMETRY` | `str` of indented GeoJSON (`GEOGRAPHY_OUTPUT_FORMAT` is `GeoJSON`) |
+| `VECTOR` | `list` of `int`/`float` |
+
+Their `cursor.description` type codes are VARIANT 5, OBJECT 9 (`MAP` and a
+structured `OBJECT` too), ARRAY 10, GEOGRAPHY 14, GEOMETRY 15, VECTOR 16,
+and `DECFLOAT` reports 0 (`FIXED`).
 
 ## ACCOUNT_USAGE lag
 

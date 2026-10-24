@@ -225,6 +225,9 @@ class FakeGateway:
         #: knob rather than a hard-coded {PIPE, STAGE} because the point of
         #: the guard is that it holds for a type nobody has verified yet.
         self.paging_noop_types: set[ObjectType] = set()
+        #: Object types whose `FROM 'name'` starts *with* that name rather
+        #: than after it, as SHOW TASKS does on a live account.
+        self.inclusive_from_types: set[ObjectType] = {ObjectType.TASK}
         #: Schemas dropped by `drop_schema`: statements naming one fail the
         #: way Snowflake's do, rather than quietly returning nothing.
         self.dropped_schemas: set[tuple[str, str]] = set()
@@ -247,10 +250,14 @@ class FakeGateway:
             )
 
     @staticmethod
-    def _page(names: list[str], after: str | None, limit: int) -> list[str]:
+    def _page(
+        names: list[str], after: str | None, limit: int, *, inclusive: bool = False
+    ) -> list[str]:
         ordered = sorted(names)
         if after is not None:
-            ordered = [name for name in ordered if name > after]
+            ordered = [
+                name for name in ordered if name > after or inclusive and name == after
+            ]
         return ordered[:limit]
 
     def show_databases(
@@ -298,7 +305,12 @@ class FakeGateway:
         if object_type in self.paging_noop_types:
             names = sorted(all_names)
         else:
-            names = self._page(all_names, after, limit)
+            names = self._page(
+                all_names,
+                after,
+                limit,
+                inclusive=object_type in self.inclusive_from_types,
+            )
         return [
             {
                 "name": name,

@@ -362,9 +362,21 @@ is read from the first row rather than from the cached column list, which can
 be older than the rows and name other columns. JSON has no type for some of
 what the driver returns, so a `Decimal` is stored as a string (a float would
 drop a `NUMBER(38,x)`'s digits), a timestamp as ISO 8601, and a `BINARY` as
-upper-case hex, Snowflake's own default output format. Anything else the
-encoder does not know is stored as `str()`, so a surprise degrades a cell's
-rendering rather than failing the fetch.
+upper-case hex, Snowflake's own default output format. A `Decimal` with a
+fractional part is written fixed-point, as `TO_VARCHAR` writes it; `str()`
+would spell -0.0000000001 as `-1E-10`. Anything else the encoder does not
+know is stored as `str()`, so a surprise degrades a cell's rendering rather
+than failing the fetch.
+
+The driver hands VARIANT, OBJECT, ARRAY, GEOGRAPHY and GEOMETRY over as
+indented JSON text (see
+[snowflake-behavior.md](snowflake-behavior.md#result-types)). The gateway
+drops the whitespace between tokens for those columns, picked by their
+`cursor.description` type code, because a Data cell is one line of 40
+characters and the indentation alone would fill it. It scans rather than
+parsing and re-serialising: a round trip would turn a 30-digit number into a
+float and fail on the `undefined` an ARRAY holds for a SQL `NULL`. A VARCHAR
+that only looks like JSON is the user's text and is left alone.
 
 ---
 
@@ -683,13 +695,24 @@ may not be complete — `SHOW` can return more than 10 000 rows (see
 [snowflake-behavior.md](snowflake-behavior.md#show-row-counts)) — and either
 way the answer is the same: fall back to a chunk small enough to trust whole.
 
-### Verified and unverified paging
+### Which SHOW commands page
 
 `LIMIT n FROM 'name'` keyset paging is verified correct for databases, schemas,
 tables and views, and a confirmed no-op for `SHOW PIPES`, `SHOW COLUMNS` and
-`SHOW STAGES`, at both `IN SCHEMA` and `IN DATABASE` scope. Tasks are
-unverified. The observations are in
+`SHOW STAGES`, at both `IN SCHEMA` and `IN DATABASE` scope. `SHOW TASKS`
+honours `LIMIT`, but its `FROM` is inclusive: a page starts with the cursor
+row itself. The observations are in
 [snowflake-behavior.md](snowflake-behavior.md#keyset-paging).
+
+`jobs.fetch_page` absorbs the inclusive `FROM` for every pageable type rather
+than special-casing tasks. A continuation page asks for one row more than the
+page size and drops a first row whose name equals the cursor. Exclusive
+types never produce that echo, so for them the spare row is simply one more
+row. Without the spare, a page size of 1 would come back as the echo alone,
+the cursor would not move, and the stuck-cursor guard below would end the
+pass after the first task. The spare row is kept rather than trimmed:
+trimming would also trim the page of a statement that ignores `LIMIT`, which
+that guard then takes for the whole result.
 
 `ObjectType.pageable` is where that finding lives in the code, and the
 statement builders consult it: `show_objects`/`show_objects_in_database` emit
@@ -745,7 +768,7 @@ can move it.
    is known. Cannot cover a statement nobody has tested yet.
 2. **Guard the continuation chain** (`FetchService._execute`, see "The fetch
    scheduler"). Catches an unpageable statement the builder did not know
-   about — tasks, most obviously, still unverified.
+   about, such as a type Snowflake adds later.
 3. **A row ceiling in the gateway** (`ROW_CEILING`, `PoolGateway._collect`).
    The only bound that applies to every statement rather than to the ones
    somebody remembered to cap. It reads the cursor in batches and raises
@@ -1768,8 +1791,12 @@ Detail pane's own `fr` absorbs whatever is left.
 
 - The Pipes (n) **Execution State** column is derived from `invalid_reason`,
   not read from `SYSTEM$PIPE_STATUS` — see "Column headers mirror Snowflake".
-  Only `RUNNING` and `STOPPED` are reachable; Snowflake's `PAUSED` and
-  `STOPPED_*` variants are not distinguishable this way.
+  Only `RUNNING` and `STOPPED` are reachable, and **a paused pipe reads
+  `RUNNING`**: pausing leaves `invalid_reason` empty, and `SHOW PIPES` has no
+  column for it (see
+  [snowflake-behavior.md](snowflake-behavior.md#pipe-execution-state)). A
+  dropped stage does set `invalid_reason`; a dropped file format or target
+  table leaves Snowflake itself reporting `RUNNING`.
 - `PIPE_ACTIVITY` (the schema-wide latest-per-pipe snapshot the Pipes (n) list
   reads) carries `PIPE_ACTIVITY_HISTORY`'s 13-day TTL override although the
   `INFORMATION_SCHEMA` coverage argument does not apply to it, and
@@ -1792,15 +1819,12 @@ Detail pane's own `fr` absorbs whatever is left.
   `SearchDialog.on_mount` is commented out — cross-database column search was
   judged not ready. Restoring that call alone would find only the columns of
   tables someone has opened: nothing fills a database's columns in bulk.
-- `SHOW TASKS` is unverified for `LIMIT`/`FROM`. It is no hang risk either way
-  — if it ignores both clauses, the cursor-progress guard completes the pass
-  after a single repeat instead of looping — but verifying it would let
-  `ObjectType.pageable` state a fact rather than a default.
-- `DATA_PREVIEW`'s JSON encoding is unverified for `VARIANT`, `BINARY`,
-  `TIMESTAMP_TZ`, `VECTOR` and `GEOGRAPHY`: which Python types the driver
-  returns for them decides whether `jobs.encode_data_preview` keeps their
-  meaning. A surprise degrades a cell's rendering rather than failing the
-  fetch.
+- The Data tab shows what the driver returns, and the driver loses a little
+  on the way: a `DECFLOAT` is rounded to 28 significant digits, `TIME` and
+  `TIMESTAMP` values are cut to microseconds, and a `TIMESTAMP_LTZ` comes in
+  the session's `TIMEZONE` rather than the machine's. Its other cells keep
+  their meaning (see
+  [snowflake-behavior.md](snowflake-behavior.md#result-types)).
 - `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`) bounds a denied or abandoned
   approval for OAuth and password+MFA, but not for browser SSO
   (`externalbrowser`): the installed driver waits on a socket with no timeout

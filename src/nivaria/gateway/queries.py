@@ -395,12 +395,11 @@ def pipe_history(
     history down to one pipe.
 
     TABLE_NAME and START_TIME are table-function named arguments, not an
-    ordinary SELECT's WHERE clause -- whether the driver's pyformat bind
-    works inside one is untested, so both are quote_literal'd/computed as
-    plain SQL text instead, the same "where binding does not clearly apply"
-    reasoning `queries.py`'s own module docstring already carries for
-    `SHOW ... FROM`. PIPE_NAME, filtering the function's *output*, is an
-    ordinary WHERE value and binds normally.
+    ordinary SELECT's WHERE clause. They are quote_literal'd/computed as
+    plain SQL text, from before it was known that a pyformat bind works
+    there too (verified live, see docs/snowflake-behavior.md "Copy
+    history"). PIPE_NAME, filtering the function's *output*, is an ordinary
+    WHERE value and binds normally.
 
     `max_rows` bounds the result the same way `pipe_activity_history` does,
     and matters slightly more here: the PIPE_NAME filter is applied to the
@@ -509,9 +508,9 @@ def task_history(database: str, schema: str, task: str, max_rows: int) -> str:
     name resolution.
 
     Every named argument here is a table-function argument, not an ordinary
-    SELECT's WHERE clause -- whether the driver's pyformat bind works inside
-    one is untested, so all of them are quote_literal'd/computed as plain SQL
-    text instead, the same reasoning `pipe_history` already documents. There
+    SELECT's WHERE clause, and all of them are quote_literal'd/computed as
+    plain SQL text, as in `pipe_history` and for the same historical reason:
+    a pyformat bind works there too, but that was verified only later. There
     is therefore no bound `%s` parameter at all here, unlike `pipe_history`,
     where PIPE_NAME filters the function's *output* rather than being a named
     argument itself.
