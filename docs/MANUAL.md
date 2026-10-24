@@ -210,7 +210,7 @@ role switch.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| cache age | 900 | Seconds cached metadata stays fresh before what is on screen is refreshed in the background. `0` disables background refreshing; `F5` still works. |
+| cache age | 300 | Seconds cached metadata stays fresh before what is on screen is refreshed in the background. `0` disables background refreshing; `F5` still works. |
 | connection pool size | 3 | Connections to keep open (1–5). Every connection may cost an MFA prompt. |
 | fetch page size | 1000 | Rows one fetch job asks for. Lowering it mainly makes fetching slower. |
 | pipe history fetch window (days) | 90 | Days of pipe load history fetched and cached. |

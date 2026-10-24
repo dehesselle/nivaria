@@ -41,7 +41,7 @@ def test_they_are_grouped_the_way_the_dialog_renders_them() -> None:
 
 
 def test_their_defaults_are_the_documented_ones() -> None:
-    assert CACHE_TTL.default == 900
+    assert CACHE_TTL.default == 300
     assert POOL_SIZE.default == 3
     assert PAGE_SIZE.default == 1000
     assert PIPE_HISTORY_FETCH_DAYS.default == 90

@@ -49,7 +49,7 @@ view's query.
 ## Background load
 
 nivaria refreshes only what is on screen. The footer Countdown shows how long
-until the first part of the screen is older than **cache age** (900 seconds
+until the first part of the screen is older than **cache age** (300 seconds
 by default); at zero, every part of the screen that old is fetched again at
 background priority. Each part ages from its own last fetch, so refreshes
 come as each part runs out, not all at once. Nothing else is fetched in the

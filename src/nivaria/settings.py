@@ -45,7 +45,7 @@ CACHE_TTL = Setting(
         "(and hides the footer countdown); an explicit refresh still works."
     ),
     group="Cache",
-    default=900,
+    default=300,
 )
 
 POOL_SIZE = Setting(
