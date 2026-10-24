@@ -573,6 +573,19 @@ class MainScreen(Screen):
                 severity="error",
                 timeout=8,
             )
+            return
+        self.app.call_from_thread(self._retry_failed)
+
+    def _retry_failed(self) -> None:
+        """Refetch whatever on screen failed, now that a warehouse is set.
+
+        Without a warehouse every SELECT-backed scope on screen fails, and
+        the sweep only retries a failed scope one TTL after it failed: left
+        to that, the warehouse that fixes them would show nothing for
+        minutes.
+        """
+        for scope in self.repo.failed_scopes(self._idle_watched()):
+            self._request(scope, Priority.VISIBLE)
 
     @work(thread=True)
     def _switch_role(self, role: str) -> None:

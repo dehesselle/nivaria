@@ -458,11 +458,51 @@ def test_next_due_of_a_never_fetched_scope_is_now(repo) -> None:
     assert repo.next_due(900, [databases_scope()]) == 0
 
 
-def test_next_due_leaves_out_a_failed_refresh(repo) -> None:
+def fail_old_rows(repo, scope, fetched_ago: float, attempted_ago: float) -> None:
+    """Rows fetched `fetched_ago` seconds back, then a refresh that failed
+    `attempted_ago` seconds back."""
+    now = time.time()
+    generation = repo.begin_pass(scope, now - fetched_ago)
+    repo.write_page(scope, generation, db_rows("ACME"), None)
+    repo.finish_pass(scope, generation)
+    repo.fail_pass(scope, repo.begin_pass(scope, now - attempted_ago), "no warehouse")
+
+
+def test_a_failed_refresh_is_retried_one_ttl_after_it_was_attempted(repo) -> None:
+    """Its rows are long overdue, but aged by them every sweep would rerun the
+    failing statement. The sweep and the countdown agree on it."""
     scope = databases_scope()
-    load(repo, scope, db_rows("ACME"))
-    repo.fail_pass(scope, repo.begin_pass(scope), "no warehouse")
-    assert repo.next_due(900, [scope]) is None
+    fail_old_rows(repo, scope, fetched_ago=5000, attempted_ago=100)
+    assert repo.stale_scopes(900, [scope]) == []
+    assert 799 < repo.next_due(900, [scope]) <= 800
+
+
+def test_a_failed_refresh_is_due_once_its_attempt_is_a_ttl_old(repo) -> None:
+    scope = databases_scope()
+    fail_old_rows(repo, scope, fetched_ago=5000, attempted_ago=1000)
+    assert repo.stale_scopes(900, [scope]) == [scope]
+    assert repo.next_due(900, [scope]) <= 0
+
+
+def test_rows_count_as_fetched_when_their_pass_began(repo) -> None:
+    """A pass of many pages ends later than its first page was asked for;
+    stamping the end would let those rows go stale before the countdown
+    said so."""
+    scope = databases_scope()
+    started = time.time() - 30
+    generation = repo.begin_pass(scope, started)
+    repo.write_page(scope, generation, db_rows("ACME"), "ACME")
+    repo.write_page(scope, generation, db_rows("BETA"), None)
+    repo.finish_pass(scope, generation)
+    assert repo.entry(scope).fetched_at == started
+
+
+def test_a_failed_refresh_is_listed_as_failed_and_keeps_its_rows_age(repo) -> None:
+    scope = databases_scope()
+    fail_old_rows(repo, scope, fetched_ago=5000, attempted_ago=100)
+    entry = repo.entry(scope)
+    assert entry.age() > 4999
+    assert repo.failed_scopes([scope, schemas_scope("MYDB")]) == [scope]
 
 
 def test_next_due_is_none_when_refreshing_is_off(repo) -> None:

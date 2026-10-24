@@ -99,9 +99,11 @@ that explains it in full.
 13. **An update never moves the tree cursor, and a highlight only shows.**
     Revealing is for jumps from outside the tree. See "The cursor must not
     move" and "A highlight is not a jump".
-14. **Staleness is decided in one place**, `models.is_stale`, so the sweep, the
-    tree and the detail views cannot drift apart. See "A scope whose data does
-    not age on the ordinary cadence".
+14. **Staleness is decided in one place**, `models.due_in`. The sweep and the
+    countdown reach it through `Entry.due`, the tree and the detail views
+    through `models.is_stale`, so none of them can drift apart. See "A scope
+    whose data does not age on the ordinary cadence" and "The staleness
+    sweep".
 15. **nivaria stores no password.** The driver owns every credential. See
     "Credentials and profiles".
 16. **Modules outside the UI layer do not import Textual, and the gateway is a
@@ -269,6 +271,11 @@ Refreshing a scope is a **pass**:
 3. finish — delete rows in this scope *older* than this generation, then mark
    it complete.
 
+The rows count as fetched when the pass began (`attempted_at`, stamped by
+`begin_pass`), not when it finished. A pass of many pages ends later than its
+first page was asked for, and stamping the end would let those rows go stale
+before the countdown said so.
+
 Deletion only at the end is the point. Rows are never briefly absent, so the UI
 never flashes an empty list on the way to a full one, and a chunked refresh is
 safe to display while still running. An object that really was dropped
@@ -279,7 +286,11 @@ interrupted, so a fetch that was already in flight when the user navigated away
 is fenced on arrival instead.
 
 A **failed** pass does not sweep. Showing yesterday's tables beats showing an
-empty schema because the warehouse was briefly unreachable.
+empty schema because the warehouse was briefly unreachable. Those rows would
+then look as current as any others once the error toast is gone, so the notes
+that report a failed first fetch (category lists, History, Data) also report a
+failed refresh, with the time the rows on screen were fetched
+(`tables.failed_refresh`).
 
 The cache is an optimisation, never a dependency: if it cannot be opened the
 app still runs, it just has nothing cached. It uses WAL journalling so a
@@ -608,12 +619,12 @@ is still honoured for every scope with no override, and a first-ever fetch
 (nothing cached yet) still happens immediately regardless.
 
 `scope_ttl` is reached only through **`models.due_in(scope, age, ttl)`,
-which is the one place staleness is decided anywhere in the app.** The footer
-countdown reads it directly (`Repository.next_due`); every yes/no check goes
-through `models.is_stale`, which is `due_in` reaching zero. Its three callers
-are `Repository.stale_scopes` (the background sweep), `_ScopedView.ensure` (a
-detail view's paint-time check) and `ObjectTree._ensure` (the tree's). Having
-one function is not tidiness: separate checks drift, and a tree that
+which is the one place staleness is decided anywhere in the app.** The sweep
+and the footer countdown (`Repository.stale_scopes` and `next_due`) reach it
+through `Entry.due`, which also knows the ledger states (see "The staleness
+sweep"). The paint-time checks go through `models.is_stale`, which is `due_in`
+reaching zero: `_ScopedView.ensure` (a detail view's) and `ObjectTree._ensure`
+(the tree's). Having one function is not tidiness: separate checks drift, and a tree that
 snapshots `CACHE_TTL` at construction or skips `scope_ttl` ignores a settings
 change until restart.
 
@@ -1063,18 +1074,21 @@ screen for nearly two TTLs.
 Zero means requested, not fresh. Until a refresh lands, its data is up to one
 fetch's duration past its TTL, which is what the countdown's spinner shows.
 
-Two kinds of watched scope are left out of both the countdown and the sweep:
+**Busy** scopes, queued or mid-fetch, either themselves or through the prime
+that fills them (`models.filling_prime`), are left out of both the countdown
+and the sweep. A busy scope's old `fetched_at` reads as overdue until its pass
+lands, and requesting a listing that a database prime is filling would be the
+per-schema round trip the prime exists to replace.
 
-- **Busy** scopes, queued or mid-fetch, either themselves or through the
-  prime that fills them (`models.filling_prime`). A busy scope's old
-  `fetched_at` reads as overdue until its pass lands, and requesting a
-  listing that a database prime is filling would be the per-schema round
-  trip the prime exists to replace.
-- **Failed** refreshes (`ERROR`). `fail_pass` keeps the old `fetched_at`, so
-  a failed scope would read as overdue forever, hold the countdown at zero,
-  and have the sweep rerun the failing statement on every tick. It is still
-  retried by any sweep another scope triggers, and when the user navigates
-  back to it.
+A **failed** refresh (`ERROR`) ages from its last attempt (`attempted_at`)
+rather than from its rows. `fail_pass` keeps the old `fetched_at`, so aged by
+that a failed scope would read as overdue forever, and every sweep, whichever
+scope triggered it, would rerun the failing statement. It is retried one TTL
+after it failed, when the user navigates back to it, and at once after a
+successful warehouse switch (`MainScreen._retry_failed`), since a missing
+warehouse is the usual cause. `Entry.due` holds all of this, and
+`stale_scopes` and `next_due` both read it, so the sweep and the countdown
+agree on every scope.
 
 With nothing left to count, the countdown shows the full TTL. Scopes nobody
 is looking at are never refreshed this way; anything urgent was already

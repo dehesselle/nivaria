@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any, ClassVar, Protocol
 
 from rich.text import Text
@@ -70,27 +71,47 @@ HISTORY_NOTE = "detail-history-note"
 SQL = "detail-sql"
 
 
+def failed_refresh(entry: Entry) -> str | None:
+    """The note for a refresh that failed while older rows stay on screen.
+
+    `fail_pass` keeps those rows, so without this they look as current as
+    any others once the error toast is gone. Stated as the time they were
+    fetched rather than their age: the note only changes on a repaint, and
+    an age would be wrong by the next minute.
+    """
+    if entry.state is not CacheState.ERROR or entry.fetched_at is None:
+        return None
+    fetched = datetime.fromtimestamp(entry.fetched_at, UTC).astimezone()
+    return (
+        f"Showing rows fetched {fetched:%Y-%m-%d %H:%M}; "
+        f"the refresh failed: {entry.error}"
+    )
+
+
 def sync_list_note(note: Static, entry: Entry, noun: str) -> None:
     """Say so when a category's primary scope was positively fetched and
-    came back with nothing, or its only fetch attempt errored with no prior
-    success to fall back on -- never when it simply has not been fetched
-    yet. `EMPTY` (never touched) and `PARTIAL` (mid-refresh) both stay
-    silent rather than guess; only `COMPLETE` with zero rows, or `ERROR`
-    with no prior `fetched_at`, say anything. Same toggle-display,
-    recompute-in-full-every-repaint shape as `HistoryView.sync_history_note`.
+    came back with nothing, when its only fetch attempt errored with no
+    prior success to fall back on, or when a refresh failed and the rows
+    shown are older -- never when it simply has not been fetched yet.
+    `EMPTY` (never touched) and `PARTIAL` (mid-refresh) both stay silent
+    rather than guess. Same toggle-display, recompute-in-full-every-repaint
+    shape as `HistoryView.sync_history_note`.
     """
     error = entry.state is CacheState.ERROR and entry.fetched_at is None
+    stale = failed_refresh(entry)
     empty = entry.state is CacheState.COMPLETE and entry.row_count == 0
     if error:
         note.update(Text(f"Could not fetch: {entry.error}"))
+    elif stale is not None:
+        note.update(Text(stale))
     elif empty:
         note.update(Text(f"No {noun} in this schema."))
     # Assigned unconditionally, not only in the branches above, so a note
     # widget reused across CategoryView.show() (switching schemas without
     # remounting) never carries a stale class or visibility from the
     # previous schema's paint.
-    note.set_class(error, "-error")
-    note.display = error or empty
+    note.set_class(error or stale is not None, "-error")
+    note.display = error or stale is not None or empty
 
 
 class RowSource(Protocol):
@@ -267,8 +288,9 @@ class HistoryView(TabbedView):
         *scopes: Scope,
     ) -> None:
         """Say so when a history was capped rather than exhausted, when it
-        settled with nothing in the display window, or when its only fetch
-        attempt errored with nothing to fall back on.
+        settled with nothing in the display window, when its only fetch
+        attempt errored with nothing to fall back on, or when a refresh
+        failed and the rows shown are older.
 
         A history table has no natural bottom -- it just stops -- so a
         capped one is indistinguishable from a complete one by looking at
@@ -299,6 +321,9 @@ class HistoryView(TabbedView):
         )
         empty = settled and not dated and not capped
         error = empty and errored is not None
+        stale = next(
+            (text for entry in entries if (text := failed_refresh(entry))), None
+        )
 
         if capped:
             note.update(
@@ -310,9 +335,12 @@ class HistoryView(TabbedView):
             )
         elif error:
             note.update(Text(f"Could not fetch: {errored.error}"))
+        elif stale is not None:
+            note.update(Text(stale))
         elif empty:
             note.update(Text(f"No {noun} in the last {show_days} days."))
 
+        failed = not capped and (error or stale is not None)
         note.set_class(capped, "-capped")
-        note.set_class(error, "-error")
-        note.display = capped or empty
+        note.set_class(failed, "-error")
+        note.display = capped or failed or empty

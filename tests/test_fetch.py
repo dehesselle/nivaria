@@ -1104,6 +1104,38 @@ def test_a_prime_scope_has_no_mirror_table_of_its_own(repo) -> None:
         spec_for(prime_scope(ObjectType.TABLE, "MYDB"))
 
 
+def test_a_primes_rows_count_as_fetched_when_its_statement_was_sent(repo) -> None:
+    """The prime only claims its scopes once the result is back, so stamping
+    them then would make every schema's rows look younger than they are."""
+    import time
+
+    from nivaria.models import prime_scope
+
+    sent: list[float] = []
+
+    class Slow(FakeGateway):
+        def show_objects_in_database(self, *args, **kwargs):
+            sent.append(time.time())
+            time.sleep(0.05)
+            return super().show_objects_in_database(*args, **kwargs)
+
+    gateway = Slow(
+        schemas={"MYDB": ["AAA"]},
+        objects={("MYDB", "AAA", ObjectType.TABLE): ["A1"]},
+    )
+    load_schemas(repo, gateway)
+    aaa = objects_scope(ObjectType.TABLE, "MYDB", "AAA")
+    service = make_service(gateway, repo)
+    try:
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"))
+        assert wait_until(lambda: repo.entry(aaa).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    fetched_at = repo.entry(aaa).fetched_at
+    assert fetched_at is not None
+    assert fetched_at <= sent[0]
+
+
 def test_a_failing_prime_is_reported(repo) -> None:
     from nivaria.models import prime_scope
 

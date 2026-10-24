@@ -187,7 +187,11 @@ A stage has no view of its own; the stage list shows everything about it.
 Columns sourced from something other than `SHOW` (Last DDL, pipe and task
 activity, tags, history, data) stay blank when the session has no warehouse
 or lacks the privilege; see
-[OPERATIONS.md](OPERATIONS.md#warehouse-and-privileges).
+[OPERATIONS.md](OPERATIONS.md#warehouse-and-privileges). Picking a warehouse
+fills them in.
+
+When a refresh fails, the rows already shown stay, and a note above the list,
+History or Data table says when they were fetched.
 
 ## Status footer
 

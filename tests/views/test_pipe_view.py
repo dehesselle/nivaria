@@ -456,6 +456,23 @@ async def test_an_uncapped_history_shows_no_note(repo) -> None:
         assert not app.query_one("#detail-history-note", Static).display
 
 
+async def test_a_history_whose_refresh_failed_says_its_rows_are_older(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    repo.fail_pass(scope, repo.begin_pass(scope), "No active warehouse selected")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = app.query_one("#detail-history-note", Static)
+        assert note.display
+        assert note.has_class("-error")
+        assert str(note.render()).endswith(
+            "the refresh failed: No active warehouse selected"
+        )
+
+
 async def test_a_new_load_arriving_keeps_the_highlighted_load(repo) -> None:
     """Rows used to be keyed by position, so a newer load at the top moved
     every key along -- and a repaint put the cursor back on the first row

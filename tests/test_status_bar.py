@@ -400,6 +400,92 @@ async def test_a_failed_refresh_does_not_hold_the_countdown_at_zero(
         config.set(CACHE_TTL, CACHE_TTL.default)
 
 
+async def test_a_failed_scope_is_not_retried_by_a_sweep_another_scope_triggers(
+    repo, clock
+) -> None:
+    """Scopes age on their own clocks, so sweeps come often. Each one used to
+    rerun every failed statement on screen, whichever scope it was for."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_schemas(repo, "OTHER", "BBB")
+    failed = schemas_scope("MYDB")
+    age_by(repo, failed, 100)
+    repo.fail_pass(failed, repo.begin_pass(failed), "no warehouse")
+    config.set(CACHE_TTL, 60)
+    try:
+        fetch = RecordingFetch()
+        app = Harness(repo, fetch)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            screen.set_databases(["MYDB", "OTHER"])
+            await pilot.pause()
+            fetch.busy.clear()
+            fetch.requests.clear()
+
+            clock.now += 30
+            age_by(repo, schemas_scope("OTHER"), 100)
+            screen._sweep()
+            await pilot.pause()
+            assert fetch.scopes == ["schemas:OTHER"]
+
+            fetch.busy.clear()
+            fetch.requests.clear()
+            clock.now += 30
+            screen._sweep()
+            await pilot.pause()
+            assert "schemas:MYDB" in fetch.scopes
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_with_only_failed_scopes_on_screen_the_countdown_runs_to_their_retry(
+    repo, clock
+) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    failed = schemas_scope("MYDB")
+    age_by(repo, failed, 100)
+    repo.fail_pass(failed, repo.begin_pass(failed), "no warehouse")
+    config.set(CACHE_TTL, 60)
+    try:
+        fetch = RecordingFetch()
+        app = Harness(repo, fetch)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.set_databases(["MYDB"])
+            await pilot.pause()
+            fetch.busy.clear()
+            fetch.requests.clear()
+            assert await countdown_after_tick(app, pilot) == 60
+            clock.now += 15
+            assert await countdown_after_tick(app, pilot) == 45
+    finally:
+        config.set(CACHE_TTL, CACHE_TTL.default)
+
+
+async def test_a_warehouse_switch_retries_what_failed_on_screen(repo, clock) -> None:
+    """Without a warehouse every SELECT-backed scope fails. Left to the sweep,
+    they would wait a whole TTL after the warehouse that fixes them is set."""
+    from nivaria.service.jobs import Priority
+
+    put_schemas(repo, "MYDB", "AAA")
+    failed = schemas_scope("MYDB")
+    repo.fail_pass(failed, repo.begin_pass(failed), "no warehouse")
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch, pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.set_databases(["MYDB"])
+        await pilot.pause()
+        fetch.busy.clear()
+        fetch.requests.clear()
+        app.screen._switch_warehouse("COMPUTE_WH")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+    assert dict(fetch.requests)["schemas:MYDB"] == int(Priority.VISIBLE)
+
+
 async def test_nothing_on_screen_goes_stale_before_the_countdown_reaches_zero(
     repo, clock
 ) -> None:

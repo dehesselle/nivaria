@@ -55,6 +55,8 @@ background priority. Each part ages from its own last fetch, so refreshes
 come as each part runs out, not all at once. Nothing else is fetched in the
 background except the initial requests after connecting. A cache age of `0`
 stops background refreshing; `F5` still refreshes the node under the cursor.
+A cache age shorter than one fetch makes that part due again as soon as its
+refresh lands, so it is refetched back to back, one fetch at a time.
 
 The `ACCOUNT_USAGE` half of a pipe's history is refetched at most every 13
 days, since it only changes as data ages out of the 14-day
@@ -95,7 +97,8 @@ left split; switch again or reconnect.
 
 A role switch stops background fetching, switches to that role's own cache
 file and starts over. Each (account, role) has its own cache, so a role used
-before is still filled. A warehouse switch leaves the cache alone.
+before is still filled. A warehouse switch leaves the cache alone and
+refetches whatever on screen had failed.
 
 ## Limits and timeouts
 
@@ -115,12 +118,13 @@ exists.
 ## Failure and recovery
 
 - **A failed refresh keeps the old rows** and reports the error. Nothing is
-  removed until a refresh succeeds.
+  removed until a refresh succeeds. Until then, a note above a list, a
+  History or a Data table says when the rows shown were fetched.
 - **Something dropped in Snowflake** disappears the next time nivaria trips
   over it: the failed fetch triggers a refresh of the list above it, which
   removes the node. "Does not exist" is shown as a warning.
-- **A failed fetch is retried** by the next background refresh, or when you
-  navigate back to it — not in a loop.
+- **A failed fetch is retried** one cache age after it failed, when you
+  navigate back to it, or right after you pick a warehouse — not in a loop.
 - **Reconnect** with `Ctrl+O` (Connection › Open...). It replaces the whole
   pool and reopens the cache for the new identity.
 - The cache is never required: if it cannot be opened, nivaria runs with

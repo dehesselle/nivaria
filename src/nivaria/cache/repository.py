@@ -39,7 +39,6 @@ from nivaria.models import (
     ScopeType,
     SFObject,
     due_in,
-    is_stale,
     pipe_activity_scope,
     schemas_scope,
 )
@@ -509,11 +508,37 @@ class Entry:
     #: are current but not all of them. A view showing this scope is
     #: expected to say so -- see `HistoryView`.
     truncated: bool = False
+    #: When the latest pass began, finished or not. See `due`.
+    attempted_at: float | None = None
 
     def age(self, now: float | None = None) -> float | None:
-        if self.fetched_at is None:
-            return None
-        return max(0.0, (now if now is not None else time.time()) - self.fetched_at)
+        return _since(self.fetched_at, now)
+
+    def due(self, scope: Scope, ttl: float, now: float | None = None) -> float | None:
+        """Seconds until a background refresh is due for this entry's scope.
+
+        The one answer the sweep and the countdown both read, so they cannot
+        disagree. Zero or less once due; None when a `ttl` of 0 disables
+        refreshing.
+
+        EMPTY is due at once: a scope claimed by a pass that has not finished
+        yet carries the previous pass's fetched_at, so it can read as fresh
+        while holding no rows. A failed refresh keeps its old `fetched_at`,
+        so it ages from its last attempt instead. Aged by `fetched_at`, it
+        would read as overdue forever, and every sweep would rerun the
+        failing statement.
+        """
+        if self.state is CacheState.EMPTY:
+            return 0.0
+        if self.state is CacheState.ERROR:
+            return due_in(scope, _since(self.attempted_at, now), ttl)
+        return due_in(scope, self.age(now), ttl)
+
+
+def _since(moment: float | None, now: float | None) -> float | None:
+    if moment is None:
+        return None
+    return max(0.0, (now if now is not None else time.time()) - moment)
 
 
 MISSING = Entry(
@@ -594,6 +619,7 @@ class Repository:
             row_count=row["row_count"],
             error=row["error"],
             truncated=bool(row["truncated"]),
+            attempted_at=row["attempted_at"],
         )
 
     def _select(
@@ -866,10 +892,7 @@ class Repository:
         return [
             scope
             for scope, entry in self._entries(among)
-            # EMPTY short-circuits is_stale: a scope claimed by a pass that
-            # has not finished yet carries the previous pass's fetched_at, so
-            # it can read as fresh while holding no rows.
-            if entry.state is CacheState.EMPTY or is_stale(scope, entry.age(now), ttl)
+            if (due := entry.due(scope, ttl, now)) is not None and due <= 0
         ]
 
     def next_due(self, ttl: float, among: Iterable[Scope]) -> float | None:
@@ -878,22 +901,20 @@ class Repository:
         What the footer countdown shows: nothing it watches goes stale before
         this reaches zero. Zero or less for anything already due; None when
         nothing counts, or when a `ttl` of 0 disables refreshing.
-
-        A failed refresh does not count. It keeps its old `fetched_at`, so it
-        would read as overdue forever, hold the countdown at zero, and have
-        the sweep rerun the failing statement on every tick.
         """
         if ttl <= 0:
             return None
         now = time.time()
-        due = [
-            0.0
-            if entry.state is CacheState.EMPTY
-            else due_in(scope, entry.age(now), ttl)
-            for scope, entry in self._entries(among)
-            if entry.state is not CacheState.ERROR
-        ]
+        due = [entry.due(scope, ttl, now) for scope, entry in self._entries(among)]
         return min((d for d in due if d is not None), default=None)
+
+    def failed_scopes(self, among: Iterable[Scope]) -> list[Scope]:
+        """Which of `among` failed their last refresh."""
+        return [
+            scope
+            for scope, entry in self._entries(among)
+            if entry.state is CacheState.ERROR
+        ]
 
     def _entries(self, among: Iterable[Scope]) -> Iterator[tuple[Scope, Entry]]:
         """Each scope's ledger entry, read from whichever store holds it."""
@@ -905,25 +926,32 @@ class Repository:
 
     # --------------------------------------------------------------- writes
 
-    def begin_pass(self, scope: Scope) -> int:
+    def begin_pass(self, scope: Scope, started_at: float | None = None) -> int:
         """Claim the scope for a new refresh pass and return its generation.
 
         `fetched_at` is deliberately carried over rather than cleared: until
         this pass finishes, the age the status bar shows is still the age of
         the rows actually on screen.
+
+        `started_at` is when the statement behind this pass was sent, for a
+        caller that only claims the pass once its result is back (see
+        `replace_grouped`). It defaults to now.
         """
+        if started_at is None:
+            started_at = time.time()
         with self._store(scope).connect() as connection:
             entry = self._entry(connection, scope)
             generation = entry.generation + 1
             connection.execute(
                 """
                 INSERT INTO cache_entry
-                    (scope, state, generation, fetched_at,
+                    (scope, state, generation, fetched_at, attempted_at,
                      next_cursor, row_count, error, truncated)
-                VALUES (?, ?, ?, ?, NULL, 0, NULL, 0)
+                VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, 0)
                 ON CONFLICT(scope) DO UPDATE SET
                     state = excluded.state,
                     generation = excluded.generation,
+                    attempted_at = excluded.attempted_at,
                     next_cursor = NULL,
                     row_count = 0,
                     error = NULL,
@@ -934,6 +962,7 @@ class Repository:
                     CacheState.PARTIAL.value,
                     generation,
                     entry.fetched_at,
+                    started_at,
                 ),
             )
         return generation
@@ -1009,9 +1038,12 @@ class Repository:
         rows written are the newest and entirely valid -- so this is not an
         error state; it is the difference between 'this is the history' and
         'this is as much of the history as was asked for'.
+
+        The rows count as fetched when the pass began, not now. Its first
+        page is that old, and stamping the end would let a long pass's oldest
+        rows go stale before the countdown says so.
         """
         spec = spec_for(scope)
-        now = time.time()
         sweep = f"DELETE FROM {spec.name} WHERE _scope = ? AND _generation < ?"
         count_rows = f"SELECT COUNT(*) AS n FROM {spec.name} WHERE _scope = ?"
         with self._store(scope).connect() as connection:
@@ -1022,13 +1054,12 @@ class Repository:
             connection.execute(
                 """
                 UPDATE cache_entry
-                   SET state = ?, fetched_at = ?, next_cursor = NULL,
+                   SET state = ?, fetched_at = attempted_at, next_cursor = NULL,
                        row_count = ?, error = NULL, truncated = ?
                  WHERE scope = ?
                 """,
                 (
                     CacheState.COMPLETE.value,
-                    now,
                     count,
                     int(truncated),
                     scope.key,
@@ -1037,7 +1068,9 @@ class Repository:
         return True
 
     def replace_grouped(
-        self, grouped: Mapping[Scope, Sequence[dict[str, Any]]]
+        self,
+        grouped: Mapping[Scope, Sequence[dict[str, Any]]],
+        started_at: float | None = None,
     ) -> None:
         """Run a complete pass for each scope from one already-fetched result.
 
@@ -1049,9 +1082,12 @@ class Repository:
         point of passing them: a schema with no tables has to read as
         "fetched, none" rather than "never fetched", or the tree would keep
         asking for it and the node would never settle.
+
+        `started_at` is when that one statement was sent, which is how old
+        every scope's rows are.
         """
         for scope, rows in grouped.items():
-            generation = self.begin_pass(scope)
+            generation = self.begin_pass(scope, started_at)
             self.write_page(scope, generation, rows, None)
             self.finish_pass(scope, generation)
 

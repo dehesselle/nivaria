@@ -802,6 +802,21 @@ async def test_a_preview_that_could_not_be_fetched_says_why(repo) -> None:
         assert "No active warehouse selected" in str(note.render())
 
 
+async def test_a_preview_whose_refresh_failed_says_its_rows_are_older(repo) -> None:
+    ref = put_table(repo, "ORDERS")
+    put_data_preview(repo, "ORDERS", {"ID": 1})
+    scope = data_preview_scope("MYDB", "PUBLIC", "ORDERS")
+    repo.fail_pass(scope, repo.begin_pass(scope), "Statement timed out")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane, _ = await _show_data(app, pilot, ref)
+        assert pane.query_one("#detail-data", DataTable).row_count == 1
+        note = pane.query_one("#detail-data-note", Static)
+        assert note.display
+        assert note.has_class("-error")
+        assert str(note.render()).endswith("the refresh failed: Statement timed out")
+
+
 async def test_moving_to_another_table_on_the_data_tab_shows_its_own_columns(
     repo,
 ) -> None:

@@ -41,7 +41,7 @@ from nivaria.models import (
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.grants import compose_grants, paint_grants
-from nivaria.ui.views.tables import PanelledTable, TabbedView
+from nivaria.ui.views.tables import PanelledTable, TabbedView, failed_refresh
 
 #: Ordering the table falls back to, and returns to whenever this (reused)
 #: view is pointed at a different object -- see `show`.
@@ -329,10 +329,13 @@ class ColumnsView(TabbedView, ObjectView):
         note = self.query_one(f"#{DATA_NOTE}", Static)
         entry = self.repo.entry(self.data_scope())
         error = entry.state is CacheState.ERROR and entry.fetched_at is None
+        stale = failed_refresh(entry)
         empty = entry.state is CacheState.COMPLETE and count == 0
         capped = entry.truncated and count > 0
         if error:
             note.update(Text(f"Could not fetch: {entry.error}"))
+        elif stale is not None:
+            note.update(Text(stale))
         elif empty:
             note.update(Text(f"No rows in this {self.ref.type.value.lower()}."))
         elif capped:
@@ -340,8 +343,8 @@ class ColumnsView(TabbedView, ObjectView):
             total = detail.get("rows")
             of = f" of {total:,}" if isinstance(total, int) and total > count else ""
             note.update(Text(f"Showing {count:,}{of} rows, in no particular order."))
-        note.set_class(error, "-error")
-        note.display = error or empty or capped
+        note.set_class(error or stale is not None, "-error")
+        note.display = error or stale is not None or empty or capped
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated

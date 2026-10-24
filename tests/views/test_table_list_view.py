@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
 from nivaria.models import (
     ObjectRef,
@@ -48,6 +48,26 @@ async def test_the_table_list_view_lists_every_cached_table(repo) -> None:
         # Truncated to the calendar day -- the full timestamp is a hover
         # tooltip now, see test_table_list_hover.py.
         assert table.get_cell_at((1, 3)).plain == "2026-01-01"
+
+
+async def test_a_list_whose_refresh_failed_says_its_rows_are_older(repo) -> None:
+    """The failed refresh keeps the old rows, and once the error toast is
+    gone they look as current as any others."""
+    put_table(repo, "ORDERS")
+    scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
+    repo.fail_pass(scope, repo.begin_pass(scope), "Network is unreachable")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        assert pane.query_one("#detail-list", DataTable).row_count == 1
+        note = pane.query_one("#detail-list-note", Static)
+        assert note.display
+        assert note.has_class("-error")
+        text = str(note.render())
+        assert text.startswith("Showing rows fetched ")
+        assert text.endswith("the refresh failed: Network is unreachable")
 
 
 async def test_table_stats_columns_render_when_the_scope_has_data(repo) -> None:

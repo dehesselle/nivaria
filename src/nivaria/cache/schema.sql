@@ -587,6 +587,11 @@ CREATE TABLE IF NOT EXISTS cache_entry (
     state       TEXT    NOT NULL,
     generation  INTEGER NOT NULL DEFAULT 0,
     fetched_at  REAL,
+    -- When the latest pass began, whether it finished, failed or is still
+    -- running. A finished pass copies it into fetched_at, so rows age from
+    -- the first page asked for rather than the last one received; a failed
+    -- pass is retried one TTL after it.
+    attempted_at REAL,
     next_cursor TEXT,
     row_count   INTEGER NOT NULL DEFAULT 0,
     error       TEXT,

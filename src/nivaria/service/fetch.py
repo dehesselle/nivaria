@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -307,6 +308,7 @@ class FetchService:
         object_type: ObjectType = scope.object_type
         database: str = scope.database
         allow_reconnect = job.priority is not Priority.BACKGROUND
+        started_at = time.time()
         try:
             rows, usable = fetch_database(
                 self._gateway, scope, allow_reconnect=allow_reconnect
@@ -339,7 +341,7 @@ class FetchService:
                 objects_scope(object_type, database, str(schema_name)), []
             ).append(row)
 
-        self._repo.replace_grouped(grouped)
+        self._repo.replace_grouped(grouped, started_at)
         for filled in grouped:
             self._announce(filled, complete=True)
         self._announce(scope, complete=True)

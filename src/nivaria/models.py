@@ -500,8 +500,8 @@ def due_in(scope: Scope, age: float | None, ttl: float) -> float | None:
     now, whatever the `ttl`: that only ever disables refreshing, never the
     first fetch.
 
-    The footer countdown reads this directly; every yes/no staleness check
-    goes through `is_stale`, so both always agree.
+    The sweep and the footer countdown read this through `Entry.due`, the
+    paint-time checks through `is_stale`, so they always agree.
     """
     if age is None:
         return 0.0
@@ -513,12 +513,11 @@ def due_in(scope: Scope, age: float | None, ttl: float) -> float | None:
 def is_stale(scope: Scope, age: float | None, ttl: float) -> bool:
     """Whether cached rows `age` seconds old are due a refetch.
 
-    The one place this is decided, called from all three that ask:
-    `Repository.stale_scopes` (the background sweep), `_ScopedView.ensure`
-    (a detail view's paint-time check) and `ObjectTree._ensure` (the tree's).
-    They drifted apart once already -- the tree was checking a TTL
+    The yes/no form of `due_in`, for the paint-time checks:
+    `_ScopedView.ensure` (a detail view's) and `ObjectTree._ensure` (the
+    tree's). They drifted apart once already -- the tree was checking a TTL
     snapshotted at construction and skipping `scope_ttl` entirely -- which is
-    why the decision lives here rather than being written out three times.
+    why the decision lives in `due_in` rather than being written out in each.
     """
     remaining = due_in(scope, age, ttl)
     return remaining is not None and remaining <= 0
