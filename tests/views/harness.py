@@ -21,6 +21,7 @@ from nivaria.models import (
     pipe_activity_history_scope,
     pipe_activity_scope,
     pipe_history_scope,
+    pipe_status_scope,
     table_stats_scope,
     tag_references_scope,
     task_activity_history_scope,
@@ -186,6 +187,24 @@ def put_pipe(repo: Repository, name: str, **extra) -> ObjectRef:
         ],
     )
     return ObjectRef(ObjectType.PIPE, "MYDB", "PUBLIC", name)
+
+
+def put_pipe_status(repo: Repository, statuses: dict[str, str]) -> None:
+    """Seeds the schema's SYSTEM$PIPE_STATUS pass: pipe name -> the
+    executionState its JSON carries."""
+    load(
+        repo,
+        pipe_status_scope("MYDB", "PUBLIC"),
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": pipe,
+                "PIPE_STATUS": f'{{"executionState":"{state}","pendingFileCount":0}}',
+            }
+            for pipe, state in statuses.items()
+        ],
+    )
 
 
 def put_pipe_activity(repo: Repository, pipe: str, **extra) -> None:

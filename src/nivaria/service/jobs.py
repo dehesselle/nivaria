@@ -17,12 +17,14 @@ from __future__ import annotations
 import datetime
 import itertools
 import json
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import IntEnum
 from typing import Any
 
-from nivaria.gateway.gateway import SnowflakeGateway
+from nivaria.gateway.gateway import SnowflakeGateway, is_missing_object
 from nivaria.gateway.queries import MAX_PAGE_SIZE
 from nivaria.models import Scope, ScopeType
 from nivaria.settings import (
@@ -35,7 +37,14 @@ from nivaria.settings import (
     config,
 )
 
+_log = logging.getLogger(__name__)
+
 _sequence = itertools.count()
+
+#: Pipes per SYSTEM$PIPE_STATUS statement. Snowflake spends about 25 ms per
+#: pipe even when they share a statement, so a batch of 50 holds a connection
+#: for about a second (docs/measurements.md "Pipe status").
+PIPE_STATUS_BATCH = 50
 
 
 class Priority(IntEnum):
@@ -111,6 +120,7 @@ def fetch_page(
     *,
     allow_reconnect: bool = True,
     pipe_target: tuple[str, str, str] | None = None,
+    pipe_names: Sequence[str] | None = None,
 ) -> Page:
     """Fetch one page.
 
@@ -131,6 +141,10 @@ def fetch_page(
     gateway, not the repository, so it cannot look up cached data). The
     caller (`FetchService._execute`) resolves it before calling here; every
     other scope type ignores this parameter.
+
+    `pipe_names` is the same kind of context for ScopeType.PIPE_STATUS: the
+    schema's pipes as SHOW PIPES last listed them, which the statement has to
+    name one by one. The caller reads them from the cache.
 
     A continuation page asks for one row more than `limit`, because `SHOW
     TASKS ... FROM 'name'` is inclusive: it starts with the cursor row itself,
@@ -282,6 +296,19 @@ def fetch_page(
                 ),
                 max_rows,
             )
+        case ScopeType.PIPE_STATUS:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # Batched by PIPE_STATUS_BATCH rather than `limit`: what bounds a
+            # job here is Snowflake's time per pipe, not rows per round trip.
+            return _pipe_status_page(
+                gateway,
+                scope.database,
+                scope.schema,
+                pipe_names or [],
+                cursor,
+                allow_reconnect=allow_reconnect,
+            )
         case ScopeType.TASK_ACTIVITY:
             assert scope.database is not None
             assert scope.schema is not None
@@ -416,6 +443,52 @@ def fetch_page(
     if not full or not rows:
         return Page(rows)
     return Page(rows, str(rows[-1][NAME_COLUMN]))
+
+
+def _pipe_status_page(
+    gateway: SnowflakeGateway,
+    database: str,
+    schema: str,
+    names: Sequence[str],
+    cursor: str | None,
+    *,
+    allow_reconnect: bool,
+) -> Page:
+    """The next batch of `names` after `cursor`, keyed by name like a SHOW.
+
+    One pipe that no longer exists, or that the role may not see, fails the
+    whole statement at compile time (see docs/snowflake-behavior.md "Pipe
+    execution state"). That batch is then asked for one pipe at a time, so
+    one stale name costs its own status rather than 49 others'. A batch in
+    which no pipe answers raises the original error, so a dropped schema
+    still reaches the fetch layer's "does not exist" handling.
+    """
+    remaining = sorted(name for name in names if cursor is None or name > cursor)
+    batch = remaining[:PIPE_STATUS_BATCH]
+    if not batch:
+        return Page([])
+    try:
+        rows = gateway.pipe_status(
+            database, schema, batch, allow_reconnect=allow_reconnect
+        )
+    except Exception as error:
+        if not is_missing_object(error):
+            raise
+        rows = []
+        for name in batch:
+            try:
+                rows += gateway.pipe_status(
+                    database, schema, [name], allow_reconnect=allow_reconnect
+                )
+            except Exception as one:
+                if not is_missing_object(one):
+                    raise
+                _log.warning(
+                    "no pipe status for %s.%s.%s: %s", database, schema, name, one
+                )
+        if not rows:
+            raise
+    return Page(rows, batch[-1] if len(remaining) > len(batch) else None)
 
 
 def _capped(rows: list[dict[str, Any]], max_rows: int) -> Page:

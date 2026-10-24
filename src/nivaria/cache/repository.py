@@ -334,6 +334,13 @@ _PIPE_HISTORY = TableSpec(
     order_by=("LAST_LOAD_TIME",),
 )
 
+_PIPE_STATUS = TableSpec(
+    name="system_pipe_status",
+    columns=("PIPE_CATALOG_NAME", "PIPE_SCHEMA_NAME", "PIPE_NAME", "PIPE_STATUS"),
+    key=("PIPE_CATALOG_NAME", "PIPE_SCHEMA_NAME", "PIPE_NAME"),
+    order_by=("PIPE_NAME",),
+)
+
 _TASK_ACTIVITY = TableSpec(
     name="account_usage_task_history",
     columns=(
@@ -470,6 +477,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _PIPE_ACTIVITY_HISTORY
         case ScopeType.PIPE_HISTORY:
             return _PIPE_HISTORY
+        case ScopeType.PIPE_STATUS:
+            return _PIPE_STATUS
         case ScopeType.TASK_ACTIVITY:
             return _TASK_ACTIVITY
         case ScopeType.TASK_ACTIVITY_HISTORY:

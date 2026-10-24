@@ -1,22 +1,17 @@
 """Category view for the "Pipes (n)" node: status and load activity.
 
 Tabbed -- Status (one row per pipe: name, execution state, and
-`invalid_reason` -- a stopped pipe is otherwise indistinguishable from a
-healthy one) opens by default, alongside Activity (last load activity
-per pipe). Status needs no new scope: `invalid_reason` is already mirrored
-onto the same `SHOW PIPES` rows this view already reads for the Name column.
+`invalid_reason`) opens by default, alongside Activity (last load activity
+per pipe).
 
-"Execution State" is the one **inferred** column in this app (see docs/DESIGN.md,
-"Column headers mirror Snowflake"): it is not read from anywhere, it is `RUNNING` when `invalid_reason` is empty and `STOPPED`
-when it is not. Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`'
-`executionState`, which nivaria never queries -- that is a per-pipe function
-call, so showing it for a whole schema would cost one round trip per pipe,
-against the round-trips-dominate rule (see docs/DESIGN.md). The column is worth
-having anyway: an empty `invalid_reason` cell on its own reads as "nothing
-fetched", not "this pipe is fine". `RUNNING`/`STOPPED` borrow
-`executionState`'s vocabulary rather than inventing a third one, but only
-those two values are reachable -- Snowflake's `PAUSED` and its
-`STOPPED_*` variants are not distinguishable from `invalid_reason` alone.
+Execution State is Snowflake's own `executionState`, read with
+`SYSTEM$PIPE_STATUS` into its own scope (`pipe_status_scope`). Until a pipe's
+status has been read, its cell is blank: `invalid_reason` cannot stand in for
+it, since a paused pipe, or one whose target table or file format was
+dropped, has none (see docs/snowflake-behavior.md "Pipe execution state").
+The function takes one pipe at a time, so a pass costs Snowflake time per
+pipe; it is asked for only while the Status tab is shown, and only once the
+pipe list it names pipes from has been fetched -- see `scopes`.
 
 The base rows (every pipe that exists) come from `SHOW PIPES`, already
 mirrored for the tree's own category count -- no new fetch scope for those.
@@ -33,6 +28,7 @@ the SHOW-sourced Name column keeps rendering whatever was cached before.
 
 from __future__ import annotations
 
+import json
 from typing import Any, ClassVar
 
 from rich.text import Text
@@ -45,7 +41,13 @@ from nivaria.format import (
     format_bytes,
     format_timestamp_minutes,
 )
-from nivaria.models import ObjectRef, ObjectType, Scope, pipe_activity_scope
+from nivaria.models import (
+    ObjectRef,
+    ObjectType,
+    Scope,
+    pipe_activity_scope,
+    pipe_status_scope,
+)
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
@@ -131,8 +133,29 @@ class PipeListView(TabbedView, CategoryView):
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.scope.database, self.scope.schema)
 
+    def status_scope(self) -> Scope:
+        return pipe_status_scope(self.scope.database, self.scope.schema)
+
+    def _status_wanted(self) -> bool:
+        """Whether the status scope is on screen, for `scopes` and `ensure`.
+
+        Only while its tab is shown, like the Table view's Grants and Data:
+        a pass costs Snowflake time per pipe. And only once the pipe list
+        has been fetched, the way `PipeView` waits for a target table: the
+        pass names its pipes from that list, and would otherwise complete
+        empty and read as fresh.
+        """
+        return (
+            self.is_mounted
+            and self.query_one(TabbedContent).active == "tab-status"
+            and self.repo.entry(self.scope).fetched_at is not None
+        )
+
     def scopes(self) -> list[Scope]:
-        return [self.scope, self.activity_scope()]
+        scopes = [self.scope, self.activity_scope()]
+        if self._status_wanted():
+            scopes.append(self.status_scope())
+        return scopes
 
     def row_for(self, key: str) -> dict[str, Any] | None:
         return self._rows.get(key)
@@ -142,6 +165,9 @@ class PipeListView(TabbedView, CategoryView):
         self.ensure(self.scope, ttl)
         activity_scope = self.activity_scope()
         self.ensure(activity_scope, ttl)
+        status_scope = self.status_scope()
+        if self._status_wanted():
+            self.ensure(status_scope, ttl)
         # Both tabs read self.scope alone, so one Entry drives both notes --
         # activity_scope stays excluded, same as the merge below.
         entry = self.repo.entry(self.scope)
@@ -155,6 +181,12 @@ class PipeListView(TabbedView, CategoryView):
             name: row
             for row in self.repo.raw_rows(activity_scope)
             if (name := row.get("PIPE_NAME"))
+        }
+        # Read whether or not the tab wants a refresh: what an earlier pass
+        # stored is still what Snowflake said, within the cache age.
+        state_by_name = {
+            row["PIPE_NAME"]: _execution_state(row.get("PIPE_STATUS"))
+            for row in self.repo.raw_rows(status_scope)
         }
 
         status_table = self.query_one("#detail-status", DataTable)
@@ -182,12 +214,26 @@ class PipeListView(TabbedView, CategoryView):
                     Text(merged.get("FILE_NAME") or ""),
                     key=name,
                 )
-                invalid_reason = row.get("invalid_reason") or ""
-                # Derived from invalid_reason, not read from SYSTEM$PIPE_STATUS
-                # -- see the module docstring. Upper case because RUNNING/
-                # STOPPED are Snowflake's own executionState values, even though
-                # only those two of them can ever be reached this way.
-                execution_state = "STOPPED" if invalid_reason else "RUNNING"
                 status_table.add_row(
-                    Text(name), Text(execution_state), Text(invalid_reason), key=name
+                    Text(name),
+                    Text(state_by_name.get(name, "")),
+                    Text(row.get("invalid_reason") or ""),
+                    key=name,
                 )
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        if event.pane.id == "tab-status":
+            self.update_content()
+
+
+def _execution_state(status: str | None) -> str:
+    """`executionState` out of SYSTEM$PIPE_STATUS' JSON, or blank."""
+    if not status:
+        return ""
+    try:
+        return str(json.loads(status).get("executionState") or "")
+    except (ValueError, AttributeError):
+        # A repaint must not fail on whatever else the function may return.
+        return ""

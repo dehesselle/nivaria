@@ -107,6 +107,11 @@ class ScopeType(StrEnum):
     #: SELECT against INFORMATION_SCHEMA.COPY_HISTORY. Scoped to one pipe like
     #: COLUMNS is scoped to one table -- see `pipe_history_scope`.
     PIPE_HISTORY = "pipe_history"
+    #: Every pipe's SYSTEM$PIPE_STATUS in a schema. The function takes one
+    #: pipe as a constant, so a pass costs server time per pipe and pages
+    #: through the cached SHOW PIPES names in batches (see
+    #: queries.pipe_status). Needs no warehouse.
+    PIPE_STATUS = "pipe_status"
     #: Every task's *latest* run in a schema (bounded by the "task history
     #: fetch window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY rather than SHOW -- the same
@@ -233,6 +238,8 @@ class Scope:
                 )
             case ScopeType.PIPE_HISTORY:
                 return f"pipe_history:{self.database}.{self.schema}.{self.table}"
+            case ScopeType.PIPE_STATUS:
+                return f"pipe_status:{self.database}.{self.schema}"
             case ScopeType.TASK_ACTIVITY:
                 return f"task_activity:{self.database}.{self.schema}"
             case ScopeType.TASK_ACTIVITY_HISTORY:
@@ -338,6 +345,10 @@ def pipe_history_scope(database: str, schema: str, pipe: str) -> Scope:
     return Scope(ScopeType.PIPE_HISTORY, database=database, schema=schema, table=pipe)
 
 
+def pipe_status_scope(database: str, schema: str) -> Scope:
+    return Scope(ScopeType.PIPE_STATUS, database=database, schema=schema)
+
+
 def task_activity_scope(database: str, schema: str) -> Scope:
     return Scope(ScopeType.TASK_ACTIVITY, database=database, schema=schema)
 
@@ -439,7 +450,11 @@ def containing_scopes(scope: Scope) -> list[Scope]:
                 objects_scope(ObjectType.TABLE, scope.database, scope.schema),
                 objects_scope(ObjectType.VIEW, scope.database, scope.schema),
             ]
-        case ScopeType.PIPE_HISTORY | ScopeType.PIPE_ACTIVITY_HISTORY:
+        case (
+            ScopeType.PIPE_HISTORY
+            | ScopeType.PIPE_ACTIVITY_HISTORY
+            | ScopeType.PIPE_STATUS
+        ):
             assert scope.database is not None
             assert scope.schema is not None
             return [objects_scope(ObjectType.PIPE, scope.database, scope.schema)]

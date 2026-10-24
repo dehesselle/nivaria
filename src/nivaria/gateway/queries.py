@@ -421,6 +421,31 @@ def pipe_history(
     )
 
 
+def pipe_status(database: str, schema: str, names: Sequence[str]) -> str:
+    """SYSTEM$PIPE_STATUS for each named pipe, one row per pipe.
+
+    The function takes one pipe, and only as a constant: a column reference,
+    as in a SELECT over INFORMATION_SCHEMA.PIPES, fails to compile (see
+    docs/snowflake-behavior.md "Pipe execution state"). So the names are
+    written into the statement, one SELECT per pipe joined with UNION ALL,
+    which saves the round trips but not Snowflake's time per pipe. The
+    argument is a string holding the quoted, fully qualified name, so a
+    lower-case or spaced name resolves as written. Needs no warehouse.
+    """
+    return " UNION ALL ".join(
+        f"SELECT {quote_literal(database)} AS PIPE_CATALOG_NAME, "
+        f"{quote_literal(schema)} AS PIPE_SCHEMA_NAME, "
+        f"{quote_literal(name)} AS PIPE_NAME, "
+        "SYSTEM$PIPE_STATUS("
+        + quote_literal(
+            f"{quote_identifier(database)}.{quote_identifier(schema)}"
+            f".{quote_identifier(name)}"
+        )
+        + ") AS PIPE_STATUS"
+        for name in names
+    )
+
+
 def task_activity(fetch_days: int) -> str:
     """Every task's *latest* run in a schema, back to `fetch_days` ago.
 

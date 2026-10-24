@@ -226,6 +226,18 @@ class FetchService:
                 pipe_target = self._repo.pipe_target_table(
                     scope.database, scope.schema, scope.table
                 )
+            pipe_names = None
+            if scope.type is ScopeType.PIPE_STATUS:
+                assert scope.database is not None
+                assert scope.schema is not None
+                # Read again for every page, so a pass that outlives a pipe
+                # list refresh carries on with the newer list.
+                pipe_names = [
+                    obj.name
+                    for obj in self._repo.objects(
+                        objects_scope(ObjectType.PIPE, scope.database, scope.schema)
+                    ).rows
+                ]
             page = fetch_page(
                 self._gateway,
                 scope,
@@ -233,6 +245,7 @@ class FetchService:
                 self._page_size,
                 allow_reconnect=allow_reconnect,
                 pipe_target=pipe_target,
+                pipe_names=pipe_names,
             )
         # A worker thread boundary: the driver, the network and sqlite all
         # raise unrelated exception types, and any escape here would kill the

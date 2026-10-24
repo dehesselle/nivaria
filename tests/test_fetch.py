@@ -14,6 +14,7 @@ from nivaria.models import (
     databases_scope,
     grants_scope,
     objects_scope,
+    pipe_status_scope,
     schemas_scope,
     tag_references_scope,
 )
@@ -358,6 +359,80 @@ def test_pipe_history_without_a_resolved_target_raises() -> None:
             None,
             limit=1,
         )
+
+
+def _status_names(gateway) -> list[tuple[str, ...]]:
+    return [args[2] for name, args in gateway.calls if name == "pipe_status"]
+
+
+def test_pipe_status_is_asked_for_in_batches_named_from_the_pipe_list() -> None:
+    """SYSTEM$PIPE_STATUS costs Snowflake time per pipe even in one
+    statement, so a batch, not `limit`, bounds a job; the cursor is the
+    batch's last name, as for a SHOW page."""
+    from nivaria.service.jobs import PIPE_STATUS_BATCH
+
+    names = [f"P{i:03}" for i in range(PIPE_STATUS_BATCH + 3)]
+    gateway = FakeGateway()
+    scope = pipe_status_scope("MYDB", "PUBLIC")
+    first = fetch_page(gateway, scope, None, limit=1000, pipe_names=names[::-1])
+    assert len(first.rows) == PIPE_STATUS_BATCH
+    assert first.cursor == names[PIPE_STATUS_BATCH - 1]
+    last = fetch_page(gateway, scope, first.cursor, limit=1000, pipe_names=names)
+    assert [row["PIPE_NAME"] for row in last.rows] == names[PIPE_STATUS_BATCH:]
+    assert last.cursor is None
+    assert _status_names(gateway) == [
+        tuple(names[:PIPE_STATUS_BATCH]),
+        tuple(names[PIPE_STATUS_BATCH:]),
+    ]
+
+
+def test_pipe_status_with_no_pipes_completes_without_a_statement() -> None:
+    gateway = FakeGateway()
+    page = fetch_page(
+        gateway, pipe_status_scope("MYDB", "PUBLIC"), None, limit=1000, pipe_names=[]
+    )
+    assert page.rows == []
+    assert page.cursor is None
+    assert gateway.calls == []
+
+
+def test_one_missing_pipe_costs_only_its_own_status() -> None:
+    """Snowflake fails the whole statement for one pipe that no longer
+    exists, so that batch is asked for again pipe by pipe."""
+    gateway = FakeGateway()
+    gateway.missing_pipes = {"P_GONE"}
+    page = fetch_page(
+        gateway,
+        pipe_status_scope("MYDB", "PUBLIC"),
+        None,
+        limit=1000,
+        pipe_names=["P_A", "P_GONE", "P_B"],
+    )
+    assert [row["PIPE_NAME"] for row in page.rows] == ["P_A", "P_B"]
+    assert _status_names(gateway) == [
+        ("P_A", "P_B", "P_GONE"),
+        ("P_A",),
+        ("P_B",),
+        ("P_GONE",),
+    ]
+
+
+def test_a_batch_in_which_no_pipe_answers_fails_as_missing() -> None:
+    """Every pipe gone at once means the schema is: the error has to reach
+    the fetch layer, whose "does not exist" handling refreshes the listing."""
+    from nivaria.gateway.gateway import is_missing_object
+
+    gateway = FakeGateway()
+    gateway.missing_pipes = {"P_A", "P_B"}
+    with pytest.raises(Exception) as raised:
+        fetch_page(
+            gateway,
+            pipe_status_scope("MYDB", "PUBLIC"),
+            None,
+            limit=1000,
+            pipe_names=["P_A", "P_B"],
+        )
+    assert is_missing_object(raised.value)
 
 
 def test_task_activity_is_fetched_in_one_shot() -> None:
@@ -1398,6 +1473,34 @@ def test_pipe_activity_history_scope_reaches_the_right_gateway_call(repo) -> Non
         service.stop()
     assert [row["FILE_NAME"] for row in repo.raw_rows(scope)] == ["orders_1.csv.gz"]
     assert [c[0] for c in gateway.calls] == ["pipe_activity_history"]
+
+
+def test_a_pipe_status_pass_reads_every_cached_pipe_over_several_pages(
+    repo,
+) -> None:
+    """The statement has to name each pipe, and the names are whatever SHOW
+    PIPES last returned; the pass pages through them batch by batch."""
+    from nivaria.service.jobs import PIPE_STATUS_BATCH
+
+    names = [f"P{i:03}" for i in range(PIPE_STATUS_BATCH + 1)]
+    pipes = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
+    status = pipe_status_scope("MYDB", "PUBLIC")
+    gateway = FakeGateway(
+        objects={("MYDB", "PUBLIC", ObjectType.PIPE): names},
+        pipe_status={("MYDB", "PUBLIC", "P000"): '{"executionState":"PAUSED"}'},
+    )
+    service = make_service(gateway, repo)
+    try:
+        service.request(pipes)
+        assert wait_until(lambda: repo.entry(pipes).state is CacheState.COMPLETE)
+        service.request(status)
+        assert wait_until(lambda: repo.entry(status).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    rows = repo.raw_rows(status)
+    assert [row["PIPE_NAME"] for row in rows] == names
+    assert rows[0]["PIPE_STATUS"] == '{"executionState":"PAUSED"}'
+    assert len([c for c in gateway.calls if c[0] == "pipe_status"]) == 2
 
 
 def test_pipe_history_resolves_its_target_from_cached_pipe_activity(repo) -> None:

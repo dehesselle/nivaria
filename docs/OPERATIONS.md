@@ -23,7 +23,8 @@ updates when a fetch lands.
 
 The tree, every object list and the column lists come from `SHOW`, which
 needs no warehouse and costs no credits. A session with no warehouse can
-browse everything.
+browse everything. The Pipes list's Execution State is read with
+`SYSTEM$PIPE_STATUS`, which needs no warehouse either.
 
 These need a running warehouse and stay blank without one:
 

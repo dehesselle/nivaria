@@ -12,6 +12,7 @@ a fake in tests, with no driver import and no network.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 from nivaria.gateway import queries, sql_log
@@ -253,6 +254,15 @@ class SnowflakeGateway(Protocol):
         target_table: str,
         pipe_name: str,
         max_rows: int,
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]: ...
+
+    def pipe_status(
+        self,
+        database: str,
+        schema: str,
+        names: Sequence[str],
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -664,6 +674,19 @@ class PoolGateway:
         return self._fetch(
             queries.pipe_history(target_catalog, target_schema, target_table, max_rows),
             (pipe_name,),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def pipe_status(
+        self,
+        database: str,
+        schema: str,
+        names: Sequence[str],
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        return self._fetch(
+            queries.pipe_status(database, schema, names),
             allow_reconnect=allow_reconnect,
         )
 

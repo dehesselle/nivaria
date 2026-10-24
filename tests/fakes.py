@@ -9,6 +9,7 @@ driven end to end with none of that.
 from __future__ import annotations
 
 import threading
+from collections.abc import Sequence
 from typing import Any
 
 from nivaria.gateway import queries
@@ -140,6 +141,7 @@ class FakeGateway:
         pipe_activity: dict[tuple[str, str], list[Row]] | None = None,
         pipe_activity_history: dict[tuple[str, str, str], list[Row]] | None = None,
         pipe_history: dict[tuple[str, str, str, str], list[Row]] | None = None,
+        pipe_status: dict[tuple[str, str, str], str] | None = None,
         task_activity: dict[tuple[str, str], list[Row]] | None = None,
         task_activity_history: dict[tuple[str, str, str], list[Row]] | None = None,
         task_history: dict[tuple[str, str, str], list[Row]] | None = None,
@@ -168,6 +170,13 @@ class FakeGateway:
         self._pipe_activity_history = pipe_activity_history or {}
         #: Keyed by (target_catalog, target_schema, target_table, pipe_name).
         self._pipe_history = pipe_history or {}
+        #: Keyed by (database, schema, pipe_name); the value is the JSON
+        #: string SYSTEM$PIPE_STATUS returns. A pipe not listed reads as
+        #: running.
+        self._pipe_status = pipe_status or {}
+        #: Pipe names that fail SYSTEM$PIPE_STATUS as Snowflake does for a
+        #: dropped pipe -- and with them any statement that names them.
+        self.missing_pipes: set[str] = set()
         self._task_activity = task_activity or {}
         #: Keyed by (database, schema, task_name).
         self._task_activity_history = task_activity_history or {}
@@ -488,6 +497,30 @@ class FakeGateway:
         if self.raise_on_pipe_history:
             raise RuntimeError("No active warehouse selected in the current session")
         return list(self._pipe_history.get(key, []))[:max_rows]
+
+    def pipe_status(
+        self,
+        database: str,
+        schema: str,
+        names: Sequence[str],
+        *,
+        allow_reconnect: bool = True,
+    ) -> list[Row]:
+        self.calls.append(("pipe_status", (database, schema, tuple(names))))
+        for name in names:
+            if name in self.missing_pipes:
+                raise MissingObjectError(f"Pipe '{name}' does not exist")
+        return [
+            {
+                "PIPE_CATALOG_NAME": database,
+                "PIPE_SCHEMA_NAME": schema,
+                "PIPE_NAME": name,
+                "PIPE_STATUS": self._pipe_status.get(
+                    (database, schema, name), '{"executionState":"RUNNING"}'
+                ),
+            }
+            for name in names
+        ]
 
     def task_activity(
         self,

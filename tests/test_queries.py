@@ -199,6 +199,21 @@ def test_pipe_history_targets_information_schema_copy_history() -> None:
     )
 
 
+def test_pipe_status_names_each_pipe_as_a_quoted_constant() -> None:
+    """SYSTEM$PIPE_STATUS only takes a constant, so the names are written into
+    the statement; quoting each identifier inside the literal keeps a
+    lower-case or spaced name as written, verified live on the sandbox."""
+    assert queries.pipe_status("MYDB", "PUBLIC", ["P_A", "it's lower"]) == (
+        "SELECT 'MYDB' AS PIPE_CATALOG_NAME, 'PUBLIC' AS PIPE_SCHEMA_NAME, "
+        "'P_A' AS PIPE_NAME, "
+        'SYSTEM$PIPE_STATUS(\'"MYDB"."PUBLIC"."P_A"\') AS PIPE_STATUS '
+        "UNION ALL "
+        "SELECT 'MYDB' AS PIPE_CATALOG_NAME, 'PUBLIC' AS PIPE_SCHEMA_NAME, "
+        "'it''s lower' AS PIPE_NAME, "
+        'SYSTEM$PIPE_STATUS(\'"MYDB"."PUBLIC"."it\'\'s lower"\') AS PIPE_STATUS'
+    )
+
+
 def test_task_activity_targets_account_usage_task_history_with_bound_params() -> None:
     """Same shape as pipe_activity, against ACCOUNT_USAGE.TASK_HISTORY
     instead: DATABASE_NAME/SCHEMA_NAME bind as ordinary params, QUALIFY

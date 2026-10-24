@@ -181,8 +181,10 @@ A stage has no view of its own; the stage list shows everything about it.
 - **History** merges a pipe's load or a task's run history from two Snowflake
   sources. A failed load or run shows its error below the table. A note above
   says when the history was capped.
-- **Status** (Pipe list) shows each pipe's `invalid_reason`; its Execution
-  State column reads `RUNNING` or `STOPPED` from that.
+- **Status** (Pipe list) shows each pipe's `invalid_reason` and the
+  execution state Snowflake reports for it (`RUNNING`, `PAUSED`,
+  `STOPPED_...`). The state is read, 50 pipes at a time, only while this tab
+  is open; a pipe whose state has not been read yet shows none.
 
 Columns sourced from something other than `SHOW` (Last DDL, pipe and task
 activity, tags, history, data) stay blank when the session has no warehouse

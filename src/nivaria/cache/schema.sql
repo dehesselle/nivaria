@@ -378,6 +378,25 @@ CREATE TABLE IF NOT EXISTS information_schema_copy_history (
 CREATE INDEX IF NOT EXISTS information_schema_copy_history_scope
     ON information_schema_copy_history(_scope);
 
+-- Every pipe's SYSTEM$PIPE_STATUS in a schema, one row per pipe. The
+-- function takes one pipe as a constant and returns a JSON string, kept
+-- here exactly as returned; the Pipes (n) list reads executionState out of
+-- it. The three name columns are not Snowflake's output but the pipe each
+-- call was made for, named like account_usage_copy_history's. Needs no
+-- warehouse. Verified live on 2026-10-25 (docs/snowflake-behavior.md).
+CREATE TABLE IF NOT EXISTS system_pipe_status (
+    PIPE_CATALOG_NAME TEXT NOT NULL,
+    PIPE_SCHEMA_NAME  TEXT NOT NULL,
+    PIPE_NAME         TEXT NOT NULL,
+    PIPE_STATUS       TEXT,
+    _scope            TEXT    NOT NULL,
+    _generation       INTEGER NOT NULL,
+    _fetched_at       REAL    NOT NULL,
+    PRIMARY KEY (PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME)
+);
+CREATE INDEX IF NOT EXISTS system_pipe_status_scope
+    ON system_pipe_status(_scope);
+
 -- Every task's latest run in a schema (bounded by the "task history fetch
 -- window" setting), sourced via a real SELECT against
 -- SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY (needs a running warehouse) rather

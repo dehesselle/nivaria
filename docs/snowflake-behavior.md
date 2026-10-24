@@ -229,6 +229,17 @@ A paused pipe therefore reads exactly like a running one in `SHOW PIPES`.
 Dropping a file format or a target table goes unnoticed by Snowflake itself
 until a load is attempted.
 
+Batching calls with `UNION ALL`, on the sandbox (2026-10-25):
+
+- The function returns a JSON string. For a healthy pipe it carried exactly
+  `executionState`, `pendingFileCount` and `pendingHistoryRefreshJobsCount`.
+- The argument `'"DB"."SCHEMA"."p lower"'`, quoted identifiers inside a
+  string literal, resolves a lower-case name with a space as written.
+- One pipe that does not exist fails the **whole statement** at compile time,
+  with `002003 (02000): SQL compilation error: Pipe '"DB"."SCHEMA"."NAME"'
+  does not exist or not authorized.` (errno 2003). A missing schema fails the
+  same way. The other pipes in the statement return nothing.
+
 ## Result types
 
 Every timestamp column nivaria reads from `SHOW` (databases, schemas, tables,

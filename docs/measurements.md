@@ -44,9 +44,11 @@ sandbox, 2026-10-24:
 | one statement per pipe | 27 | 2.5 s (~94 ms each) |
 | one `UNION ALL` statement, one call per pipe | 22 | 0.9 s |
 | one `UNION ALL` statement, one call per pipe | 587 | 14.5 s |
+| one `UNION ALL` statement, one call per pipe (2026-10-25, three runs) | 50 | 0.8–1.3 s |
 
 Batching saves the round trips, but the server still spends ~25 ms per
-pipe.
+pipe. The 50-pipe batch is the shape the Pipes (n) list's status pass
+sends (`PIPE_STATUS_BATCH`).
 
 ## Search
 

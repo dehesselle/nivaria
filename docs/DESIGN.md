@@ -455,6 +455,7 @@ the same exception `information_schema_columns` established).
 | `PIPE_ACTIVITY` | `ACCOUNT_USAGE.COPY_HISTORY`, latest row per pipe | Pipes (n) activity columns; target-table resolution | warehouse, `IMPORTED PRIVILEGES` |
 | `PIPE_ACTIVITY_HISTORY` | the same view, one pipe, unreduced | Pipe view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
 | `PIPE_HISTORY` | `INFORMATION_SCHEMA.COPY_HISTORY` | Pipe view History (recent half) | warehouse, a resolved target table |
+| `PIPE_STATUS` | `SYSTEM$PIPE_STATUS`, one call per pipe, batched | Pipes (n) Execution State | a fetched pipe list |
 | `TASK_ACTIVITY` | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | Tasks (n): Last Scheduled, Last Run State | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view History (recent half) | warehouse |
@@ -515,6 +516,20 @@ their Grants tab is shown (see "What decides a view's shape"). A
 materialized view is listed by `SHOW VIEWS` (`is_materialized = true`) and
 so opens as a view, and `ON VIEW` covers it (see
 [snowflake-behavior.md](snowflake-behavior.md#show-grants)).
+
+`PIPE_STATUS` has no batch form either, and is a function rather than a
+`SHOW`: `SYSTEM$PIPE_STATUS` takes one pipe, as a constant, so no query over
+a pipe list can call it. A pass names each pipe from the cached `SHOW PIPES`
+rows and joins one call per pipe with `UNION ALL`, in batches of
+`PIPE_STATUS_BATCH`, each batch one page of the pass. That saves the round
+trips but not Snowflake's time per pipe (see
+[measurements.md](measurements.md#pipe-status)), which is why the list asks
+for it only while its Status tab is shown. One pipe that no longer exists, or
+that the role may not see, fails a whole batch at compile time, so that batch
+is asked for again one pipe at a time and the pipe is left out: its cell
+stays blank until the next pass of the pipe list drops it. A batch in which
+no pipe answers fails as "does not exist", so a dropped schema still reaches
+the fetch layer's self-healing.
 
 #### One row per pipe, in SQL
 
@@ -1313,14 +1328,19 @@ listed in `scopes()` only while its tab is up -- the same conditional
 it otherwise. Switching objects while on Grants or Data keeps the tab, and
 so fetches each one's grants or rows, which is what is on screen.
 
+The Pipes (n) list's Status tab follows the same conditional although it is
+the tab the list opens on: its execution state costs Snowflake time per pipe
+(see "A second source"), and a list left on Activity should not keep paying
+for it. It also waits for the pipe list itself, which its pass names pipes
+from.
+
 Two of those decisions are worth their reasoning:
 
 `PipeListView` is tabbed but `TaskListView` is not, even though a pipe and a
 task look symmetrical. Status ("which of my pipes are broken?") needs *every*
 pipe in the schema to be useful, so it lives on the list rather than on a
-single pipe's view — and it costs no new scope, since `invalid_reason` is
-already on the `SHOW PIPES` rows the list reads anyway. A schema's tasks have
-only the one thing to show today, so a single table is enough.
+single pipe's view. A schema's tasks have only the one thing to show today,
+so a single table is enough.
 
 `ViewView` is a view's whole Table view plus one tab, because a view is
 the one type that is genuinely **both** shapes the registry already had:
@@ -1411,17 +1431,13 @@ names in the `TAG_REFERENCES_ALL_COLUMNS` rows, not of the rows themselves,
 since a multi-value tag has one row per value. A test holds every tooltip to a column the
 cache actually has.
 
-Type and Tags are computed, but only restate what the cache holds. There is
-exactly one *inferred* column in the app, one that stands in for a Snowflake
-value nivaria never reads, and it is called out as such in
-`pipe_list_view.py`: the Pipes (n) Status tab's **Execution State**, which
-is `RUNNING` when `invalid_reason` is empty and `STOPPED` when it is not.
-Snowflake's own name for the concept is `SYSTEM$PIPE_STATUS`' `executionState`,
-which nivaria never queries — it is a per-pipe function call, so covering a
-schema with it would cost one round trip per pipe. The column earns its place
-because an empty `invalid_reason` cell alone reads as "nothing fetched"
-rather than "this pipe is fine", but only two of `executionState`'s values
-are reachable this way.
+Type and Tags are computed, but only restate what the cache holds. No column
+stands in for a Snowflake value nivaria has not read. The Pipes (n) Status
+tab's **Execution State** is `SYSTEM$PIPE_STATUS`' `executionState` as
+returned, and stays blank until it has been read, rather than being guessed
+from `invalid_reason`: a paused pipe, or one whose target table or file
+format was dropped, has no `invalid_reason` (see
+[snowflake-behavior.md](snowflake-behavior.md#pipe-execution-state)).
 
 **Grants are one row per grantee**, not one per `SHOW GRANTS` row: Grantee,
 Granted To and Privileges, with OWNERSHIP first and `+` marking a privilege
@@ -1790,14 +1806,6 @@ Detail pane's own `fr` absorbs whatever is left.
 
 ## Accepted design gaps
 
-- The Pipes (n) **Execution State** column is derived from `invalid_reason`,
-  not read from `SYSTEM$PIPE_STATUS` — see "Column headers mirror Snowflake".
-  Only `RUNNING` and `STOPPED` are reachable, and **a paused pipe reads
-  `RUNNING`**: pausing leaves `invalid_reason` empty, and `SHOW PIPES` has no
-  column for it (see
-  [snowflake-behavior.md](snowflake-behavior.md#pipe-execution-state)). A
-  dropped stage does set `invalid_reason`; a dropped file format or target
-  table leaves Snowflake itself reporting `RUNNING`.
 - `PIPE_ACTIVITY` (the schema-wide latest-per-pipe snapshot the Pipes (n) list
   reads) carries `PIPE_ACTIVITY_HISTORY`'s 13-day TTL override although the
   `INFORMATION_SCHEMA` coverage argument does not apply to it, and
