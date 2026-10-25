@@ -55,8 +55,11 @@ repository root on `sys.path`.
 
 ## Linting and formatting
 
-**ruff** is installed globally and runs on default settings; there is
-deliberately no `[tool.ruff]` configuration. After changes:
+**ruff** is installed globally and runs on default rules. The only
+`[tool.ruff]` setting is `required-version`, which pins the minor release
+because ruff's defaults change between minors; raise it together with the pin
+in `.github/workflows/build.yml` once the new minor's findings are reviewed.
+After changes:
 
 ```sh
 ruff format
@@ -64,6 +67,16 @@ ruff check
 ```
 
 Let the formatter decide.
+
+## CI and releases
+
+`.github/workflows/build.yml` runs on every push and pull request: ruff and
+`reuse lint`, the tests on Linux, Windows and macOS with Python 3.12 (plus
+3.14 on Linux), and a wheel build that is smoke-tested by importing it.
+
+Pushing a `v*` tag additionally checks that the wheel's version matches the
+tag, creates a draft GitHub release with the wheel and sdist, and publishes to
+PyPI through trusted publishing (GitHub environment `pypi`).
 
 ## Licensing
 
