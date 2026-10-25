@@ -2,12 +2,11 @@
 
 ![main screen](docs/screenshot.svg)
 
-> __Nivarius, nivaria, nivarium__  
-> _Latin adjective_
+> __Nivarius, nivaria, nivarium__ · _Latin adjective_
 >
-> “Of snow,” “belonging to snow,” or “snow-related.” _Nivaria_ is its feminine singular form.
+> “Of snow”, “belonging to snow” or “snow-related”. _Nivaria_ is its feminine singular form.
 
-Nivaria is a terminal UI to browse and search objects in Snowflake: databases,
+Nivaria is a [Textual](https://textual.textualize.io)-based TUI to browse and search objects in Snowflake: databases,
 schemas, tables, views, pipes, stages and tasks, with their columns, grants,
 tags, load and run history, and a preview of table data.
 
@@ -32,8 +31,6 @@ databases to browse, `/` searches, `F9` opens the menu.
 
 - The Data tab and the activity, history and tag columns run `SELECT`s on the
   active warehouse, which consumes credits. The tree and object lists do not.
-- nivaria stores no passwords; login tokens are kept by the Snowflake driver's
-  own credential cache.
 
 ## Documentation
 
