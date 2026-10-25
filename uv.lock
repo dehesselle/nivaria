@@ -985,7 +985,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
-    { name = "snowflake-connector-python", extras = ["secure-local-storage"], specifier = ">=4.7.3" },
+    { name = "snowflake-connector-python", extras = ["secure-local-storage"], specifier = ">=4.7.3,<5" },
     { name = "tcoda", specifier = ">=0.8.0,<0.9" },
     { name = "textual", specifier = ">=8.2.8,<9" },
 ]

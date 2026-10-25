@@ -20,6 +20,14 @@ The menu bar, settings and dialog chrome come from **tcoda**, a shared library
 installed from PyPI like any other dependency. Its source is the sibling
 checkout `../tcoda`; `../snakecam` and `../vc` use it too.
 
+`snowflake-connector-python` is held below 5 on purpose. The 5.x line is a
+rewrite on Snowflake's Rust core, so lifting the cap is a migration, not a
+bump: it drops the `keyring` extra that `gateway/credential_cache.py` imports
+and keeps its own token cache, which on Windows has no fallback for an OAuth
+token too large for Credential Manager. It also ignores the `timeout` argument
+of `cursor.execute()` that bounds a data preview, and renames or retires
+several connect kwargs in `ConnectParams.to_connect_kwargs`.
+
 ## Running
 
 ```sh
