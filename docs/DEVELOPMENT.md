@@ -96,9 +96,9 @@ seam to Snowflake) are core principles in
 - Comments explain why the obvious alternative was rejected.
 - Test names are sentences describing the behaviour they protect.
 
-## Live-account tools
+## Tools
 
-Both scripts in `tools/` import nothing from nivaria, so they can be copied to
+The scripts in `tools/` import nothing from nivaria, so they can be copied to
 a machine that reaches the account.
 
 - `tools/probe_snowflake.py` checks `SHOW ... LIMIT n FROM 'name'` paging and
@@ -116,6 +116,15 @@ a machine that reaches the account.
 
   ```sh
   python tools/gen_test_ddl.py --seed 1 --out tools/data/renetest_ddl.sql
+  ```
+
+- `tools/trim_svg.py` shrinks a screenshot SVG from Textual to about a
+  quarter of its size. It merges Rich's per-segment backgrounds and text
+  runs and drops the per-line clip paths. The result looks the same.
+
+  ```sh
+  python tools/trim_svg.py shot.svg              # writes shot.min.svg
+  python tools/trim_svg.py *.svg --in-place
   ```
 
 ## Adding a scope

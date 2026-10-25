@@ -1,5 +1,7 @@
 # Nivaria
 
+![main screen](docs/screenshot.svg)
+
 > __Nivarius, nivaria, nivarium__  
 > _Latin adjective_
 >
