@@ -16,6 +16,11 @@ Every statement is built in `gateway/queries.py`, and every one is read-only:
 ROLE` / `USE WAREHOUSE` when you switch. The Log panel (`F1`) shows each
 statement as it is sent.
 
+Every session reports itself as `nivaria` in
+`SNOWFLAKE.ACCOUNT_USAGE.SESSIONS.CLIENT_ENVIRONMENT:APPLICATION`; join on
+`SESSION_ID` to attribute `QUERY_HISTORY` rows. nivaria sets no `QUERY_TAG`, so
+a tag set on your user or account still applies to its queries.
+
 Nothing waits on Snowflake: the screen always shows what is cached and
 updates when a fetch lands.
 

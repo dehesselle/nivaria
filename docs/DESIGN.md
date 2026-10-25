@@ -894,6 +894,10 @@ reasons are here.
 - Sessions are kept alive, and the driver's SSO/MFA token cache is enabled, so
   the session does not expire mid-browse and re-prompt hours later, and
   connections 2..N usually do not prompt at all.
+- Sessions identify themselves with the driver's `application` kwarg
+  (`nivaria`), not a `QUERY_TAG`: a session-level tag silently overrides any
+  tag an admin set on the user or account, which would break their cost
+  attribution for every nivaria query.
 - A worker that needs a connection while all N are busy simply blocks. That is
   the "stalled worker" state and it needs no special handling beyond the Pool
   gauge reflecting it.

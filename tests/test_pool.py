@@ -89,6 +89,14 @@ def test_a_denied_or_abandoned_approval_is_bounded_by_the_connect_timeout() -> N
     assert kwargs["external_browser_timeout"] == CONNECT_TIMEOUT_SECONDS
 
 
+def test_connections_identify_themselves_as_nivaria_to_snowflake() -> None:
+    """Admins attribute sessions by this, since nivaria deliberately sets no
+    QUERY_TAG that would override theirs."""
+    kwargs = ConnectParams(account="a", user="u").to_connect_kwargs()
+    assert kwargs["application"] == "nivaria"
+    assert "session_parameters" not in kwargs
+
+
 def test_empty_role_and_warehouse_are_omitted_rather_than_sent_blank() -> None:
     kwargs = ConnectParams(
         account="a", user="u", role="", warehouse=""

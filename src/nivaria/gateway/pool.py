@@ -89,6 +89,10 @@ class ConnectParams:
             # actually governs.
             "login_timeout": CONNECT_TIMEOUT_SECONDS,
             "external_browser_timeout": CONNECT_TIMEOUT_SECONDS,
+            # Lets an admin attribute sessions to nivaria (it lands in
+            # SESSIONS.CLIENT_ENVIRONMENT) where a session QUERY_TAG would
+            # override any tag they set on the user or account.
+            "application": "nivaria",
         }
         if self.role:
             kwargs["role"] = self.role
