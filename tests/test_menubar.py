@@ -21,10 +21,10 @@ from textual.app import App
 from textual.widgets import OptionList, Static
 
 import nivaria.ui.app as app_module
+from nivaria import __version__
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
 from nivaria.ui.screens.main import MainScreen
-from nivaria.version import __version__
 
 
 class Harness(App[None]):

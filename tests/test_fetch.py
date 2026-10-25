@@ -821,7 +821,20 @@ def test_cancel_where_drops_queued_scopes(repo) -> None:
 def test_a_cancelled_scope_stops_paging_after_the_current_page(repo) -> None:
     """The in-flight page cannot be interrupted -- a thread worker's blocking
     call is not preemptible -- but the chain must stop right after it."""
-    gateway = FakeGateway(databases=[f"DB_{i:03d}" for i in range(100)])
+    gate = threading.Event()
+
+    # Holds every page after the first until the cancel is in: an instant fake
+    # lets a slow runner finish all ten pages before the test can cancel.
+    class Gated(FakeGateway):
+        served = 0
+
+        def show_databases(self, **kwargs):
+            self.served += 1
+            if self.served > 1:
+                gate.wait(timeout=2)
+            return super().show_databases(**kwargs)
+
+    gateway = Gated(databases=[f"DB_{i:03d}" for i in range(100)])
     pages: list[bool] = []
     service = FetchService(
         gateway,
@@ -835,11 +848,13 @@ def test_a_cancelled_scope_stops_paging_after_the_current_page(repo) -> None:
     try:
         assert wait_until(lambda: len(pages) >= 1)
         service.cancel_where(lambda s: s == scope)
+        gate.set()
         time.sleep(0.2)
     finally:
+        gate.set()
         service.stop()
-    # Far short of the ten pages a full run would have produced.
-    assert len(pages) < 10
+    # The first page, plus at most the one in flight when the cancel came.
+    assert len(pages) <= 2
     assert repo.entry(scope).state is CacheState.PARTIAL
 
 

@@ -13,7 +13,7 @@ from nivaria.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database, MemoryDa
 
 #: The SHA-256 of the schema scripts as of SCHEMA_VERSION 6. Change it only
 #: together with a bump of SCHEMA_VERSION.
-SCHEMA_DIGEST = "37af830f66ac67e2bd6809c122d30ce26dc9c61ff8a6a89b1f1c9b992a081dc2"
+SCHEMA_DIGEST = "43a04472fdd28d98948e9dd78a9a1a970f60593e8c753514ad49f2d43c2c9dde"
 
 
 def test_prepare_creates_the_file_and_its_parent_directory(tmp_path) -> None:

@@ -7,8 +7,7 @@ import sys
 
 import pytest
 
-from nivaria import main
-from nivaria.version import __version__
+from nivaria import __version__, main
 
 
 def test_version_prints_the_version_and_exits_without_starting_the_app(

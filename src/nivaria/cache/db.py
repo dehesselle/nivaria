@@ -36,7 +36,7 @@ from pathlib import Path
 #: mirror tables plus the freshness ledger, search.sql the derived view over
 #: them (and so has to run second).
 _SCHEMA_SCRIPTS: tuple[str, ...] = tuple(
-    files("nivaria.cache").joinpath(name).read_text()
+    files("nivaria.cache").joinpath(name).read_text(encoding="utf-8")
     for name in ("schema.sql", "search.sql")
 )
 
@@ -113,7 +113,7 @@ class Database:
 #: the file has, since Repository's ledger code reads both. Its mirror tables
 #: come along and stay empty, which costs nothing. preview.sql for the rows.
 _MEMORY_SCRIPTS: tuple[str, ...] = tuple(
-    files("nivaria.cache").joinpath(name).read_text()
+    files("nivaria.cache").joinpath(name).read_text(encoding="utf-8")
     for name in ("schema.sql", "preview.sql")
 )
 
