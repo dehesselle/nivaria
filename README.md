@@ -43,3 +43,7 @@ databases to browse, `/` searches, `F9` opens the menu.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — setup, tests, linting, conventions and live-account tools.
 - [docs/snowflake-behavior.md](docs/snowflake-behavior.md) — what live Snowflake accounts were observed to do.
 - [docs/measurements.md](docs/measurements.md) — timings and data volumes behind the design.
+
+## AI disclosure
+
+Substantial parts of this code were generated with Sonnet 5.x/Opus 5.x. Generated code was tested, but not every line was reviewed in detail.
