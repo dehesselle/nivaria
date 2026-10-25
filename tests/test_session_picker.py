@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The warehouse and role pickers: same fuzzy-picker pattern as the database
 picker (see test_main_screen.py), but wired through the Connection menu and,
 unlike the database picker, actually rewriting the pool's session."""

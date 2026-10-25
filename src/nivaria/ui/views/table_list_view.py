@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Category view for the "Tables (n)" node: an overview of every table in a
 schema, the way Snowsight's own table list does it.
 

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Generate DDL to populate a near-empty Snowflake sandbox with test objects.
 
 Self-contained: this file imports nothing from nivaria. It writes a single

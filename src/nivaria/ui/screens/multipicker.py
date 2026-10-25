@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """A find-as-you-type picker over a fixed list of candidates, for selecting
 any number of them rather than exactly one -- used for the database chooser.
 

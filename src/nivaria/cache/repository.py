@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The typed read/write API over the cache.
 
 Readers run on the Textual event loop and must stay in the microsecond range;

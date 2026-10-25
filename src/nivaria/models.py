@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Domain vocabulary: frozen dataclasses and enums.
 
 Deliberately free of Textual and of snowflake.connector types, so widgets

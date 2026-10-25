@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The Grants tab's table, shared by the schema, database and table views.
 
 One row per grantee rather than one per `SHOW GRANTS` row. The question

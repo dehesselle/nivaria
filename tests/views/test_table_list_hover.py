@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Hovering "Created"/"Last DDL"/"Last Altered" tooltips the full timestamp
 behind a truncated cell.
 

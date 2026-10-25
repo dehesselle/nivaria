@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Subsequence fuzzy matching, fzy-style. Pure: no Textual, no I/O.
 
 Scanning names in Python rather than in sqlite is deliberate. FTS5 -- even

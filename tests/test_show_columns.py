@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """SHOW COLUMNS -> INFORMATION_SCHEMA.COLUMNS mapping.
 
 The account nivaria was verified against runs with no warehouse, and

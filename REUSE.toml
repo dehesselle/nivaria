@@ -1,0 +1,16 @@
+version = 1
+
+# Files that can't carry an SPDX comment, or shouldn't: docs stay clean when
+# rendered, the about box is shown verbatim, the screenshot and uv.lock are
+# regenerated, JSON has no comments.
+[[annotations]]
+path = [
+    "**.md",
+    "docs/screenshot.svg",
+    "src/nivaria/ui/about.txt",
+    "tests/data/show_column_types.json",
+    "uv.lock",
+    ".python-version",
+]
+SPDX-FileCopyrightText = "2026 René de Hesselle <dehesselle@web.de>"
+SPDX-License-Identifier = "0BSD"

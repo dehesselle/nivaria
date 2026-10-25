@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Remembered connection profiles.
 
 Deliberately holds no secret: account, user, authenticator, role and warehouse

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Category view for the "Pipes (n)" node: status and load activity.
 
 Tabbed -- Status (one row per pipe: name, execution state, and

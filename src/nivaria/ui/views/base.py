@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Detail views, one per object type, and the registry that finds them.
 
 Why a registry and not a `ContentSwitcher`: a switcher needs every child

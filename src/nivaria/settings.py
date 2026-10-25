@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """nivaria's settings.
 
 The machinery -- `Setting`, the registry, `ConfigStore`, the dialog -- lives

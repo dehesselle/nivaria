@@ -1,8 +1,13 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 [project]
 name = "nivaria"
 dynamic = ["version"]
 description = "A TUI for quickly browsing and searching Snowflake objects"
 readme = "README.md"
+license = "0BSD"
 authors = [{ name = "René de Hesselle", email = "dehesselle@web.de" }]
 requires-python = ">=3.12"
 dependencies = [

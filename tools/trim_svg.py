@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Shrink an SVG screenshot exported by Textual (Rich's `Console.export_svg`).
 
 Self-contained: this file imports nothing from nivaria and needs only the

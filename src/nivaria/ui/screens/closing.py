@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """A small modal shown while a session is being closed.
 
 Two callers. `NivariaApp.open_connect` stops the outgoing `FetchService` and

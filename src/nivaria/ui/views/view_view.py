@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Detail view for views: columns, data, grants and SQL.
 
 A view is genuinely both shapes the registry already has: everything a

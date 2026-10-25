@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Detail view for a schema or database node: Grants and Tags.
 
 Neither a schema nor a database has an ObjectType (see SchemaRef / docs/DESIGN.md's

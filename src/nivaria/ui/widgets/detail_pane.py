@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The container that mounts one detail view at a time.
 
 The swap rule is the whole point: if the object being shown is of the same type

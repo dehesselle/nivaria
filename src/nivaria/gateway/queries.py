@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Snowflake statement builders.
 
 Every statement nivaria sends is built here and nowhere else, so the paging

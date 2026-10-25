@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Detail view for tables: their columns, their grants and some of their rows.
 
 Also hosts `ColumnsView`, the whole tabbed body (Columns, Data, Grants) --

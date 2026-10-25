@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The background fetch scheduler.
 
 Nothing here touches a widget. A worker writes its page into sqlite and then

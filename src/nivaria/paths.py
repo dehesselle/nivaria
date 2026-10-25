@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Where nivaria keeps its files.
 
 The generic parts -- per-app config/cache directories and the JSON read/write

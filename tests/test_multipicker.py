@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The multi-select database picker: a checkbox-glyph fuzzy list plus an
 All/None/Ok/Cancel button row, sibling to the single-select PickerDialog."""
 

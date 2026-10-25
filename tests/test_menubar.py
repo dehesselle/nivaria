@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """nivaria's menu bar: the Nivaria and Connection menus.
 
 The bar itself -- auto-hide, the staged bar/dropdown flow, mnemonics,

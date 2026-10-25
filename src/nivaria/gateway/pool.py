@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """A pool of persistent Snowflake connections.
 
 The whole reason this exists: in a corporate account every new connection can

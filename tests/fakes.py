@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Offline stand-ins for everything that would otherwise touch Snowflake.
 
 No test may import snowflake.connector: the driver opens sockets, reads

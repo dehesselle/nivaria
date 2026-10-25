@@ -1,7 +1,7 @@
 # Developing nivaria
 
-This document covers setting up, running, testing and linting nivaria, and the
-conventions its code follows.
+This document covers setting up, running, testing, linting and licensing
+nivaria, and the conventions its code follows.
 
 The architecture and the invariants a change must respect are in
 [DESIGN.md](DESIGN.md#core-principles).
@@ -64,6 +64,12 @@ ruff check
 ```
 
 Let the formatter decide.
+
+## Licensing
+
+The project is REUSE-compliant (`reuse` is installed globally). New files
+start with the SPDX header that `reuse annotate` writes; files that can't
+carry a comment get covered in `REUSE.toml`. `reuse lint` must pass.
 
 ## Testing against unreleased tcoda
 

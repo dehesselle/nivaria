@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Fetch job definitions and the page-fetch dispatch.
 
 **One job fetches exactly one page.** If more pages remain, the job re-enqueues

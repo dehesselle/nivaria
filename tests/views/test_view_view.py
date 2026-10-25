@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """ViewView: a view's columns, its rows, its grants and its defining SQL."""
 
 from __future__ import annotations

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Category view for the "Tasks (n)" node: an overview of every task in a
 schema, merging schedule/state with last-run activity into one table.
 

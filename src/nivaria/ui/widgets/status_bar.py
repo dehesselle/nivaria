@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Nivaria's own footer status widgets: pool, warehouse, role.
 
 Plain `Static`s with reactives, mounted into `tcoda.widgets.Footer`'s status

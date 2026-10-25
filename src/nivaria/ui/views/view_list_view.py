@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Category view for the "Views (n)" node: an overview of every view in a
 schema, the same shape `table_list_view.py` uses.
 

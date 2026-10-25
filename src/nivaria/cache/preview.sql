@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+--
+-- SPDX-License-Identifier: 0BSD
+
 -- Some of one table's rows, for the Table view's Data tab. Applied only to
 -- the in-memory MemoryDatabase, never to a cache file: this is table data,
 -- possibly personal data, and must not reach the disk. Kept out of

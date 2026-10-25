@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Working out what has to change in a node's children.
 
 Pure: no Textual, no I/O. The whole diffing decision lives here so it can be

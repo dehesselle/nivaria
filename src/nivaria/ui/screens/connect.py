@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The connect screen: form on the left, recent connections on the right.
 
 This screen owns the whole "produce a working connection pool" interaction,

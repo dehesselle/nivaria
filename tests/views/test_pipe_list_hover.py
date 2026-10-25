@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Hovering "Loaded" tooltips the full timestamp behind a truncated cell.
 
 Same DataTable-subclass tooltip pattern as test_table_list_hover.py (see

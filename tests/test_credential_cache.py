@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """DpapiFileKeyring is Windows-only -- see credential_cache.py for why -- so
 every test here is skipped on any other platform rather than faked, since
 there is nothing to fake: DPAPI is a real OS facility, not a network call or

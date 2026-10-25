@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The object search modal: find-as-you-type over every cached object and
 schema across every currently selected database, given the room a modal can
 take instead of a sliver of the top pane.

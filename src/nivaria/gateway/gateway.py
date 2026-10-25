@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """The only module that speaks Snowflake.
 
 Methods return plain `list[dict]` keyed exactly as Snowflake names the result

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """StageListView: every stage in a schema.
 
 This list is the only place a stage is shown in any detail -- a stage has no

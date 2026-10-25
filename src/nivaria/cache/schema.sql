@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+--
+-- SPDX-License-Identifier: 0BSD
+
 -- nivaria cache.
 --
 -- The bottom layer mirrors Snowflake: one table per SHOW command, with the

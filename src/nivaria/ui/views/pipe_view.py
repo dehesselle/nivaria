@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Detail view for pipes: load history and SQL.
 
 Deliberately a different shape from the column views: a pipe has no columns,

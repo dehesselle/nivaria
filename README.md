@@ -47,3 +47,7 @@ databases to browse, `/` searches, `F9` opens the menu.
 ## AI disclosure
 
 Substantial parts of this code were generated with Sonnet 5.x/Opus 5.x. Generated code was tested, but not every line was reviewed in detail.
+
+## License
+
+[0BSD](LICENSES/0BSD.txt)

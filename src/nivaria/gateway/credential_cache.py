@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Swap in a DPAPI-encrypted file for Windows' Credential Manager keyring.
 
 The driver's own OAuth/SSO/MFA token cache (`ConnectParams.to_connect_kwargs`

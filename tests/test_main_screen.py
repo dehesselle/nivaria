@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Main screen wiring: scope routing, the database picker, refresh."""
 
 from __future__ import annotations

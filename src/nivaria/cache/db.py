@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """sqlite plumbing for the cache.
 
 Two deliberate choices:
@@ -41,7 +45,7 @@ _SCHEMA_SCRIPTS: tuple[str, ...] = tuple(
 #: with any other version is deleted and rebuilt rather than migrated: nivaria
 #: is pre-1.0 and carries no compatibility code. tests/test_cache_db.py pins
 #: the scripts' digest to this number so a forgotten bump fails there.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Database:

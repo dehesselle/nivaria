@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Shared building blocks for the detail views.
 
 Three shapes every view here used to write out for itself, and that had each

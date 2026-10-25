@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """Hovering "Last Scheduled" tooltips the full timestamp behind a truncated cell.
 
 Same shared-`HoverTooltipTable` pattern as test_pipe_list_hover.py/

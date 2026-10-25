@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """A small modal shown while a connection attempt is under way.
 
 Stacked over `ConnectScreen` the same way the pool-growth `ConfirmDialog` is,

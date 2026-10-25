@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+--
+-- SPDX-License-Identifier: 0BSD
+
 -- A uniform view over every searchable object, whatever kind it is.
 --
 -- A view rather than a maintained index table: the mirror tables are the only

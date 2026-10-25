@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """A find-as-you-type picker over a fixed list of candidates.
 
 Used for the database chooser now and the global object search later -- the

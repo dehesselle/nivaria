@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 René de Hesselle <dehesselle@web.de>
+#
+# SPDX-License-Identifier: 0BSD
+
 """`sql_log.log_statement` in isolation, with no pool or gateway involved.
 
 `tests/test_gateway.py` and `tests/test_pool.py` prove the real choke points
