@@ -1,6 +1,6 @@
 # Nivaria
 
-![main screen](docs/screenshot.svg)
+![main screen](https://raw.githubusercontent.com/dehesselle/nivaria/master/docs/screenshot.svg)
 
 > __Nivarius, nivaria, nivarium__ · _Latin adjective_
 >
@@ -34,12 +34,12 @@ databases to browse, `/` searches, `F9` opens the menu.
 
 ## Documentation
 
-- [docs/MANUAL.md](docs/MANUAL.md) — connecting, keys, browsing, search, detail views and all settings.
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) — Snowflake load, warehouse and privilege needs, limits, files on disk, troubleshooting.
-- [docs/DESIGN.md](docs/DESIGN.md) — architecture, core principles and the reasons behind them.
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — setup, tests, linting, conventions and live-account tools.
-- [docs/snowflake-behavior.md](docs/snowflake-behavior.md) — what live Snowflake accounts were observed to do.
-- [docs/measurements.md](docs/measurements.md) — timings and data volumes behind the design.
+- [docs/MANUAL.md](https://github.com/dehesselle/nivaria/blob/master/docs/MANUAL.md) — connecting, keys, browsing, search, detail views and all settings.
+- [docs/OPERATIONS.md](https://github.com/dehesselle/nivaria/blob/master/docs/OPERATIONS.md) — Snowflake load, warehouse and privilege needs, limits, files on disk, troubleshooting.
+- [docs/DESIGN.md](https://github.com/dehesselle/nivaria/blob/master/docs/DESIGN.md) — architecture, core principles and the reasons behind them.
+- [docs/DEVELOPMENT.md](https://github.com/dehesselle/nivaria/blob/master/docs/DEVELOPMENT.md) — setup, tests, linting, conventions and live-account tools.
+- [docs/snowflake-behavior.md](https://github.com/dehesselle/nivaria/blob/master/docs/snowflake-behavior.md) — what live Snowflake accounts were observed to do.
+- [docs/measurements.md](https://github.com/dehesselle/nivaria/blob/master/docs/measurements.md) — timings and data volumes behind the design.
 
 ## AI disclosure
 
@@ -47,4 +47,4 @@ Substantial parts of this code were generated with Sonnet 5.x/Opus 5.x. Generate
 
 ## License
 
-[0BSD](LICENSES/0BSD.txt)
+[0BSD](https://github.com/dehesselle/nivaria/blob/master/LICENSES/0BSD.txt)
