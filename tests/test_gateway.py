@@ -92,6 +92,12 @@ def make_gateway() -> tuple[PoolGateway, RecordingConnection, ConnectionPool]:
         ConnectParams(account="a", user="u"), 1, connector=lambda **_: connection
     )
     pool.connect_all()
+    # Forget the pool's own connect-time query, so every count a test reads
+    # is the gateway's alone.
+    connection.executed.clear()
+    connection.timeouts.clear()
+    connection.attempts = 0
+    connection.closed_cursors = 0
     return PoolGateway(pool), connection, pool
 
 

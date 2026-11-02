@@ -50,7 +50,8 @@ from nivaria.models import (
 from nivaria.profiles import ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import Priority
-from nivaria.settings import CACHE_TTL, config
+from nivaria.settings import CACHE_TTL, SNOWSIGHT_URL, config
+from nivaria.snowsight import base_url, database_url, object_url, schema_url
 from nivaria.ui.messages import (
     CacheUpdated,
     CategorySelected,
@@ -119,6 +120,9 @@ class MainScreen(Screen):
         Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
         Binding("slash", "search", "Search"),
         Binding("f5", "refresh", "Refresh"),
+        # "Web", not "Snowsight": a label starts with its key's letter, and
+        # `s` is already the SQL tab's.
+        Binding("w", "open_in_snowsight", "Web"),
     ]
 
     def __init__(
@@ -660,3 +664,45 @@ class MainScreen(Screen):
             scope = databases_scope() if not self.databases else None
         if scope is not None:
             self._request(scope, Priority.INTERACTIVE)
+
+    def action_open_in_snowsight(self) -> None:
+        """Open whatever the cursor is on in Snowsight."""
+        node = self.tree.cursor_node
+        if self.pool is None or node is None or node.data is None:
+            return
+        base = base_url(
+            self.pool.account_names,
+            privatelink=self.pool.params.uses_privatelink,
+            override=config.get(SNOWSIGHT_URL),
+        )
+        if base is None:
+            # One message for both causes (a PrivateLink account, or names
+            # that could not be read at connect): the setting fixes either.
+            self.notify(
+                "No Snowsight link for this account: set its Snowsight URL "
+                "in Settings.",
+                severity="warning",
+                timeout=5,
+            )
+            return
+        data = node.data
+        match data.type:
+            case NodeType.DATABASE:
+                assert data.database is not None
+                url = database_url(base, data.database)
+            case NodeType.SCHEMA:
+                assert data.database is not None
+                url = schema_url(base, data.database, data.key)
+            case NodeType.CATEGORY:
+                # Snowsight has no page for "the pipes of a schema", so a
+                # category opens the schema it belongs to.
+                assert data.scope is not None
+                assert data.database is not None
+                assert data.scope.schema is not None
+                url = schema_url(base, data.database, data.scope.schema)
+            case NodeType.OBJECT:
+                assert data.ref is not None
+                url = object_url(base, data.ref)
+            case _:
+                return
+        self.app.open_url(url)

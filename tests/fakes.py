@@ -42,9 +42,17 @@ class CancelledError(Exception):
 class FakeCursor:
     def __init__(self, owner: FakeConnection) -> None:
         self._owner = owner
+        self._row: tuple[Any, ...] | None = None
 
     def execute(self, statement: str) -> None:
         self._owner.executed.append(statement)
+        if statement == queries.current_account_names():
+            if self._owner.account_names is None:
+                raise RuntimeError("simulated context query failure")
+            self._row = self._owner.account_names
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._row
 
     def close(self) -> None:
         pass
@@ -60,7 +68,11 @@ class FakeCursor:
 
 class FakeConnection:
     def __init__(
-        self, *, role: str | None = None, warehouse: str | None = None
+        self,
+        *,
+        role: str | None = None,
+        warehouse: str | None = None,
+        account_names: tuple[str, str] | None = None,
     ) -> None:
         self.closed = False
         #: Every statement run via cursor(), so a test can prove exactly which
@@ -70,6 +82,9 @@ class FakeConnection:
         #: sessionInfo, for tests of ConnectionPool._adopt_resolved_session.
         self.role = role
         self.warehouse = warehouse
+        #: What CURRENT_ORGANIZATION_NAME()/CURRENT_ACCOUNT_NAME() answer;
+        #: None makes that query fail.
+        self.account_names = account_names
 
     def is_closed(self) -> bool:
         return self.closed
@@ -94,6 +109,7 @@ class FakeConnector:
         fail_after: int | None = None,
         resolved_role: str | None = None,
         resolved_warehouse: str | None = None,
+        account_names: tuple[str, str] | None = ("MYORG", "MYACCT"),
     ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.fail_after = fail_after
@@ -101,6 +117,7 @@ class FakeConnector:
         #: standing in for what Snowflake's login response would resolve.
         self.resolved_role = resolved_role
         self.resolved_warehouse = resolved_warehouse
+        self.account_names = account_names
         self._lock = threading.Lock()
 
     def __call__(self, **kwargs: Any) -> FakeConnection:
@@ -109,7 +126,9 @@ class FakeConnector:
                 raise RuntimeError("simulated connection failure")
             self.calls.append(kwargs)
         return FakeConnection(
-            role=self.resolved_role, warehouse=self.resolved_warehouse
+            role=self.resolved_role,
+            warehouse=self.resolved_warehouse,
+            account_names=self.account_names,
         )
 
 

@@ -16,6 +16,7 @@ from textual.widgets import Input
 import nivaria.ui.app as app_module
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
+from nivaria.gateway.pool import AccountNames, ConnectionPool, ConnectParams
 from nivaria.models import (
     ObjectRef,
     ObjectType,
@@ -27,13 +28,14 @@ from nivaria.models import (
     schemas_scope,
 )
 from nivaria.profiles import Profile, ProfileStore
+from nivaria.settings import SNOWSIGHT_URL, config
 from nivaria.ui.messages import ScopeNeeded
 from nivaria.ui.screens.main import CacheUpdated, MainScreen
 from nivaria.ui.screens.multipicker import MultiPickerDialog
 from nivaria.ui.screens.picker import PickerDialog
 from nivaria.ui.views.schema_view import DatabaseView, SchemaView
 from nivaria.ui.widgets.object_tree import ObjectTree
-from tests.fakes import make_pool
+from tests.fakes import FakeConnector, make_pool
 
 
 class RecordingFetch:
@@ -962,3 +964,133 @@ async def test_highlighting_an_object_in_the_tree_does_not_reveal_it_again(
 
         assert screen.detail.ref.name == "PAYMENTS"
     assert revealed == []
+
+
+# -------------------------------------------------------------- snowsight
+
+SNOWSIGHT = "https://app.snowflake.com/myorg/myacct/"
+
+
+def snowsight_pool(
+    account: str = "MYORG-MYACCT", names: AccountNames | None = None
+) -> ConnectionPool:
+    """A pool as connect_all leaves it, without connecting: the harness never
+    calls it, so the names it would have read are set directly, and so is the
+    settings instance NivariaApp.switch_repo would have set."""
+    config.current_instance = account.casefold()
+    pool = ConnectionPool(
+        ConnectParams(account=account, user="user"), 1, connector=FakeConnector()
+    )
+    pool.account_names = names or AccountNames("MYORG", "MYACCT")
+    return pool
+
+
+async def press_w_on(app, pilot, pick) -> list[str]:
+    """Move the tree cursor to `pick(tree, tables)`, press w, return what
+    would have been opened."""
+    opened: list[str] = []
+    app.open_url = lambda url, **_: opened.append(url)
+    screen = app.screen
+    screen.set_databases(["MYDB"])
+    await pilot.pause()
+    tree, tables = await drill_to_tables(app, pilot, screen)
+    tree.focus()
+    tree.move_cursor(pick(tree, tables))
+    await settle(pilot)
+    await pilot.press("w")
+    await pilot.pause()
+    return opened
+
+
+async def test_w_opens_the_highlighted_object_in_snowsight(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        opened = await press_w_on(app, pilot, lambda tree, tables: tables.children[0])
+    assert opened == [f"{SNOWSIGHT}#/data/databases/MYDB/schemas/AAA/table/ORDERS"]
+
+
+async def test_w_on_a_database_opens_the_database(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        opened = await press_w_on(
+            app, pilot, lambda tree, tables: tree.root.children[0]
+        )
+    assert opened == [f"{SNOWSIGHT}#/data/databases/MYDB"]
+
+
+async def test_w_on_a_category_opens_its_schema(repo) -> None:
+    """Snowsight has no page for one kind of object in a schema."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        opened = await press_w_on(app, pilot, lambda tree, tables: tables)
+    assert opened == [f"{SNOWSIGHT}#/data/databases/MYDB/schemas/AAA"]
+
+
+async def test_w_opens_the_accounts_snowsight_url_setting(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    pool = snowsight_pool("MYORG-MYACCT.privatelink")
+    config.set(SNOWSIGHT_URL, "https://snowsight.example/myorg/myacct")
+    app = Harness(repo, RecordingFetch(), pool=pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        opened = await press_w_on(
+            app, pilot, lambda tree, tables: tree.root.children[0]
+        )
+    assert opened == ["https://snowsight.example/myorg/myacct/#/data/databases/MYDB"]
+
+
+def capture_notices(app) -> list[str]:
+    notices: list[str] = []
+    original = app.screen.notify
+    app.screen.notify = lambda message, **kw: (
+        notices.append(message),
+        original(message, **kw),
+    )
+    return notices
+
+
+async def test_w_on_a_privatelink_account_without_the_setting_asks_for_it(
+    repo,
+) -> None:
+    """Guessing a private host opened a dead link on a real account."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(
+        repo, RecordingFetch(), pool=snowsight_pool("MYORG-MYACCT.privatelink")
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        notices = capture_notices(app)
+        opened = await press_w_on(
+            app, pilot, lambda tree, tables: tree.root.children[0]
+        )
+    assert opened == []
+    assert notices and "Settings" in notices[0]
+
+
+async def test_w_without_the_account_names_asks_for_the_setting(repo) -> None:
+    """The names are read at connect, best effort; if that failed there is
+    nothing to build a link from."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    pool = snowsight_pool()
+    pool.account_names = None
+    app = Harness(repo, RecordingFetch(), pool=pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        notices = capture_notices(app)
+        opened = await press_w_on(
+            app, pilot, lambda tree, tables: tree.root.children[0]
+        )
+    assert opened == []
+    assert notices and "Settings" in notices[0]

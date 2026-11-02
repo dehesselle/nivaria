@@ -13,8 +13,10 @@ in [snowflake-behavior.md](snowflake-behavior.md).
 Every statement is built in `gateway/queries.py`, and every one is read-only:
 `SHOW` commands, `SELECT`s from `INFORMATION_SCHEMA` and
 `SNOWFLAKE.ACCOUNT_USAGE`, the Data tab's `SELECT * ... LIMIT n`, and `USE
-ROLE` / `USE WAREHOUSE` when you switch. The Log panel (`F1`) shows each
-statement as it is sent.
+ROLE` / `USE WAREHOUSE` when you switch. Once per connect, `SELECT
+CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()` reads the names Snowsight
+links need; it uses no warehouse. The Log panel (`F1`) shows each statement as
+it is sent.
 
 Every session reports itself as `nivaria` in
 `SNOWFLAKE.ACCOUNT_USAGE.SESSIONS.CLIENT_ENVIRONMENT:APPLICATION`; join on

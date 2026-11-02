@@ -176,6 +176,10 @@ class NivariaApp(TerminalTitleMixin, App[None]):
         reconnect, and a successful role switch -- anywhere the identity
         behind `pool` may have just changed.
         """
+        # Per-account settings (SNOWSIGHT_URL) resolve against this. The
+        # account alone, not the cache file's (account, role): a URL does not
+        # change with the role.
+        config.current_instance = pool.params.account.casefold()
         self.repo = self._open_repo(pool)
         self.restart_fetch(pool)
 

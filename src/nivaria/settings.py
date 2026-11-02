@@ -33,6 +33,7 @@ __all__ = [
     "POOL_SIZE",
     "PRIME_CHUNK_THRESHOLD",
     "ROW_CEILING",
+    "SNOWSIGHT_URL",
     "TASK_HISTORY_FETCH_DAYS",
     "TASK_HISTORY_SHOW_DAYS",
     "Setting",
@@ -65,6 +66,24 @@ POOL_SIZE = Setting(
     group="Connection",
     default=3,
     choices=(1, 2, 3, 4, 5),
+)
+
+SNOWSIGHT_URL = Setting(
+    key="snowsight_url",
+    label="Snowsight URL",
+    description=(
+        "Where 'w' opens this account in Snowsight, up to and including the "
+        "account, e.g. https://app.eu-central-1.privatelink."
+        "snowflakecomputing.com/myorg/myacct. Empty uses the public "
+        "app.snowflake.com address. A PrivateLink account needs this: which "
+        "private Snowsight host works depends on how your network was set "
+        "up, which nivaria cannot see."
+    ),
+    group="Connection",
+    default="",
+    # Per account, not global: the URL names the account, and one set for a
+    # PrivateLink account must not follow you to the next.
+    per_instance=True,
 )
 
 PAGE_SIZE = Setting(

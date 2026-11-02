@@ -163,6 +163,18 @@ def use_warehouse(warehouse: str) -> str:
     return f"USE WAREHOUSE {quote_identifier(warehouse)}"
 
 
+def current_account_names() -> str:
+    """The session's organization and account name, for Snowsight links.
+
+    Asked once per connect (see `ConnectionPool._read_account_names`): the
+    login response carries the resolved role and warehouse but not these.
+    Context functions only, so it needs no warehouse and no privilege --
+    verified on the sandbox account as `PUBLIC` with `CURRENT_WAREHOUSE()`
+    reading `NULL`.
+    """
+    return "SELECT CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()"
+
+
 def show_columns(database: str, schema: str, table: str) -> str:
     """A table's columns without needing a running warehouse.
 

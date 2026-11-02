@@ -11,11 +11,13 @@ from typing import Any
 
 import pytest
 
+from nivaria.gateway import queries
 from nivaria.gateway.pool import (
     CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
     OAUTH,
     USERNAME_PASSWORD_MFA,
+    AccountNames,
     ConnectionError_,
     ConnectionPool,
     ConnectParams,
@@ -153,6 +155,41 @@ def test_connect_all_never_overrides_an_explicit_role_or_warehouse() -> None:
     pool.connect_all()
     assert pool.params.role == "SYSADMIN"
     assert pool.params.warehouse == "ETL_WH"
+
+
+def test_connect_all_reads_the_organization_and_account_name() -> None:
+    """For Snowsight links, whatever form the identifier was typed in."""
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    assert pool.account_names == AccountNames("MYORG", "MYACCT")
+
+
+def test_the_account_names_are_asked_once_on_one_connection() -> None:
+    """The account cannot change within a pool, so neither more connections
+    nor growing the pool asks again."""
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    pool.grow(1)
+    statement = queries.current_account_names()
+    asked = [c.executed.count(statement) for c in pool._all]
+    assert asked == [1, 0, 0]
+
+
+def test_a_failed_account_name_query_still_connects() -> None:
+    """The names only feed a link; a working session is worth more."""
+    connector = FakeConnector(account_names=None)
+    pool = ConnectionPool(
+        ConnectParams(account="acct", user="user"), 1, connector=connector
+    )
+    pool.connect_all()
+    assert pool.account_names is None
+    with pool.acquire() as connection:
+        assert connection is pool._all[0]
+
+
+def test_a_privatelink_identifier_is_recognised() -> None:
+    assert ConnectParams(account="MYORG-MYACCT.PRIVATELINK", user="u").uses_privatelink
+    assert not ConnectParams(account="MYORG-MYACCT", user="u").uses_privatelink
 
 
 def test_a_failure_to_connect_is_reported_as_a_nivaria_error() -> None:
@@ -405,7 +442,7 @@ def test_set_role_runs_use_role_on_every_connection() -> None:
     pool, _ = make_pool(size=2)
     pool.connect_all()
     pool.set_role("SYSADMIN")
-    assert all(c.executed == ['USE ROLE "SYSADMIN"'] for c in pool._all)
+    assert all(c.executed[-1] == 'USE ROLE "SYSADMIN"' for c in pool._all)
     assert pool.params.role == "SYSADMIN"
 
 
@@ -413,7 +450,7 @@ def test_set_warehouse_runs_use_warehouse_on_every_connection() -> None:
     pool, _ = make_pool(size=2)
     pool.connect_all()
     pool.set_warehouse("COMPUTE_WH")
-    assert all(c.executed == ['USE WAREHOUSE "COMPUTE_WH"'] for c in pool._all)
+    assert all(c.executed[-1] == 'USE WAREHOUSE "COMPUTE_WH"' for c in pool._all)
     assert pool.params.warehouse == "COMPUTE_WH"
 
 

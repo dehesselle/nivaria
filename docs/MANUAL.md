@@ -100,6 +100,7 @@ across sessions.
 | `F1` | Show or hide the Log panel |
 | `/` | Open search |
 | `F5` | Refresh whatever the cursor is on |
+| `w` | Open whatever the cursor is on in Snowsight |
 | `Ctrl+O` | Reopen the connect dialog (reconnect, or switch account) |
 | `Ctrl+D` | Pick databases |
 | `Ctrl+W` | Pick warehouse |
@@ -128,6 +129,18 @@ place without moving the cursor. Counts on collapsed nodes come from the cache.
 Moving the cursor shows the node in the Detail pane. `enter` on a row of a
 category list (for example `Tables (n)`) opens that object and moves the tree
 cursor to it.
+
+`w` opens the tree cursor's database, schema or object in Snowsight in the
+default browser; on a category such as `Pipes (n)` it opens the schema. The
+link uses the organization and account name nivaria reads from Snowflake when
+connecting, so any form of account identifier works, and opens the public
+`app.snowflake.com`. A PrivateLink account (an identifier ending in
+`.privatelink`) reaches Snowsight through a private host that depends on its
+network setup, so `w` asks for **Snowsight URL** in Settings instead: enter the
+address Snowsight shows for the account up to and including the account name,
+for example
+`https://app.eu-central-1.privatelink.snowflakecomputing.com/myorg/myacct`.
+The setting is kept per account and, when set, is used for any account.
 
 **Warehouse ...** and **Role ...** switch the whole session. A role switch
 changes what Snowflake lets you see, so nivaria switches to that role's own
@@ -218,6 +231,7 @@ role switch.
 | --- | --- | --- |
 | cache age | 300 | Seconds cached metadata stays fresh before what is on screen is refreshed in the background. `0` disables background refreshing; `F5` still works. |
 | connection pool size | 3 | Connections to keep open (1–5). Every connection may cost an MFA prompt. |
+| Snowsight URL | empty | Per account: the Snowsight address `w` opens, up to the account name. Empty uses the public address; a PrivateLink account needs it set. |
 | fetch page size | 1000 | Rows one fetch job asks for. Lowering it mainly makes fetching slower. |
 | pipe history fetch window (days) | 90 | Days of pipe load history fetched and cached. |
 | pipe history display window (days) | 90 | Days of it shown in the Pipe view. |

@@ -77,6 +77,11 @@ Tested directly with no warehouse active: `INFORMATION_SCHEMA.TASK_HISTORY`,
 `No active warehouse selected in the current session`. `SHOW` commands need
 none.
 
+Context functions need neither a warehouse nor a privilege: on the sandbox on
+2026-11-02, `SELECT CURRENT_WAREHOUSE(), CURRENT_ORGANIZATION_NAME(),
+CURRENT_ACCOUNT_NAME()` succeeded as `PUBLIC` with `CURRENT_WAREHOUSE()`
+returning `NULL`.
+
 ## Keyset paging
 
 `LIMIT n FROM 'name'` was verified correct — same rows, same order as an
@@ -285,6 +290,42 @@ published figures.
 on 2026-10-14, a 1 s timeout on `SELECT SYSTEM$WAIT(5)` raised `000604
 (57014): SQL execution was cancelled by the client due to a timeout`, once,
 and the connection stayed in the pool and answered the next query.
+
+## Snowsight links
+
+Snowflake does not document Snowsight's object routes. On the sandbox on
+2026-11-02, Snowsight's address bar showed these for objects opened from
+**Catalog » Database Explorer** (org, account, database and schema replaced by
+placeholders):
+
+```text
+https://app.snowflake.com/myorg/myacct/#/data/databases/DB/schemas/SC/table/probe%20lower
+https://app.snowflake.com/myorg/myacct/#/data/databases/DB/schemas/SC/stage/PROBE_STAGE
+https://app.snowflake.com/myorg/myacct/#/data/databases/DB/schemas/SC/pipe/PROBE_PIPE
+https://app.snowflake.com/myorg/myacct/#/data/databases/DB/schemas/SC/task/PROBE_TASK/run-history
+```
+
+- The base is `https://app.snowflake.com/<orgname>/<account_name>/`, lowercase.
+  Snowflake's Streamlit sharing documentation uses the same base for its app
+  links.
+- Names appear as stored, case kept, percent-encoded: the quoted table
+  `"probe lower"` is `probe%20lower`.
+- `/run-history` on the task is the tab Snowsight opened by default.
+- The `view` segment and the bare database and schema routes
+  (`#/data/databases/DB`, `…/schemas/SC`) were not checked live; they are the
+  ones DataHub's Snowflake connector builds (`SnowsightUrlBuilder`).
+- Snowflake documents two private Snowsight hosts, a regionless
+  `app-<org>-<account>.privatelink.snowflakecomputing.com` and a regional
+  `app.<cloud_region_id>.privatelink.snowflakecomputing.com`. The production
+  account (PrivateLink) is reached at the regional one, with the public form's
+  `/<org>/<account>/` path:
+  `https://app.<cloud_region_id>.privatelink.snowflakecomputing.com/<org>/<account>/`.
+  Which host resolves depends on the DNS the account's network admins set up,
+  and `SYSTEM$GET_PRIVATELINK_CONFIG()`, which reports both, needs
+  `ACCOUNTADMIN`; hence the per-account Snowsight URL setting rather than a
+  derived private host.
+- Not checked: whether a link opened while signed out reaches the object
+  after sign-in.
 
 ## externalbrowser login
 

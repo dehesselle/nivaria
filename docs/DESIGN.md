@@ -1616,6 +1616,16 @@ session state rather than an unfilled form field. Warehouse can genuinely
 read `none` even after this — a session can have no active warehouse at all
 — but role never legitimately does.
 
+The login response has no organization or account name, which Snowsight links
+(`w`) need. `connect_all` asks for them once, on the first connection
+(`ConnectionPool._read_account_names`, context functions only, so no
+warehouse), and keeps them on the pool; a link is then an attribute read and
+never waits on Snowflake. A failure leaves them unset and does not fail the
+connect: the link is a convenience, the session is not. They only build the
+public address: a PrivateLink account's Snowsight host depends on its network's
+DNS, which the client cannot see, so it comes from the per-account Snowsight
+URL setting, which wins whenever it is set.
+
 The Role and Warehouse pickers (`PickerDialog`, single-select; the database
 picker is the multi-select sibling, `MultiPickerDialog`) are backed by their
 own cache scopes (`SHOW WAREHOUSES`, `SHOW ROLES` — small, flat, unpaged

@@ -21,6 +21,7 @@ from nivaria.settings import (
     PIPE_HISTORY_FETCH_DAYS,
     PIPE_HISTORY_SHOW_DAYS,
     POOL_SIZE,
+    SNOWSIGHT_URL,
 )
 
 
@@ -74,3 +75,12 @@ def test_the_store_is_pointed_at_nivarias_own_config_file() -> None:
     configure(APP_NAME)
     assert config.path == tcoda_settings_file(APP_NAME)
     assert config.path.parent.name == APP_NAME
+
+
+def test_the_snowsight_url_is_kept_per_account() -> None:
+    """One set for a PrivateLink account must not follow you to the next."""
+    assert SNOWSIGHT_URL.per_instance
+    config.current_instance = "myorg-one"
+    config.set(SNOWSIGHT_URL, "https://one.example")
+    config.current_instance = "myorg-two"
+    assert config.get(SNOWSIGHT_URL) == ""

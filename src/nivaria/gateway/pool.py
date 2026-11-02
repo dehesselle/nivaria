@@ -113,6 +113,21 @@ class ConnectParams:
             kwargs["oauth_enable_refresh_tokens"] = True
         return kwargs
 
+    @property
+    def uses_privatelink(self) -> bool:
+        """Whether the account identifier routes through PrivateLink, which
+        puts Snowsight on its own private host."""
+        return ".privatelink" in self.account.casefold()
+
+
+@dataclass(frozen=True)
+class AccountNames:
+    """The session's organization and account name, as Snowflake reports
+    them -- whatever form the identifier in `ConnectParams` was typed in."""
+
+    organization: str
+    account: str
+
 
 class Connector(Protocol):
     """The one call the pool makes into snowflake.connector.
@@ -176,6 +191,9 @@ class ConnectionPool:
         #: it before every checkout; `run_on_all` holds it while it drains and
         #: rewrites every connection in the pool.
         self._maintenance = threading.Lock()
+        #: Read once by `connect_all`; None until then, or if Snowflake would
+        #: not say.
+        self.account_names: AccountNames | None = None
 
     @property
     def in_use(self) -> int:
@@ -204,7 +222,35 @@ class ConnectionPool:
             self._all.append(connection)
             self._free.put(connection)
         self._adopt_resolved_session()
+        self._read_account_names()
         self._notify_usage()
+
+    def _read_account_names(self) -> None:
+        """Ask the first connection which organization and account it is in.
+
+        The login response that `_adopt_resolved_session` reads has no such
+        field, so this is one query -- here, in the connect worker, so a
+        Snowsight link later is a plain attribute read. Not repeated by
+        `grow()` or a role switch: neither changes the account.
+        """
+        if not self._all:
+            return
+        statement = queries.current_account_names()
+        try:
+            cursor = self._all[0].cursor()
+            try:
+                sql_log.log_statement(cursor, statement)
+                cursor.execute(statement)
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
+        # Swallowed, not raised: the names only feed a convenience link, and
+        # a session that connected fine is worth more than that link. The
+        # driver raises many unrelated types, as in connect_all.
+        except Exception:  # noqa: BLE001
+            return
+        if row and row[0] and row[1]:
+            self.account_names = AccountNames(str(row[0]), str(row[1]))
 
     def _adopt_resolved_session(self) -> None:
         """Fill in whatever role/warehouse was left blank with what Snowflake

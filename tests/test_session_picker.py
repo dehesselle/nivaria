@@ -218,7 +218,7 @@ async def test_picking_a_warehouse_switches_every_pooled_connection(repo) -> Non
                 break
             await pilot.pause()
     assert pool.params.warehouse == "ETL_WH"
-    assert all(c.executed == ['USE WAREHOUSE "ETL_WH"'] for c in pool._all)
+    assert all(c.executed[-1] == 'USE WAREHOUSE "ETL_WH"' for c in pool._all)
 
 
 async def test_picking_a_role_switches_every_pooled_connection(repo) -> None:
@@ -238,7 +238,7 @@ async def test_picking_a_role_switches_every_pooled_connection(repo) -> None:
                 break
             await pilot.pause()
     assert pool.params.role == "SYSADMIN"
-    assert all(c.executed == ['USE ROLE "SYSADMIN"'] for c in pool._all)
+    assert all(c.executed[-1] == 'USE ROLE "SYSADMIN"' for c in pool._all)
 
 
 async def test_a_successful_role_switch_repoints_the_screen_at_a_new_cache(
@@ -338,7 +338,8 @@ async def test_reselecting_the_current_warehouse_does_nothing(repo) -> None:
         await pilot.press("enter")
         await settle(pilot)
     # The one USE from the setup call above, and no more from reselecting it.
-    assert pool._all[0].executed == ['USE WAREHOUSE "COMPUTE_WH"']
+    uses = [s for s in pool._all[0].executed if s.startswith("USE ")]
+    assert uses == ['USE WAREHOUSE "COMPUTE_WH"']
 
 
 # -------------------------------------------------------------------- footer
