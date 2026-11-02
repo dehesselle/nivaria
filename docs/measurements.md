@@ -28,6 +28,29 @@ window through the `PIPE_ACTIVITY` reduction (`QUALIFY ROW_NUMBER() OVER
 for 190 distinct pipes**, a ~2284x collapse. Without the reduction, an account
 with ~400 pipes hung the app for minutes.
 
+## History latency
+
+One pipe's or task's history statement, on the sandbox, 2026-11-02. Five runs
+each with `USE_CACHED_RESULT = FALSE`, median (min–max); a `SELECT 1` round
+trip took 0.06 s.
+
+| Statement | Rows | Time |
+| --- | --- | --- |
+| `pipe_activity_history`, never-loaded pipe, 90 days | 0 | 6.45 s (3.09–14.30) |
+| the same, 14 days | 0 | 1.21 s (1.03–5.37) |
+| the same, 2 days | 0 | 1.16 s (0.96–4.58) |
+| `pipe_activity_history`, pipe with 6 loads, 90 days | 6 | 6.66 s (3.65–9.11) |
+| the same, 14 days | 6 | 1.32 s (1.23–1.86) |
+| `pipe_activity`, one schema, 90 days | 0 | 2.62 s (2.49–2.68) |
+| `pipe_history` (`INFORMATION_SCHEMA`, 14 days) | 0 | 0.16 s (0.13–0.19) |
+| `task_activity_history`, 2163 runs, 90 days | 2163 | 9.74 s (4.61–24.82) |
+| `task_activity_history`, no runs, 90 days | 0 | 3.77 s (1.13–5.48) |
+| `task_history` (`INFORMATION_SCHEMA`, 7 days) | 0 | 0.18 s (0.17–0.34) |
+
+The `ACCOUNT_USAGE` window, not the row count, sets the cost: 90 days costs
+about five times 14 days with nothing to return. The `INFORMATION_SCHEMA`
+functions answer in well under a second.
+
 ## Column scale
 
 `SHOW COLUMNS IN DATABASE` returned 11 511 columns for 614 tables across 25

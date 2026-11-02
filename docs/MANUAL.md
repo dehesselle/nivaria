@@ -193,7 +193,10 @@ A stage has no view of its own; the stage list shows everything about it.
   below the table. Only grants your role may see are shown.
 - **History** merges a pipe's load or a task's run history from two Snowflake
   sources. A failed load or run shows its error below the table. A note above
-  says when the history was capped.
+  says when the history was capped. While the slower, older source is still
+  being read the first time, the note says what is known so far, such as "No
+  run history in the last 7 days. Still looking...". For a pipe the Pipes list
+  saw no loads for, it gives that list's answer and the time it was fetched.
 - **Status** (Pipe list) shows each pipe's `invalid_reason` and the
   execution state Snowflake reports for it (`RUNNING`, `PAUSED`,
   `STOPPED_...`). The state is read, 50 pipes at a time, only while this tab

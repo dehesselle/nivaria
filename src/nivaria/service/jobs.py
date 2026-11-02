@@ -22,6 +22,8 @@ import datetime
 import itertools
 import json
 import logging
+import math
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -116,6 +118,26 @@ class Page:
     truncated: bool = False
 
 
+#: Days added to an idle pipe's narrowed backfill window, for
+#: ACCOUNT_USAGE's ingestion lag (up to a few hours): a load just before the
+#: snapshot may not have reached it yet. The same margin as the 13/14 split
+#: in `models._TTL_OVERRIDES`.
+IDLE_BACKFILL_MARGIN_DAYS = 1
+
+
+def idle_backfill_days(idle_as_of: float, now: float, fetch_days: int) -> int:
+    """The backfill window for a pipe the PIPE_ACTIVITY snapshot saw idle.
+
+    The snapshot already covers the fetch window up to `idle_as_of`, so only
+    the days since can hold a load it did not see. Reading the whole window
+    again was measured at about five times the cost of a 14-day one, with
+    nothing to return (docs/measurements.md "History latency"). Never wider
+    than the fetch window itself.
+    """
+    elapsed = math.ceil(max(now - idle_as_of, 0) / 86400)
+    return min(fetch_days, elapsed + IDLE_BACKFILL_MARGIN_DAYS)
+
+
 def fetch_page(
     gateway: SnowflakeGateway,
     scope: Scope,
@@ -124,6 +146,7 @@ def fetch_page(
     *,
     allow_reconnect: bool = True,
     pipe_target: tuple[str, str, str] | None = None,
+    pipe_idle_as_of: float | None = None,
     pipe_names: Sequence[str] | None = None,
 ) -> Page:
     """Fetch one page.
@@ -145,6 +168,11 @@ def fetch_page(
     gateway, not the repository, so it cannot look up cached data). The
     caller (`FetchService._execute`) resolves it before calling here; every
     other scope type ignores this parameter.
+
+    `pipe_idle_as_of` is the same kind of context for
+    ScopeType.PIPE_ACTIVITY_HISTORY: when the schema's PIPE_ACTIVITY snapshot
+    last showed no load for this pipe (`Repository.pipe_idle_as_of`). The
+    fetch window then shrinks to the days since -- see `idle_backfill_days`.
 
     `pipe_names` is the same kind of context for ScopeType.PIPE_STATUS: the
     schema's pipes as SHOW PIPES last listed them, which the statement has to
@@ -266,6 +294,10 @@ def fetch_page(
             # needed, unlike PIPE_HISTORY, since ACCOUNT_USAGE.COPY_HISTORY
             # has an ordinary PIPE_NAME column to filter on directly.
             fetch_days = config.get(PIPE_HISTORY_FETCH_DAYS)
+            if pipe_idle_as_of is not None:
+                fetch_days = idle_backfill_days(
+                    pipe_idle_as_of, time.time(), fetch_days
+                )
             max_rows = config.get(HISTORY_MAX_ROWS)
             return _capped(
                 gateway.pipe_activity_history(

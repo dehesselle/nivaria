@@ -588,6 +588,27 @@ Rows older than the "display window" setting are filtered out of the *view*
 only; they stay in the fetch-window-bounded cache, so shrinking the display
 window later needs no refetch.
 
+#### Saying what is known while the backfill runs
+
+The near-real-time half answers in a fraction of a second, the `ACCOUNT_USAGE`
+half in seconds (see
+[measurements.md](measurements.md#history-latency)). A blank table under the
+busy indicator for that long reads as slower than Snowsight, so until both
+halves have answered, the note above the table says what the answered ones
+cover: "No run history in the last 7 days. Still looking...", or "Showing the
+last 14 days. Still looking for older load activity..." when rows are already
+there.
+
+Only the near-real-time half makes such a claim. `ACCOUNT_USAGE` lags by hours,
+so the backfill alone cannot speak for the most recent loads or runs, however
+far back it reaches. A near-real-time half that covers the whole display
+window is the full answer, and the note says so without waiting for the
+backfill.
+
+"Answered" means fetched at least once, or failed. A background refresh keeps
+the cached rows on screen and is not waited for, so revisiting a history stays
+as quiet as before; the note only speaks during a first fetch.
+
 #### Resolving a pipe's target table, and the pipe that never loaded
 
 `INFORMATION_SCHEMA.COPY_HISTORY` wants a `TABLE_NAME`, and Snowflake exposes
@@ -610,6 +631,21 @@ queues it. Such a pipe renders an empty history and starts fetching real data
 the moment `PIPE_ACTIVITY` first gets a row for it. `fetch_page` still raises
 if `PIPE_HISTORY` is requested with no target: a safety net for a caller that
 skips the gate, not the expected path.
+
+Such a pipe has no near-real-time half to answer early, but the snapshot that
+left its target unresolved is an answer too. `PIPE_ACTIVITY` keeps each pipe's
+latest load in the fetch window, so a fetched snapshot without this pipe says
+it loaded nothing in that window up to the snapshot's `fetched_at`
+(`Repository.pipe_idle_as_of`). The note gives that answer with its time,
+since the snapshot can be up to 13 days old. The backfill then only has to
+look at the days since: `FetchService` hands `pipe_idle_as_of` to `fetch_page`
+the same way it hands `pipe_target` to `PIPE_HISTORY`, and the
+`PIPE_ACTIVITY_HISTORY` statement narrows its window to those days plus one
+for `ACCOUNT_USAGE`'s lag (`jobs.idle_backfill_days`). That costs about a
+fifth of the full 90-day statement. Like the target, this is an
+opportunistic read of the sibling scope's cache. The cached backfill is still
+the pipe's whole history in the window, because the snapshot vouches for
+everything older.
 
 `TaskView` needs none of this. `INFORMATION_SCHEMA.TASK_HISTORY` accepts
 `TASK_NAME`/`DATABASE_NAME`/`SCHEMA_NAME` as direct named arguments, all of
@@ -1827,6 +1863,10 @@ Detail pane's own `fr` absorbs whatever is left.
   `PipeView` does. The list's Loaded/Status columns can therefore be up to 13
   days old without a refetch on a busy account. Worth revisiting if the list
   turns out to need fresher data.
+- An idle pipe's narrowed backfill trusts the `PIPE_ACTIVITY` snapshot to cover
+  the fetch window, but the snapshot covered the window as it was set when it
+  was fetched. After the setting is raised, that pipe's older days stay
+  unread until the snapshot is refetched, at most 13 days later.
 - The tree/Detail drag-resize does not persist across sessions, and does not
   re-clamp an already-narrow pane if the terminal is then resized smaller.
 - A single stage's own leaf node has no Object view. Deliberate, not an open

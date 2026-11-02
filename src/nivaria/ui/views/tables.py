@@ -289,12 +289,15 @@ class HistoryView(TabbedView):
         dated: Sequence[Any],
         show_days: int,
         noun: str,
-        *scopes: Scope,
+        sources: Sequence[tuple[Scope, int | None]],
+        *,
+        idle: tuple[float, int] | None = None,
     ) -> None:
         """Say so when a history was capped rather than exhausted, when it
         settled with nothing in the display window, when its only fetch
-        attempt errored with nothing to fall back on, or when a refresh
-        failed and the rows shown are older.
+        attempt errored with nothing to fall back on, when a refresh failed
+        and the rows shown are older, or what is known while a first fetch
+        is still out.
 
         A history table has no natural bottom -- it just stops -- so a
         capped one is indistinguishable from a complete one by looking at
@@ -303,6 +306,21 @@ class HistoryView(TabbedView):
         source hitting its cap means the merged table is short of rows, and
         neither one knows about the other's depth.
 
+        Each source comes with the days back from now it covers once
+        answered, or None for an ACCOUNT_USAGE backfill: its lag means it
+        cannot speak for the last hours, so it claims nothing early. The
+        near-real-time source answers in a fraction of a second and the
+        backfill in seconds (docs/measurements.md "History latency"), and a
+        blank table under a busy indicator says nothing while that runs. So
+        until every source has answered, the note says what the answered ones
+        cover. One that covers the whole display window is the answer.
+        `idle` is an earlier answer that covers days up to a moment (when, days),
+        used while nothing has answered: the PIPE_ACTIVITY snapshot's.
+
+        Answered means fetched at least once, or failed: a background refresh
+        of a cached history keeps its rows and is not waited for, so a
+        revisit stays as quiet as before.
+
         Emptiness is judged against `dated` -- this paint's post-window-
         filter merge -- rather than the merge sources' own row counts, since
         the display window (which can be narrower than the fetch window) is
@@ -310,10 +328,23 @@ class HistoryView(TabbedView):
         without making today's paint anything but empty.
         """
         note = self.query_one(f"#{HISTORY_NOTE}", Static)  # type: ignore[attr-defined]
-        entries = [repo.entry(scope) for scope in scopes]
+        covers = [(repo.entry(scope), days) for scope, days in sources]
+        entries = [entry for entry, _ in covers]
         capped = any(entry.truncated for entry in entries)
-        settled = all(
-            entry.state in (CacheState.COMPLETE, CacheState.ERROR) for entry in entries
+        covered = max(
+            (
+                days
+                for entry, days in covers
+                if days is not None and _has_rows_on_record(entry)
+            ),
+            default=0,
+        )
+        settled = (
+            all(
+                entry.state is CacheState.ERROR or _has_rows_on_record(entry)
+                for entry in entries
+            )
+            or covered >= show_days
         )
         errored = next(
             (
@@ -324,6 +355,7 @@ class HistoryView(TabbedView):
             None,
         )
         empty = settled and not dated and not capped
+        looking = not settled and not capped
         error = empty and errored is not None
         stale = next(
             (text for entry in entries if (text := failed_refresh(entry))), None
@@ -343,8 +375,40 @@ class HistoryView(TabbedView):
             note.update(Text(stale))
         elif empty:
             note.update(Text(f"No {noun} in the last {show_days} days."))
+        elif looking:
+            note.update(Text(_looking(dated, noun, covered, idle)))
 
         failed = not capped and (error or stale is not None)
         note.set_class(capped, "-capped")
         note.set_class(failed, "-error")
-        note.display = capped or failed or empty
+        note.display = capped or failed or empty or looking
+
+
+def _has_rows_on_record(entry: Entry) -> bool:
+    """Whether a scope's cached rows are some pass's whole answer.
+
+    A refresh keeps the previous rows and their `fetched_at` while it runs.
+    EMPTY can carry a `fetched_at` with no rows behind it -- see `Entry.due`.
+    """
+    return entry.fetched_at is not None and entry.state is not CacheState.EMPTY
+
+
+def _looking(
+    dated: Sequence[Any], noun: str, covered: int, idle: tuple[float, int] | None
+) -> str:
+    """What a history note says while some source has not answered yet."""
+    if covered and dated:
+        return f"Showing the last {covered} days. Still looking for older {noun}..."
+    if covered:
+        return f"No {noun} in the last {covered} days. Still looking..."
+    if dated:
+        return f"Still looking for more {noun}..."
+    if idle is not None:
+        when, days = idle
+        # A time, not an age -- see failed_refresh.
+        as_of = datetime.fromtimestamp(when, UTC).astimezone()
+        return (
+            f"No {noun} in the last {days} days as of {as_of:%Y-%m-%d %H:%M}. "
+            "Still looking..."
+        )
+    return f"Looking for {noun}..."

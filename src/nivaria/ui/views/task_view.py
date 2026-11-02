@@ -45,6 +45,7 @@ from textual.binding import Binding
 from textual.widgets import DataTable, TabbedContent, TabPane, TextArea
 
 from nivaria.format import format_timestamp_minutes, parse_timestamp
+from nivaria.gateway.queries import TASK_HISTORY_RETENTION_DAYS
 from nivaria.models import (
     ObjectType,
     Scope,
@@ -135,8 +136,10 @@ class TaskView(HistoryView, ObjectView):
             dated,
             show_days,
             "run history",
-            activity_history_scope,
-            history_scope,
+            [
+                (activity_history_scope, None),
+                (history_scope, TASK_HISTORY_RETENTION_DAYS),
+            ],
         )
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)

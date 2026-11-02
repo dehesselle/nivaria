@@ -58,6 +58,7 @@ from textual.binding import Binding
 from textual.widgets import DataTable, TabbedContent, TabPane, TextArea
 
 from nivaria.format import format_bytes, format_timestamp_minutes, parse_timestamp
+from nivaria.gateway.queries import PIPE_HISTORY_RETENTION_DAYS
 from nivaria.models import (
     ObjectType,
     Scope,
@@ -65,7 +66,12 @@ from nivaria.models import (
     pipe_activity_scope,
     pipe_history_scope,
 )
-from nivaria.settings import CACHE_TTL, PIPE_HISTORY_SHOW_DAYS, config
+from nivaria.settings import (
+    CACHE_TTL,
+    PIPE_HISTORY_FETCH_DAYS,
+    PIPE_HISTORY_SHOW_DAYS,
+    config,
+)
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.tables import (
     HISTORY_TABLE,
@@ -177,13 +183,20 @@ class PipeView(HistoryView, ObjectView):
         # it leaves the merged table short -- see HistoryView. Judged against
         # `dated`, not the merge sources' own row counts -- see
         # HistoryView.sync_history_note.
+        sources: list[tuple[Scope, int | None]] = [(activity_history_scope, None)]
+        if history_scope is not None:
+            sources.append((history_scope, PIPE_HISTORY_RETENTION_DAYS))
+        # With no target there is no near-real-time source to answer early,
+        # but the snapshot that left the target unresolved is itself an
+        # answer, as of when it was fetched -- see Repository.pipe_idle_as_of.
+        idle = None
+        idle_as_of = self.repo.pipe_idle_as_of(
+            self.ref.database, self.ref.schema, self.ref.name
+        )
+        if idle_as_of is not None:
+            idle = (idle_as_of, min(show_days, config.get(PIPE_HISTORY_FETCH_DAYS)))
         self.sync_history_note(
-            self.repo,
-            dated,
-            show_days,
-            "load activity",
-            activity_history_scope,
-            *([history_scope] if history_scope is not None else []),
+            self.repo, dated, show_days, "load activity", sources, idle=idle
         )
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)

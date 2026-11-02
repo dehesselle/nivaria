@@ -764,6 +764,30 @@ class Repository:
                 return (str(catalog), str(table_schema), str(table))
         return None
 
+    def pipe_idle_as_of(self, database: str, schema: str, pipe: str) -> float | None:
+        """When PIPE_ACTIVITY last saw no load for this pipe, or None.
+
+        PIPE_ACTIVITY keeps each pipe's latest load within the fetch window,
+        so a fetched snapshot without a row for this pipe says that nothing
+        loaded in that window up to `fetched_at`. EMPTY is excluded: a pass
+        can hold that state with no rows while carrying the previous pass's
+        `fetched_at`. A failed or running refresh still keeps the earlier
+        rows, so the absence still holds as of `fetched_at`.
+
+        The window is the fetch window as it was set for that pass; raising
+        the setting afterwards makes the claim cover less than it says until
+        the snapshot is refetched.
+        """
+        scope = pipe_activity_scope(database, schema)
+        with self._store(scope).connect() as connection:
+            entry = self._entry(connection, scope)
+            rows = self._select(connection, scope)
+        if entry.state is CacheState.EMPTY or entry.fetched_at is None:
+            return None
+        if any(row["PIPE_NAME"] == pipe for row in rows):
+            return None
+        return entry.fetched_at
+
     def search_corpus(self, databases: Sequence[str]) -> list[tuple[str, ObjectRef]]:
         """Every searchable object across `databases` as (text, ref) pairs.
 

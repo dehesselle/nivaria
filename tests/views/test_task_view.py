@@ -21,6 +21,7 @@ from nivaria.ui.views.task_view import TaskView
 from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
+    load,
     put_task,
     put_task_activity_history,
     put_task_history,
@@ -285,3 +286,58 @@ def test_task_view_scopes_always_includes_all_three_task_scopes(repo) -> None:
         view.scopes()
     )
     assert task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS") in view.scopes()
+
+
+def _note(app) -> str | None:
+    note = app.query_one("#detail-history-note", Static)
+    return str(note.render()) if note.display else None
+
+
+async def test_an_empty_recent_history_answers_before_the_backfill(repo) -> None:
+    """INFORMATION_SCHEMA.TASK_HISTORY answers in a fraction of a second,
+    ACCOUNT_USAGE in seconds; the note says what is known meanwhile."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    load(repo, task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"), [])
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert _note(app) == "No run history in the last 7 days. Still looking..."
+
+
+async def test_recent_runs_show_while_the_backfill_still_runs(repo) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    put_task_history(repo, "REFRESH_ORDERS", SCHEDULED_TIME=_days_ago_iso(1))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert _note(app) == (
+            "Showing the last 7 days. Still looking for older run history..."
+        )
+
+
+async def test_an_empty_recent_history_is_the_answer_for_a_short_window(
+    repo,
+) -> None:
+    """A display window inside the near-real-time source's retention needs
+    nothing from the backfill."""
+    config.set(TASK_HISTORY_SHOW_DAYS, 5)
+    ref = put_task(repo, "REFRESH_ORDERS")
+    load(repo, task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"), [])
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert _note(app) == "No run history in the last 5 days."
+
+
+async def test_a_task_whose_sources_both_answered_empty_says_so(repo) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    load(repo, task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"), [])
+    load(repo, task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"), [])
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert _note(app) == "No run history in the last 90 days."

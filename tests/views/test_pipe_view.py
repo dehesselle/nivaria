@@ -529,3 +529,95 @@ async def test_the_s_key_shows_the_pipes_sql(repo) -> None:
         assert tabs.active == "tab-sql"
         await pilot.press("h")
         assert tabs.active == "tab-history"
+
+
+def _note(app) -> Static | None:
+    note = app.query_one("#detail-history-note", Static)
+    return note if note.display else None
+
+
+async def test_a_pipe_the_snapshot_saw_idle_says_so_while_its_backfill_runs(
+    repo,
+) -> None:
+    """No target table means no near-real-time source to answer early, but
+    the Pipes list's snapshot is itself an answer, as of its fetch. Without
+    it the table sat blank under the busy indicator for seconds."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_OTHER")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = _note(app)
+        assert note is not None
+        text = str(note.render())
+        assert text.startswith("No load activity in the last 90 days as of ")
+        assert text.endswith("Still looking...")
+
+
+async def test_an_idle_pipes_finished_backfill_gives_the_plain_answer(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_OTHER")
+    load(repo, pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"), [])
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = _note(app)
+        assert note is not None
+        assert str(note.render()) == "No load activity in the last 90 days."
+
+
+async def test_a_pipe_with_nothing_known_yet_says_it_is_looking(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = _note(app)
+        assert note is not None
+        assert str(note.render()) == "Looking for load activity..."
+
+
+async def test_a_recent_load_shows_while_the_backfill_still_runs(repo) -> None:
+    """Rows from the near-real-time source alone look like the whole
+    history; the note says they are not."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_ORDERS")
+    put_pipe_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(2))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = _note(app)
+        assert note is not None
+        assert str(note.render()) == (
+            "Showing the last 14 days. Still looking for older load activity..."
+        )
+
+
+async def test_a_cached_history_being_refreshed_stays_quiet(repo) -> None:
+    """A refresh keeps the cached rows, so a revisit has its answer already
+    and says nothing about looking."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
+    repo.begin_pass(pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert _note(app) is None
+
+
+async def test_a_cached_empty_history_being_refreshed_keeps_its_answer(repo) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    load(repo, scope, [])
+    repo.begin_pass(scope)
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = _note(app)
+        assert note is not None
+        assert str(note.render()) == "No load activity in the last 90 days."

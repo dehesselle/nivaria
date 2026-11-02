@@ -1042,6 +1042,48 @@ def test_pipe_target_table_reads_snowflakes_own_resolution(repo) -> None:
     )
 
 
+def _other_pipes_activity(repo) -> None:
+    load(
+        repo,
+        pipe_activity_scope("MYDB", "PUBLIC"),
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "LOAD_OTHER",
+                "FILE_NAME": "other.csv.gz",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+            }
+        ],
+    )
+
+
+def test_an_unfetched_snapshot_says_nothing_about_a_pipe_being_idle(repo) -> None:
+    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_ORDERS") is None
+
+
+def test_a_fetched_snapshot_without_the_pipe_says_it_was_idle_then(repo) -> None:
+    _other_pipes_activity(repo)
+    fetched_at = repo.entry(pipe_activity_scope("MYDB", "PUBLIC")).fetched_at
+    assert fetched_at is not None
+    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_ORDERS") == fetched_at
+
+
+def test_a_snapshot_with_the_pipes_load_does_not_call_it_idle(repo) -> None:
+    _other_pipes_activity(repo)
+    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_OTHER") is None
+
+
+def test_a_refreshing_snapshot_still_says_the_pipe_was_idle(repo) -> None:
+    """A refresh keeps the earlier rows until it finishes, so their answer
+    still holds as of when they were fetched."""
+    _other_pipes_activity(repo)
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    fetched_at = repo.entry(scope).fetched_at
+    repo.begin_pass(scope)
+    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_ORDERS") == fetched_at
+
+
 def test_pipe_history_columns_survive_a_round_trip(repo) -> None:
     """INFORMATION_SCHEMA.COPY_HISTORY's columns, under the names a live
     account returned them on 2026-09-09 (docs/snowflake-behavior.md)."""

@@ -1494,6 +1494,71 @@ def test_pipe_activity_history_scope_reaches_the_right_gateway_call(repo) -> Non
     assert [c[0] for c in gateway.calls] == ["pipe_activity_history"]
 
 
+def test_an_idle_pipes_backfill_covers_the_days_since_the_snapshot_plus_one() -> None:
+    from nivaria.service.jobs import idle_backfill_days
+
+    day = 86400
+    assert idle_backfill_days(1000.0, 1000.0, 90) == 1
+    assert idle_backfill_days(0.0, 1.0, 90) == 2
+    assert idle_backfill_days(0.0, 5 * day, 90) == 6
+    assert idle_backfill_days(0.0, 5 * day + 1, 90) == 7
+
+
+def test_an_idle_pipes_backfill_is_never_wider_than_the_fetch_window() -> None:
+    from nivaria.service.jobs import idle_backfill_days
+
+    assert idle_backfill_days(0.0, 200 * 86400, 90) == 90
+
+
+def _backfill_days(repo, snapshot_pipe: str | None) -> int:
+    """The fetch window one LOAD_ORDERS backfill pass asked for, after a
+    PIPE_ACTIVITY snapshot holding `snapshot_pipe`'s load (or no snapshot)."""
+    from nivaria.models import pipe_activity_history_scope, pipe_activity_scope
+
+    if snapshot_pipe is not None:
+        snapshot = pipe_activity_scope("MYDB", "PUBLIC")
+        generation = repo.begin_pass(snapshot)
+        repo.write_page(
+            snapshot,
+            generation,
+            [
+                {
+                    "PIPE_CATALOG_NAME": "MYDB",
+                    "PIPE_SCHEMA_NAME": "PUBLIC",
+                    "PIPE_NAME": snapshot_pipe,
+                    "FILE_NAME": "orders_1.csv.gz",
+                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
+                }
+            ],
+            None,
+        )
+        repo.finish_pass(snapshot, generation)
+    gateway = FakeGateway()
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    (call,) = [args for name, args in gateway.calls if name == "pipe_activity_history"]
+    return call[3]
+
+
+def test_a_pipe_the_snapshot_saw_idle_backfills_only_the_days_since(repo) -> None:
+    """The snapshot already answers for the rest of the fetch window, and
+    reading all of it again was measured at five times the cost."""
+    assert _backfill_days(repo, "LOAD_OTHER") <= 2
+
+
+def test_a_pipe_the_snapshot_saw_loading_backfills_the_whole_window(repo) -> None:
+    assert _backfill_days(repo, "LOAD_ORDERS") == 90
+
+
+def test_a_pipe_with_no_snapshot_backfills_the_whole_window(repo) -> None:
+    assert _backfill_days(repo, None) == 90
+
+
 def test_a_pipe_status_pass_reads_every_cached_pipe_over_several_pages(
     repo,
 ) -> None:

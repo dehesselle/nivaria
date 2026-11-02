@@ -230,6 +230,14 @@ class FetchService:
                 pipe_target = self._repo.pipe_target_table(
                     scope.database, scope.schema, scope.table
                 )
+            pipe_idle_as_of = None
+            if scope.type is ScopeType.PIPE_ACTIVITY_HISTORY:
+                assert scope.database is not None
+                assert scope.schema is not None
+                assert scope.table is not None
+                pipe_idle_as_of = self._repo.pipe_idle_as_of(
+                    scope.database, scope.schema, scope.table
+                )
             pipe_names = None
             if scope.type is ScopeType.PIPE_STATUS:
                 assert scope.database is not None
@@ -249,6 +257,7 @@ class FetchService:
                 self._page_size,
                 allow_reconnect=allow_reconnect,
                 pipe_target=pipe_target,
+                pipe_idle_as_of=pipe_idle_as_of,
                 pipe_names=pipe_names,
             )
         # A worker thread boundary: the driver, the network and sqlite all
