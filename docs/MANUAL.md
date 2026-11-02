@@ -99,7 +99,7 @@ across sessions.
 | `F9` | Open the menu bar |
 | `F1` | Show or hide the Log panel |
 | `/` | Open search |
-| `F5` | Refresh whatever the cursor is on |
+| `F5` | Refresh whatever the cursor is on, and what the detail pane shows for it |
 | `w` | Open whatever the cursor is on in Snowsight |
 | `Ctrl+O` | Reopen the connect dialog (reconnect, or switch account) |
 | `Ctrl+D` | Pick databases |
@@ -195,8 +195,10 @@ A stage has no view of its own; the stage list shows everything about it.
   sources. A failed load or run shows its error below the table. A note above
   says when the history was capped. While the slower, older source is still
   being read the first time, the note says what is known so far, such as "No
-  run history in the last 7 days. Still looking...". For a pipe the Pipes list
-  saw no loads for, it gives that list's answer and the time it was fetched.
+  run history in the last 7 days. Still looking...". A pipe's recent loads are read through its target table. When the table is
+  not known from a load and the pipe's definition does not name it in full
+  (`database.schema.table`), new loads are not checked for automatically; the
+  note says so, and `F5` checks now.
 - **Status** (Pipe list) shows each pipe's `invalid_reason` and the
   execution state Snowflake reports for it (`RUNNING`, `PAUSED`,
   `STOPPED_...`). The state is read, 50 pipes at a time, only while this tab

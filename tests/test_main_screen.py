@@ -420,7 +420,8 @@ async def test_the_picker_is_not_opened_with_nothing_to_show(repo) -> None:
 
 
 async def test_refresh_targets_the_scope_under_the_cursor(repo) -> None:
-    """Surgical, not 'fetch everything again'."""
+    """Surgical, not 'fetch everything again': the node's own list and what
+    the detail pane shows for it."""
     put_databases(repo, "MYDB")
     put_schemas(repo, "MYDB", "AAA")
     fetch = RecordingFetch()
@@ -444,7 +445,11 @@ async def test_refresh_targets_the_scope_under_the_cursor(repo) -> None:
         fetch.requests.clear()
         screen.action_refresh()
         await pilot.pause()
-    assert fetch.scopes == ["schemas:MYDB"]
+    assert sorted(fetch.scopes) == [
+        "grants:MYDB",
+        "schemas:MYDB",
+        "tag_references:MYDB",
+    ]
 
 
 async def test_refresh_on_a_schema_node_refreshes_the_list_it_is_in(repo) -> None:
@@ -468,11 +473,14 @@ async def test_refresh_on_a_schema_node_refreshes_the_list_it_is_in(repo) -> Non
         fetch.requests.clear()
         screen.action_refresh()
         await pilot.pause()
-    assert fetch.scopes == ["schemas:MYDB"]
+    assert sorted(fetch.scopes) == [
+        "grants:MYDB.AAA",
+        "schemas:MYDB",
+        "tag_references:MYDB.AAA",
+    ]
 
 
-async def test_refresh_on_an_object_leaf_asks_for_nothing(repo) -> None:
-    """A leaf owns no scope of its own; its columns are the detail pane's job."""
+async def test_refresh_with_nothing_under_the_cursor_asks_for_nothing(repo) -> None:
     put_databases(repo, "MYDB")
     fetch = RecordingFetch()
     app = Harness(repo, fetch)
@@ -489,6 +497,33 @@ async def test_refresh_on_an_object_leaf_asks_for_nothing(repo) -> None:
         screen.action_refresh()
         await pilot.pause()
     assert fetch.scopes == []
+
+
+async def test_refresh_asks_for_the_detail_panes_scopes_while_they_are_fresh(
+    repo,
+) -> None:
+    """A pipe whose target table cannot be resolved is only read through
+    the PIPE_ACTIVITY snapshot, which the sweep leaves alone for up to 13
+    days; F5 is how to check now."""
+    from nivaria.models import pipe_activity_scope
+    from nivaria.ui.widgets.detail_pane import DetailPane
+    from tests.views.harness import put_pipe, put_pipe_activity
+
+    put_databases(repo, "MYDB")
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_OTHER")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        screen.query_one(DetailPane).show(ref)
+        await settle(pilot)
+        fetch.requests.clear()
+        screen.action_refresh()
+        await pilot.pause()
+    assert fetch.scopes == [pipe_activity_scope("MYDB", "PUBLIC").key]
 
 
 # ------------------------------------------------------------------ picker

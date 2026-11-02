@@ -291,7 +291,7 @@ class HistoryView(TabbedView):
         noun: str,
         sources: Sequence[tuple[Scope, int | None]],
         *,
-        idle: tuple[float, int] | None = None,
+        unchecked: str | None = None,
     ) -> None:
         """Say so when a history was capped rather than exhausted, when it
         settled with nothing in the display window, when its only fetch
@@ -314,8 +314,11 @@ class HistoryView(TabbedView):
         blank table under a busy indicator says nothing while that runs. So
         until every source has answered, the note says what the answered ones
         cover. One that covers the whole display window is the answer.
-        `idle` is an earlier answer that covers days up to a moment (when, days),
-        used while nothing has answered: the PIPE_ACTIVITY snapshot's.
+
+        `unchecked` is the note for a history that nothing on the cache-age
+        cadence keeps current, so that the gap is never silent. It stands in
+        for the empty and the still-looking notes, but not for the cap, an
+        error or a failed refresh, which say more about the rows shown.
 
         Answered means fetched at least once, or failed: a background refresh
         of a cached history keeps its rows and is not waited for, so a
@@ -373,15 +376,19 @@ class HistoryView(TabbedView):
             note.update(Text(f"Could not fetch: {errored.error}"))
         elif stale is not None:
             note.update(Text(stale))
+        elif unchecked is not None:
+            note.update(Text(unchecked))
         elif empty:
             note.update(Text(f"No {noun} in the last {show_days} days."))
         elif looking:
-            note.update(Text(_looking(dated, noun, covered, idle)))
+            note.update(Text(_looking(dated, noun, covered)))
 
         failed = not capped and (error or stale is not None)
+        warned = not capped and not failed and unchecked is not None
         note.set_class(capped, "-capped")
         note.set_class(failed, "-error")
-        note.display = capped or failed or empty or looking
+        note.set_class(warned, "-unchecked")
+        note.display = capped or failed or warned or empty or looking
 
 
 def _has_rows_on_record(entry: Entry) -> bool:
@@ -393,9 +400,7 @@ def _has_rows_on_record(entry: Entry) -> bool:
     return entry.fetched_at is not None and entry.state is not CacheState.EMPTY
 
 
-def _looking(
-    dated: Sequence[Any], noun: str, covered: int, idle: tuple[float, int] | None
-) -> str:
+def _looking(dated: Sequence[Any], noun: str, covered: int) -> str:
     """What a history note says while some source has not answered yet."""
     if covered and dated:
         return f"Showing the last {covered} days. Still looking for older {noun}..."
@@ -403,12 +408,4 @@ def _looking(
         return f"No {noun} in the last {covered} days. Still looking..."
     if dated:
         return f"Still looking for more {noun}..."
-    if idle is not None:
-        when, days = idle
-        # A time, not an age -- see failed_refresh.
-        as_of = datetime.fromtimestamp(when, UTC).astimezone()
-        return (
-            f"No {noun} in the last {days} days as of {as_of:%Y-%m-%d %H:%M}. "
-            "Still looking..."
-        )
     return f"Looking for {noun}..."

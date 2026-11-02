@@ -195,7 +195,7 @@ def test_pipe_history_targets_information_schema_copy_history() -> None:
         "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, "
         "PIPE_RECEIVED_TIME, PIPE_NAME, FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "
         'FROM TABLE("MYDB".INFORMATION_SCHEMA.COPY_HISTORY('
-        "TABLE_NAME => 'MYDB.PUBLIC.ORDERS', "
+        """TABLE_NAME => '"MYDB"."PUBLIC"."ORDERS"', """
         "START_TIME => DATEADD('day', -14, CURRENT_TIMESTAMP())"
         ")) "
         "WHERE PIPE_NAME = %s "
@@ -306,4 +306,12 @@ def test_a_data_preview_quotes_every_part_and_takes_its_limit() -> None:
     assert (
         queries.data_preview("MyDb", "PUBLIC", "Orders", 500)
         == 'SELECT * FROM "MyDb"."PUBLIC"."Orders" LIMIT 500'
+    )
+
+
+def test_pipe_history_quotes_each_part_of_the_table_name() -> None:
+    """Unquoted, TABLE_NAME is upper-cased, so a lower-case or spaced table
+    was not found; quoted parts resolve as written, verified live."""
+    assert 'TABLE_NAME => \'"MYDB"."RAW"."t ""x"" it\'\'s"\'' in queries.pipe_history(
+        "MYDB", "RAW", 't "x" it\'s', 5000
     )

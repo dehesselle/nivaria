@@ -188,6 +188,16 @@ load metadata remembers it.
 `TASK_HISTORY`'s `DATABASE_NAME`/`SCHEMA_NAME`/`TASK_NAME` arguments accept a
 pyformat `%s` bind. The rows equalled those of the `quote_literal` spelling.
 
+`TABLE_NAME` is read like an identifier path, sandbox, 2026-11-02. For a
+table created as `"t lower"`, `'DB.SCH.t lower'` failed with `Table
+'DB.SCH."T LOWER"' does not exist`, while `'DB.SCH."t lower"'` and
+`'"DB"."SCH"."t lower"'` worked. For an upper-case table, the quoted
+`'"DB"."SCH"."T_UP"'`, the unquoted `'DB.SCH.T_UP'` and the lower-case
+`'db.sch.t_up'` all worked.
+
+The function rejects a `PIPE_NAME` argument given without `TABLE_NAME`:
+`missing required argument [TABLE_NAME]` (sandbox, 2026-11-02).
+
 ## Task history
 
 An unqualified `INFORMATION_SCHEMA.TASK_HISTORY(...)` resolves against the
@@ -209,6 +219,42 @@ cause. With `EXECUTE TASK` granted for the test and revoked afterwards:
 Rows with a `NULL` `QUERY_ID` survive the `(_scope, QUERY_ID)` key. Two
 such runs stored as two rows, over two refresh passes, because SQLite
 treats `NULL`s in a key as distinct.
+
+## Pipe target table
+
+No named field holds the table a pipe loads into. Snowflake's documentation,
+read 2026-11-02:
+
+- `SHOW PIPES`, `INFORMATION_SCHEMA.PIPES` and `ACCOUNT_USAGE.PIPES` name it
+  only inside `definition`, the `COPY` statement. A Snowpipe Streaming default
+  pipe takes its name from its table, but that kind is Snowflake's own.
+- None of `SYSTEM$PIPE_STATUS`'s documented fields names it.
+- `ACCOUNT_USAGE.OBJECT_DEPENDENCIES` does not list pipes among the objects
+  it tracks.
+- `COPY_HISTORY`, access history and lineage name it only for a load that
+  happened.
+
+How the `COPY` resolves an unqualified target, sandbox, 2026-11-02. Every
+pipe was created in schema A, with the session's current schema set as shown:
+
+| Session schema | `COPY INTO` | Result |
+| --- | --- | --- |
+| B | `RES_ONLY_B` (exists only in B) | created |
+| B | `RES_ONLY_A` (exists only in A) | `Table 'RES_ONLY_A' does not exist` |
+| A | `RES_ONLY_A` | created |
+| A | `RES_ONLY_B` | `Table 'RES_ONLY_B' does not exist` |
+| B | `NIVARIA_PROBE_A.RES_ONLY_A` | created |
+| B | `RENETEST1.NIVARIA_PROBE_A.RES_ONLY_A` | created |
+| A | `NIVARIA_PROBE_B.RES_ONLY_B` | created |
+
+An unqualified target therefore resolves against the session's schema at
+`CREATE PIPE` time, not against the pipe's own schema. `SHOW PIPES` keeps the
+definition as written (`COPY INTO RES_ONLY_A FROM ...`), so the text alone
+does not say which table that is. The `CREATE PIPE` documentation is silent on
+this.
+
+All 1872 pipe definitions on the three sandbox databases start with `COPY
+INTO`; 1871 name a fully qualified, unquoted target.
 
 ## Pipe execution state
 

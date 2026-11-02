@@ -350,7 +350,7 @@ def test_pipe_history_is_fetched_in_one_shot_given_its_resolved_target() -> None
 
 def test_pipe_history_without_a_resolved_target_raises() -> None:
     """fetch_page has no repository access and so cannot resolve the target
-    table itself -- see FetchService._resolve_pipe_target, the caller that
+    table itself -- FetchService._execute is the caller that
     is supposed to supply `pipe_target`. A caller that forgets is a bug, not
     a silent no-op, so this raises rather than fetching nothing quietly."""
     from nivaria.models import pipe_history_scope
@@ -1494,71 +1494,6 @@ def test_pipe_activity_history_scope_reaches_the_right_gateway_call(repo) -> Non
     assert [c[0] for c in gateway.calls] == ["pipe_activity_history"]
 
 
-def test_an_idle_pipes_backfill_covers_the_days_since_the_snapshot_plus_one() -> None:
-    from nivaria.service.jobs import idle_backfill_days
-
-    day = 86400
-    assert idle_backfill_days(1000.0, 1000.0, 90) == 1
-    assert idle_backfill_days(0.0, 1.0, 90) == 2
-    assert idle_backfill_days(0.0, 5 * day, 90) == 6
-    assert idle_backfill_days(0.0, 5 * day + 1, 90) == 7
-
-
-def test_an_idle_pipes_backfill_is_never_wider_than_the_fetch_window() -> None:
-    from nivaria.service.jobs import idle_backfill_days
-
-    assert idle_backfill_days(0.0, 200 * 86400, 90) == 90
-
-
-def _backfill_days(repo, snapshot_pipe: str | None) -> int:
-    """The fetch window one LOAD_ORDERS backfill pass asked for, after a
-    PIPE_ACTIVITY snapshot holding `snapshot_pipe`'s load (or no snapshot)."""
-    from nivaria.models import pipe_activity_history_scope, pipe_activity_scope
-
-    if snapshot_pipe is not None:
-        snapshot = pipe_activity_scope("MYDB", "PUBLIC")
-        generation = repo.begin_pass(snapshot)
-        repo.write_page(
-            snapshot,
-            generation,
-            [
-                {
-                    "PIPE_CATALOG_NAME": "MYDB",
-                    "PIPE_SCHEMA_NAME": "PUBLIC",
-                    "PIPE_NAME": snapshot_pipe,
-                    "FILE_NAME": "orders_1.csv.gz",
-                    "LAST_LOAD_TIME": "2026-01-02T03:04:05+00:00",
-                }
-            ],
-            None,
-        )
-        repo.finish_pass(snapshot, generation)
-    gateway = FakeGateway()
-    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
-    service = make_service(gateway, repo)
-    try:
-        service.request(scope)
-        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
-    finally:
-        service.stop()
-    (call,) = [args for name, args in gateway.calls if name == "pipe_activity_history"]
-    return call[3]
-
-
-def test_a_pipe_the_snapshot_saw_idle_backfills_only_the_days_since(repo) -> None:
-    """The snapshot already answers for the rest of the fetch window, and
-    reading all of it again was measured at five times the cost."""
-    assert _backfill_days(repo, "LOAD_OTHER") <= 2
-
-
-def test_a_pipe_the_snapshot_saw_loading_backfills_the_whole_window(repo) -> None:
-    assert _backfill_days(repo, "LOAD_ORDERS") == 90
-
-
-def test_a_pipe_with_no_snapshot_backfills_the_whole_window(repo) -> None:
-    assert _backfill_days(repo, None) == 90
-
-
 def test_a_pipe_status_pass_reads_every_cached_pipe_over_several_pages(
     repo,
 ) -> None:
@@ -1588,7 +1523,7 @@ def test_a_pipe_status_pass_reads_every_cached_pipe_over_several_pages(
 
 
 def test_pipe_history_resolves_its_target_from_cached_pipe_activity(repo) -> None:
-    """FetchService._resolve_pipe_target reads the target table straight off
+    """Repository.pipe_target_table reads the target table straight off
     whatever PIPE_ACTIVITY already has cached, Snowflake's own resolution --
     an opportunistic read of a sibling scope's cache."""
     from nivaria.models import pipe_activity_scope, pipe_history_scope
@@ -1644,6 +1579,43 @@ def test_pipe_history_resolves_its_target_from_cached_pipe_activity(repo) -> Non
     assert (
         "pipe_history",
         ("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS", 5000),
+    ) in gateway.calls
+
+
+def test_pipe_history_resolves_a_never_loaded_pipes_target_from_its_definition(
+    repo,
+) -> None:
+    from nivaria.models import pipe_history_scope
+
+    pipes = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
+    generation = repo.begin_pass(pipes)
+    repo.write_page(
+        pipes,
+        generation,
+        [
+            {
+                "database_name": "MYDB",
+                "schema_name": "PUBLIC",
+                "name": "LOAD_ORDERS",
+                "definition": "COPY INTO mydb.raw.orders FROM @s",
+            }
+        ],
+        None,
+    )
+    repo.finish_pass(pipes, generation)
+    history_scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    gateway = FakeGateway()
+    service = make_service(gateway, repo)
+    try:
+        service.request(history_scope)
+        assert wait_until(
+            lambda: repo.entry(history_scope).state is CacheState.COMPLETE
+        )
+    finally:
+        service.stop()
+    assert (
+        "pipe_history",
+        ("MYDB", "RAW", "ORDERS", "LOAD_ORDERS", 5000),
     ) in gateway.calls
 
 

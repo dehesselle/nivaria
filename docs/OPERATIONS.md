@@ -69,9 +69,9 @@ refresh lands, so it is refetched back to back, one fetch at a time.
 The `ACCOUNT_USAGE` half of a pipe's history is refetched at most every 13
 days, since it only changes as data ages out of the 14-day
 `INFORMATION_SCHEMA` window; the Pipes list's activity columns use the same
-interval. For a pipe that the Pipes list's last fetch showed no load for, it
-reads only the days since that fetch, plus one, rather than the whole fetch
-window.
+interval. For a pipe that the Pipes list's last fetch showed no load for, the
+`ACCOUNT_USAGE` half is not fetched at all: that fetch is the answer, and the
+`INFORMATION_SCHEMA` half covers the days since.
 
 The background refresh shares the connection pool with browsing at the
 lowest priority, so it never delays what you are doing.

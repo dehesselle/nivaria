@@ -406,8 +406,7 @@ def pipe_history(
     INFORMATION_SCHEMA.COPY_HISTORY, a table function that requires a
     TABLE_NAME argument -- Snowflake exposes no way to ask for "this pipe's"
     history directly, so the caller resolves the pipe's target table first
-    (from the already-cached ACCOUNT_USAGE.COPY_HISTORY data -- see
-    FetchService._resolve_pipe_target) and this just filters that table's
+    (`Repository.pipe_target_table`) and this just filters that table's
     history down to one pipe.
 
     TABLE_NAME and START_TIME are table-function named arguments, not an
@@ -417,13 +416,23 @@ def pipe_history(
     history"). PIPE_NAME, filtering the function's *output*, is an ordinary
     WHERE value and binds normally.
 
+    Each part of TABLE_NAME is quoted inside the literal, as
+    `pipe_status` quotes its pipe names: unquoted, the string is
+    upper-cased, so a lower-case or spaced table name was not found
+    (verified live, see docs/snowflake-behavior.md "Copy history").
+
     `max_rows` bounds the result the same way `pipe_activity_history` does,
     and matters slightly more here: the PIPE_NAME filter is applied to the
     table function's output, so several pipes loading into one target table
     all have their history returned before anything is discarded.
     """
     target = f"{quote_identifier(target_catalog)}.INFORMATION_SCHEMA.COPY_HISTORY"
-    qualified_table = quote_literal(f"{target_catalog}.{target_schema}.{target_table}")
+    qualified_table = quote_literal(
+        ".".join(
+            quote_identifier(part)
+            for part in (target_catalog, target_schema, target_table)
+        )
+    )
     return (
         "SELECT FILE_NAME, FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, "
         "PIPE_RECEIVED_TIME, PIPE_NAME, FIRST_ERROR_MESSAGE, FIRST_ERROR_LINE_NUMBER "

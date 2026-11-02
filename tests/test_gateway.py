@@ -521,7 +521,7 @@ def test_pipe_history_binds_pipe_name_and_qualifies_the_target_table() -> None:
     rows = gateway.pipe_history("MYDB", "PUBLIC", "ORDERS", "LOAD_ORDERS", 5000)
     statement, params = connection.executed[-1]
     assert 'FROM TABLE("MYDB".INFORMATION_SCHEMA.COPY_HISTORY(' in statement
-    assert "TABLE_NAME => 'MYDB.PUBLIC.ORDERS'" in statement
+    assert """TABLE_NAME => '"MYDB"."PUBLIC"."ORDERS"'""" in statement
     assert params == ("LOAD_ORDERS",)
     assert rows[0]["FILE_NAME"] == "orders_9.csv.gz"
 

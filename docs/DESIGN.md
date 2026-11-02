@@ -611,41 +611,80 @@ as quiet as before; the note only speaks during a first fetch.
 
 #### Resolving a pipe's target table, and the pipe that never loaded
 
-`INFORMATION_SCHEMA.COPY_HISTORY` wants a `TABLE_NAME`, and Snowflake exposes
-no way to ask it for "this pipe's" history. Rather than parse the target out
-of the pipe's `COPY INTO` text, `Repository.pipe_target_table` reads it off
-whatever `PIPE_ACTIVITY` already has cached for that pipe — Snowflake's own
-resolution, already being fetched for the Pipes (n) list, not a guess. That
-is an opportunistic read of a sibling scope's cache, not a dependency
-between scopes.
+`INFORMATION_SCHEMA.COPY_HISTORY` wants a `TABLE_NAME`, even when given a
+`PIPE_NAME`, and Snowflake keeps a pipe's target table in no named field (see
+[snowflake-behavior.md](snowflake-behavior.md#pipe-target-table)).
+`Repository.pipe_target_table` therefore resolves it in this order:
 
-A pipe that has never loaded anything has no cached row to resolve a target
-from, and that is a normal, **permanent** state for plenty of real pipes, not
-a transient failure to retry. Queuing `PIPE_HISTORY` anyway would make
+1. Whatever `PIPE_ACTIVITY` has cached for the pipe: Snowflake's own
+   resolution, already fetched for the Pipes (n) list. That is an
+   opportunistic read of a sibling scope's cache, not a dependency between
+   scopes.
+2. Otherwise the target named in the pipe's cached `SHOW PIPES` definition,
+   **only when it is fully qualified** (`pipe_definition.copy_target`).
+3. Otherwise none.
+
+The second step is the one place nivaria reads a fact out of SQL text rather
+than a named field, and it exists because the alternative is worse. A pipe
+with no load in the fetch window has no `PIPE_ACTIVITY` row, so without the
+definition its 14-day query, the only one on the cache-age cadence, would
+never run, and nothing would notice its first load for up to 13 days.
+
+Only the start of the statement is read: `COPY INTO` and up to three
+identifier parts, tokenized by Snowflake's documented rules for unquoted and
+quoted identifiers and comments. What follows does not matter. A full SQL
+parser was rejected for exactly that: it parses the whole statement, so an
+option it does not know loses the target too, and `sqlglot` fell back to an
+unparsed command on `ON_ERROR = SKIP_FILE_10%`, a documented value. Only a
+fully qualified name is accepted because Snowflake resolves an unqualified or
+schema-qualified target against the session's schema at `CREATE PIPE` time and
+stores the text as written. The pipe's own schema is a guess that can name a
+missing table, or a same-named table that is the wrong one.
+
+A pipe with no target from either source is a normal, lasting state, not a
+transient failure to retry. Queuing `PIPE_HISTORY` anyway would make
 `fetch_page` raise and the fetch layer report an error on every attempt,
 forever. So the gate lives above the fetch layer: `PipeView.scopes()` only
 lists `pipe_history_scope` once a target actually resolves, and
 `update_content` only `ensure()`s it under the same condition — so neither the
 interactive path nor the background sweep (which watches `scopes()` too) ever
-queues it. Such a pipe renders an empty history and starts fetching real data
-the moment `PIPE_ACTIVITY` first gets a row for it. `fetch_page` still raises
-if `PIPE_HISTORY` is requested with no target: a safety net for a caller that
-skips the gate, not the expected path.
+queues it. `fetch_page` still raises if `PIPE_HISTORY` is requested with no
+target: a safety net for a caller that skips the gate, not the expected path.
 
-Such a pipe has no near-real-time half to answer early, but the snapshot that
-left its target unresolved is an answer too. `PIPE_ACTIVITY` keeps each pipe's
-latest load in the fetch window, so a fetched snapshot without this pipe says
-it loaded nothing in that window up to the snapshot's `fetched_at`
-(`Repository.pipe_idle_as_of`). The note gives that answer with its time,
-since the snapshot can be up to 13 days old. The backfill then only has to
-look at the days since: `FetchService` hands `pipe_idle_as_of` to `fetch_page`
-the same way it hands `pipe_target` to `PIPE_HISTORY`, and the
-`PIPE_ACTIVITY_HISTORY` statement narrows its window to those days plus one
-for `ACCOUNT_USAGE`'s lag (`jobs.idle_backfill_days`). That costs about a
-fifth of the full 90-day statement. Like the target, this is an
-opportunistic read of the sibling scope's cache. The cached backfill is still
-the pipe's whole history in the window, because the snapshot vouches for
-everything older.
+Such a pipe is only covered by `ACCOUNT_USAGE`, and both of its scopes carry
+the 13-day TTL override, so nothing on the cache-age cadence would notice its
+first load. That gap is not silent: the note above its history says when its
+newest answer was fetched, that new loads are not checked for automatically,
+and that `F5` checks now (see "The staleness sweep").
+
+A parsed target can still fail: its table may have been dropped, or the role
+may not see it. `PIPE_HISTORY` then fails with "does not exist", which
+refreshes the pipe list and shows the gentle notice, and the query is retried
+every cache age. A `PIPE_ACTIVITY` target whose table was dropped later
+behaves the same.
+
+#### The pipe the snapshot shows no load for
+
+`PIPE_ACTIVITY` keeps each pipe's latest load in the fetch window. A fetched
+snapshot without a row for a pipe therefore says the pipe loaded nothing in
+that window, up to the snapshot's `fetched_at` minus `ACCOUNT_USAGE`'s lag
+(`Repository.pipe_idle_as_of`). The pipe's own `PIPE_ACTIVITY_HISTORY` reads
+the same view over the same window with the same lag, so it could only repeat
+that answer, at about 6.5 s per pipe (see
+[measurements.md](measurements.md#history-latency)). `PipeView` asks for it
+only once the snapshot has answered **with** a load for the pipe
+(`PipeView.needs_backfill`). Until the snapshot answers, nothing decides
+whether the backfill is needed, so it waits too.
+
+For such a pipe the snapshot is the history's older half, and the 14-day
+`PIPE_HISTORY` its recent half. They join without a gap while the snapshot is
+less than 14 days old, less the lag, and the snapshot's 13-day TTL keeps it
+there: the same 13/14 reasoning as `PIPE_ACTIVITY_HISTORY`'s own TTL (see
+"A scope whose data does not age on the ordinary cadence"). Once it goes
+stale, the snapshot is refetched, one schema-wide statement for every pipe in
+the schema, rather than a backfill per pipe. The note treats the snapshot as a
+lagging source that claims nothing early, so the answer is complete once the
+14-day history has answered, a fraction of a second after the view opens.
 
 `TaskView` needs none of this. `INFORMATION_SCHEMA.TASK_HISTORY` accepts
 `TASK_NAME`/`DATABASE_NAME`/`SCHEMA_NAME` as direct named arguments, all of
@@ -696,8 +735,10 @@ change until restart.
 the two sources must jointly cover every day with no gap between them, and
 `ACCOUNT_USAGE`'s own ingestion lag (up to a few hours) eats into a boundary
 cut exactly at 14, so the override stays one day inside it for margin.
-`PIPE_ACTIVITY` carries the same 13-day override, which the coverage argument
-does not require for it — see "Accepted design gaps".
+`PIPE_ACTIVITY` carries the same 13-day override, and the same coverage
+argument holds for it: for a pipe with no load in it, the snapshot is the
+older half of that pipe's history (see "The pipe the snapshot shows no load
+for").
 
 `object_type` on a `Scope` means "this is a `SHOW` listing of one object
 type" -- or, on an object-level `GRANTS` scope, which kind of object it names
@@ -1145,7 +1186,13 @@ priority. A stale schema listing is requested as its database prime, like any
 other request for one (see "Database priming"). Those are then busy and drop out, so the countdown moves on to
 whichever scope is due next: it jumps up after a sweep, and down when a view
 shows a scope that is close to its TTL. Navigation and `F5` affect it only
-through the ledger. A fixed timer restarted at `CACHE_TTL` cannot keep the
+through the ledger.
+
+`F5` is the explicit refresh, outside the sweep. It requests the scope of the
+tree node under the cursor, and every scope the detail pane reads, whatever
+their age. That is the only way to refresh a scope with a long TTL override
+before it runs out, such as a pipe whose target table cannot be resolved (see
+"Resolving a pipe's target table"). A fixed timer restarted at `CACHE_TTL` cannot keep the
 promise: a refresh lands a moment after the sweep that asked for it, so the
 next zero comes just before that data goes stale, skips it, and leaves it on
 screen for nearly two TTLs.
@@ -1857,16 +1904,14 @@ Detail pane's own `fr` absorbs whatever is left.
 ## Accepted design gaps
 
 - `PIPE_ACTIVITY` (the schema-wide latest-per-pipe snapshot the Pipes (n) list
-  reads) carries `PIPE_ACTIVITY_HISTORY`'s 13-day TTL override although the
-  `INFORMATION_SCHEMA` coverage argument does not apply to it, and
-  `PipeListView` does not merge in the near-real-time source the way
-  `PipeView` does. The list's Loaded/Status columns can therefore be up to 13
+  reads) carries a 13-day TTL override, and `PipeListView` does not merge in
+  the near-real-time source the way `PipeView` does. The list's Loaded/Status columns can therefore be up to 13
   days old without a refetch on a busy account. Worth revisiting if the list
   turns out to need fresher data.
-- An idle pipe's narrowed backfill trusts the `PIPE_ACTIVITY` snapshot to cover
-  the fetch window, but the snapshot covered the window as it was set when it
-  was fetched. After the setting is raised, that pipe's older days stay
-  unread until the snapshot is refetched, at most 13 days later.
+- A pipe the `PIPE_ACTIVITY` snapshot shows no load for trusts the snapshot to
+  cover the fetch window, but the snapshot covered the window as it was set
+  when it was fetched. After the setting is raised, that pipe's older days
+  stay unread until the snapshot is refetched, at most 13 days later.
 - The tree/Detail drag-resize does not persist across sessions, and does not
   re-clamp an already-narrow pane if the terminal is then resized smaller.
 - A single stage's own leaf node has no Object view. Deliberate, not an open

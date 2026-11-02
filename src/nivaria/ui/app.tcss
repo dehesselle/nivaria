@@ -232,8 +232,10 @@ ClosingDialog > #dialog {
     color: $text-muted;
 }
 
-/* Not $error: a capped history is correct data, just not all of it. */
-#detail-history-note.-capped {
+/* Not $error: a capped history is correct data, just not all of it, and an
+   unchecked one is correct as of the time it states. */
+#detail-history-note.-capped,
+#detail-history-note.-unchecked {
     color: $text-warning;
 }
 

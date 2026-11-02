@@ -1042,6 +1042,64 @@ def test_pipe_target_table_reads_snowflakes_own_resolution(repo) -> None:
     )
 
 
+def _pipe_defined_as(repo, definition: str) -> None:
+    load(
+        repo,
+        objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC"),
+        [
+            {
+                "database_name": "MYDB",
+                "schema_name": "PUBLIC",
+                "name": "LOAD_ORDERS",
+                "definition": definition,
+            }
+        ],
+    )
+
+
+def test_a_pipe_without_activity_takes_its_target_from_its_definition(repo) -> None:
+    """A pipe that never loaded has no PIPE_ACTIVITY row, and without a
+    target its 14-day history would never be asked for."""
+    _pipe_defined_as(repo, 'COPY INTO mydb.raw."orders" FROM @s')
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") == (
+        "MYDB",
+        "RAW",
+        "orders",
+    )
+
+
+def test_a_partly_qualified_definition_gives_no_target(repo) -> None:
+    """Resolved against the session's schema at CREATE PIPE time, which the
+    text does not record."""
+    _pipe_defined_as(repo, "COPY INTO raw.orders FROM @s")
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") is None
+
+
+def test_snowflakes_own_resolution_wins_over_the_definition(repo) -> None:
+    _pipe_defined_as(repo, "COPY INTO mydb.raw.elsewhere FROM @s")
+    load(
+        repo,
+        pipe_activity_scope("MYDB", "PUBLIC"),
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "LOAD_ORDERS",
+                "FILE_NAME": "orders_1.csv.gz",
+                "LAST_LOAD_TIME": "2026-01-02 03:04:05",
+                "TABLE_CATALOG_NAME": "MYDB",
+                "TABLE_SCHEMA_NAME": "RAW",
+                "TABLE_NAME": "ORDERS",
+            }
+        ],
+    )
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") == (
+        "MYDB",
+        "RAW",
+        "ORDERS",
+    )
+
+
 def _other_pipes_activity(repo) -> None:
     load(
         repo,

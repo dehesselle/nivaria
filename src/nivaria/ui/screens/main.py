@@ -653,7 +653,16 @@ class MainScreen(Screen):
         self.fetch = self.app.fetch
 
     def action_refresh(self) -> None:
-        """Explicitly refresh whatever the cursor is on."""
+        """Explicitly refresh whatever the cursor is on, and what the detail
+        pane shows for it.
+
+        The detail pane's scopes are asked for whatever their age. The sweep
+        leaves a scope with a long TTL override alone for days -- a pipe the
+        PIPE_ACTIVITY snapshot shows no load for is not checked again for
+        up to 13 days -- and F5 is how to check now.
+        """
+        for scope in self.detail.scopes():
+            self._request(_requestable(scope), Priority.INTERACTIVE)
         node = self.tree.cursor_node
         if node is not None and node.data and node.data.type is NodeType.SCHEMA:
             # A schema node owns no scope; the list it appears in is its
