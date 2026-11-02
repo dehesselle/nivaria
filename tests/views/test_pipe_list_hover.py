@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: 0BSD
 
-"""Hovering "Loaded" tooltips the full timestamp behind a truncated cell.
+"""Hovering "Loaded" (Activity tab) or "Created" (Status tab) tooltips the
+full timestamp behind a truncated cell.
 
 Same DataTable-subclass tooltip pattern as test_table_list_hover.py (see
-views/tables.py's HoverTooltipTable) -- one tooltip-bearing column here
-instead of three.
+views/tables.py's HoverTooltipTable) -- one tooltip-bearing column per tab
+here instead of three.
 """
 
 from __future__ import annotations
@@ -55,6 +56,22 @@ async def test_hovering_a_non_timestamp_column_sets_no_tooltip(repo) -> None:
         table = await _mounted_table(app, pilot)
         await _hover_cell(pilot, table, 0, 0)  # Name
         assert table.tooltip is None
+
+
+async def test_hovering_created_on_the_status_tab_tooltips_the_full_timestamp(
+    repo,
+) -> None:
+    raw = "2026-03-01 08:15:30"
+    put_pipe(repo, "LOAD_ORDERS", created_on=raw)
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC"))
+        await pilot.pause()
+        # Status is the default tab, so no switch is needed.
+        table = pane.query_one("#detail-status", DataTable)
+        await _hover_cell(pilot, table, 0, 1)
+        assert table.tooltip == format_timestamp_full(raw)
 
 
 async def test_hovering_a_row_without_an_activity_pass_sets_no_tooltip(repo) -> None:

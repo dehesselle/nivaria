@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, TabbedContent
 
+from nivaria.format import format_date
 from nivaria.models import (
     ObjectRef,
     ObjectType,
@@ -57,11 +58,11 @@ async def test_the_status_tab_shows_every_pipes_execution_state_from_snowflake(
         table = pane.query_one("#detail-status", DataTable)
         assert table.row_count == 2
         assert table.get_cell_at((0, 0)).plain == "LOAD_CUSTOMERS"
-        assert table.get_cell_at((0, 1)).plain == "STOPPED_STAGE_DROPPED"
-        assert table.get_cell_at((0, 2)).plain == "stage dropped"
+        assert table.get_cell_at((0, 2)).plain == "STOPPED_STAGE_DROPPED"
+        assert table.get_cell_at((0, 3)).plain == "stage dropped"
         assert table.get_cell_at((1, 0)).plain == "LOAD_ORDERS"
-        assert table.get_cell_at((1, 1)).plain == "PAUSED"
-        assert table.get_cell_at((1, 2)).plain == ""
+        assert table.get_cell_at((1, 2)).plain == "PAUSED"
+        assert table.get_cell_at((1, 3)).plain == ""
 
 
 async def test_a_pipe_whose_status_was_never_read_shows_no_execution_state(
@@ -77,7 +78,20 @@ async def test_a_pipe_whose_status_was_never_read_shows_no_execution_state(
         pane.show_category(scope)
         await pilot.pause()
         table = pane.query_one("#detail-status", DataTable)
-        assert table.get_cell_at((0, 1)).plain == ""
+        assert table.get_cell_at((0, 2)).plain == ""
+
+
+async def test_the_status_tab_shows_when_each_pipe_was_created(repo) -> None:
+    raw = "2026-01-02 13:45:07"
+    put_pipe(repo, "LOAD_ORDERS", created_on=raw)
+    scope = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-status", DataTable)
+        assert table.get_cell_at((0, 1)).plain == format_date(raw)
 
 
 async def test_the_status_scope_is_watched_only_while_the_status_tab_is_shown(

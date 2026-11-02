@@ -4,8 +4,8 @@
 
 """Category view for the "Pipes (n)" node: status and load activity.
 
-Tabbed -- Status (one row per pipe: name, execution state, and
-`invalid_reason`) opens by default, alongside Activity (last load activity
+Tabbed -- Status (one row per pipe: name, `created_on`, execution state
+and `invalid_reason`) opens by default, alongside Activity (last load activity
 per pipe).
 
 Execution State is Snowflake's own `executionState`, read with
@@ -43,6 +43,7 @@ from textual.widgets import DataTable, Static, TabbedContent, TabPane
 from nivaria.cache.repository import Repository
 from nivaria.format import (
     format_bytes,
+    format_date,
     format_timestamp_minutes,
 )
 from nivaria.models import (
@@ -67,7 +68,7 @@ from nivaria.ui.views.tables import (
 #: tab since both go empty/error together (both read `self.scope` alone).
 _STATUS_NOTE = "detail-status-note"
 
-_STATUS_COLUMNS = ("Name", "Execution State", "Invalid Reason")
+_STATUS_COLUMNS = ("Name", "Created", "Execution State", "Invalid Reason")
 _ACTIVITY_COLUMNS = (
     "Name",
     "Rows",
@@ -80,8 +81,10 @@ _ACTIVITY_COLUMNS = (
 
 
 #: Which merged-row field a tooltip-bearing column's full value comes
-#: from, keyed by that column's header. Every other column has no tooltip.
+#: from, keyed by that column's header, one map per tab. Every other column
+#: has no tooltip.
 _TOOLTIP_FIELDS = {"Loaded": "LAST_LOAD_TIME"}
+_STATUS_TOOLTIP_FIELDS = {"Created": "created_on"}
 
 
 @register_category_view
@@ -110,8 +113,8 @@ class PipeListView(TabbedView, CategoryView):
                 yield activity
             with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
                 yield Static("", id=_STATUS_NOTE)
-                status: DataTable[Text] = DataTable(
-                    id="detail-status", cursor_type="row"
+                status: DataTable[Text] = HoverTooltipTable(
+                    self, _STATUS_TOOLTIP_FIELDS, id="detail-status", cursor_type="row"
                 )
                 status.zebra_stripes = True
                 status.add_columns(*_STATUS_COLUMNS)
@@ -220,6 +223,7 @@ class PipeListView(TabbedView, CategoryView):
                 )
                 status_table.add_row(
                     Text(name),
+                    Text(format_date(row.get("created_on"))),
                     Text(state_by_name.get(name, "")),
                     Text(row.get("invalid_reason") or ""),
                     key=name,
