@@ -76,10 +76,22 @@ ruff check
 
 Let the formatter decide.
 
+**markdownlint** checks the Markdown files:
+
+```sh
+uvx --from nodejs-wheel npx --yes markdownlint-cli2@0.24.0
+```
+
+It runs on Node, which `nodejs-wheel` provides, so no Node install is needed.
+Its settings are in `.markdownlint-cli2.yaml`, which the VS Code markdownlint
+extension reads too. CI uses `markdownlint-cli2-action`, which bundles a fixed
+markdownlint-cli2; bump the version above together with that action's pin in
+`.github/workflows/build.yml`.
+
 ## CI and releases
 
-`.github/workflows/build.yml` runs on every push and pull request: ruff and
-`reuse lint`, the tests on Linux, Windows and macOS with Python 3.12 (plus
+`.github/workflows/build.yml` runs on every push and pull request: ruff,
+markdownlint and `reuse lint`, the tests on Linux, Windows and macOS with Python 3.12 (plus
 3.14 on Linux), and a wheel build that is smoke-tested by importing it.
 
 Pushing a `v*` tag additionally checks that the wheel's version matches the
