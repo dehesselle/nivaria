@@ -680,14 +680,18 @@ as quiet as before; the note only speaks during a first fetch.
 `Repository.pipe_target_table` therefore resolves it in this order:
 
 1. Whatever `PIPE_ACTIVITY` has cached for the pipe: Snowflake's own
-   resolution, already fetched for the Pipes (n) list. That is an
-   opportunistic read of a sibling scope's cache, not a dependency between
-   scopes.
-2. Otherwise the target named in the pipe's cached `SHOW PIPES` definition,
+   resolution of its newest load, already fetched for the Pipes (n) list.
+   That is an opportunistic read of a sibling scope's cache, not a
+   dependency between scopes.
+2. Otherwise the newest load in the pipe's own `PIPE_ACTIVITY_HISTORY` that
+   names a table: the same resolution. A pipe view opened before the
+   schema-wide snapshot has answered gets it sooner this way (see "The pipe
+   the snapshot shows no load for").
+3. Otherwise the target named in the pipe's cached `SHOW PIPES` definition,
    **only when it is fully qualified** (`pipe_definition.copy_target`).
-3. Otherwise none.
+4. Otherwise none.
 
-The second step is the one place nivaria reads a fact out of SQL text rather
+The third step is the one place nivaria reads a fact out of SQL text rather
 than a named field, and it exists because the alternative is worse. A pipe
 with no load in the fetch window has no `PIPE_ACTIVITY` row, so without the
 definition its near-real-time 14-day query would not run, and its first load
@@ -736,10 +740,21 @@ that window, up to the snapshot's `fetched_at` minus `ACCOUNT_USAGE`'s lag
 (`Repository.pipe_idle_as_of`). The pipe's own `PIPE_ACTIVITY_HISTORY` reads
 the same view over the same window with the same lag, so it could only repeat
 that answer, at about 6.5 s per pipe (see
-[measurements.md](measurements.md#history-latency)). `PipeView` asks for it
-only once the snapshot has answered **with** a load for the pipe
-(`PipeView.needs_backfill`). Until the snapshot answers, nothing decides
-whether the backfill is needed, so it waits too.
+[measurements.md](measurements.md#history-latency)). So once the snapshot
+has answered **without** a load for the pipe, `PipeView` no longer asks for
+it (`PipeView.needs_backfill`).
+
+Until the snapshot has answered, the backfill is asked for alongside it, not
+after it. On a busy account the schema-wide snapshot takes up to half a
+minute, one pipe's backfill a few seconds (see
+[measurements.md](measurements.md#account_usage-windows)). And for a pipe
+whose definition does not name its target in full, the backfill is also what
+first names the table the 14-day history needs. Waiting would leave a pipe
+opened straight from search, or after a cache file was replaced, empty for
+that long. The price is one backfill for a pipe that turns out idle, paid
+once, since later refreshes are window passes. A snapshot whose only attempt
+failed stops it as well: the backfill reads the same view and would fail the
+same way.
 
 For such a pipe the snapshot is the history's older half, and the 14-day
 `PIPE_HISTORY` its recent half. The snapshot is refreshed by a window pass on

@@ -1693,3 +1693,70 @@ def test_a_window_as_long_as_the_fetch_window_is_a_full_pass() -> None:
     """After the app was closed for longer than the fetch window."""
     entry = _entry(fetched_at=_NOW - _FETCH, covered_from=_NOW - 2 * _FETCH)
     assert plan_window(entry, _FETCH, 7200, _NOW) == Window(_FETCH, True)
+
+
+# ------------------------------------------------------- pipe target table
+
+
+def _backfill_row(at: str, table: str | None) -> dict:
+    return {
+        "PIPE_CATALOG_NAME": "MYDB",
+        "PIPE_SCHEMA_NAME": "PUBLIC",
+        "PIPE_NAME": "LOAD_ORDERS",
+        "FILE_NAME": f"{at}.csv",
+        "LAST_LOAD_TIME": at,
+        "TABLE_CATALOG_NAME": "MYDB" if table else None,
+        "TABLE_SCHEMA_NAME": "RAW" if table else None,
+        "TABLE_NAME": table,
+    }
+
+
+def test_pipe_target_table_falls_back_to_the_pipes_own_backfill(repo) -> None:
+    """Before the schema-wide snapshot answers, the pipe's own backfill
+    already carries Snowflake's resolution."""
+    load(
+        repo,
+        pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+        [_backfill_row("2026-01-02 03:04:05+00:00", "ORDERS")],
+    )
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") == (
+        "MYDB",
+        "RAW",
+        "ORDERS",
+    )
+
+
+def test_the_backfills_newest_load_names_the_target(repo) -> None:
+    """A pipe re-created into another table: the newest load says where it
+    loads now. 10:00 at -08:00 is later than 12:00 UTC, though its text
+    sorts first; a load without a table is skipped."""
+    load(
+        repo,
+        pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+        [
+            _backfill_row("2026-01-01 12:00:00+00:00", "OLD_ORDERS"),
+            _backfill_row("2026-01-01 10:00:00-08:00", "ORDERS"),
+            _backfill_row("2026-01-01 11:00:00-08:00", None),
+        ],
+    )
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS") == (
+        "MYDB",
+        "RAW",
+        "ORDERS",
+    )
+
+
+def test_the_snapshot_names_the_target_before_the_backfill(repo) -> None:
+    load(
+        repo,
+        pipe_activity_scope("MYDB", "PUBLIC"),
+        [_backfill_row("2026-01-02 03:04:05+00:00", "FROM_SNAPSHOT")],
+    )
+    load(
+        repo,
+        pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+        [_backfill_row("2026-01-02 03:04:05+00:00", "FROM_BACKFILL")],
+    )
+    assert repo.pipe_target_table("MYDB", "PUBLIC", "LOAD_ORDERS")[2] == (
+        "FROM_SNAPSHOT"
+    )

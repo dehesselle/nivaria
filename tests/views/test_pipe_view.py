@@ -566,16 +566,48 @@ async def test_a_pipe_the_snapshot_saw_idle_asks_for_no_backfill(repo) -> None:
     assert backfill not in PipeView(repo, ref).scopes()
 
 
-async def test_a_pipe_with_no_snapshot_yet_asks_for_no_backfill(repo) -> None:
-    """Whether the backfill can add anything is only known once the
-    snapshot has answered."""
-    ref = put_pipe(repo, "LOAD_ORDERS", definition=_QUALIFIED)
+async def test_a_pipe_with_no_snapshot_yet_asks_for_its_backfill_alongside(
+    repo,
+) -> None:
+    """The schema-wide snapshot can take half a minute; one pipe's backfill
+    takes seconds and names the target too, so the view does not wait."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+    backfill = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    assert backfill.key in app.needed
+    assert pipe_activity_scope("MYDB", "PUBLIC").key in app.needed
+
+
+async def test_a_pipe_whose_snapshot_failed_asks_for_no_backfill(repo) -> None:
+    """The backfill reads the same view, so it would fail the same way --
+    a missing grant or warehouse."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    snapshot = pipe_activity_scope("MYDB", "PUBLIC")
+    repo.fail_pass(snapshot, repo.begin_pass(snapshot), "Insufficient privileges")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
     backfill = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
     assert backfill.key not in app.needed
+
+
+async def test_the_backfill_gives_the_target_before_the_snapshot_answers(
+    repo,
+) -> None:
+    """A definition that does not name its target in full: the 14-day
+    history is asked for as soon as the pipe's own backfill has answered."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert _lag_banner(app) is None
+    assert pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS").key in app.needed
 
 
 async def test_a_pipe_the_snapshot_saw_loading_asks_for_its_backfill(repo) -> None:
@@ -732,7 +764,9 @@ async def test_a_pipe_whose_load_names_no_target_still_shows_its_history(
     the backfill alone shows the history, under the lag banner."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     put_pipe_activity(repo, "LOAD_ORDERS", TABLE_NAME=None)
-    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
+    put_pipe_activity_history(
+        repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1), TABLE_NAME=None
+    )
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)

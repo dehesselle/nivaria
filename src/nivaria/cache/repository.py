@@ -47,6 +47,7 @@ from nivaria.models import (
     ScopeType,
     SFObject,
     due_in,
+    pipe_activity_history_scope,
     pipe_activity_scope,
     schemas_scope,
 )
@@ -859,13 +860,17 @@ class Repository:
         """The (catalog, schema, table) a pipe loads into, or None.
 
         Read first off whatever PIPE_ACTIVITY (ACCOUNT_USAGE.COPY_HISTORY)
-        already has cached for this pipe: Snowflake's own resolution. A pipe
-        with no load there -- one that never loaded, or not within the fetch
-        window -- falls back to its cached SHOW PIPES definition, which
-        names the table only when it is fully qualified (see
-        `pipe_definition.copy_target`). None means neither says, and callers
-        (PipeView, FetchService._execute) treat it as "nothing to show yet",
-        not an error.
+        already has cached for this pipe: Snowflake's own resolution, and its
+        newest load. Then off the pipe's own PIPE_ACTIVITY_HISTORY, its
+        newest load first: the same resolution, which a pipe view opened
+        before the schema-wide snapshot has answered gets sooner, since one
+        pipe's statement takes seconds where the schema's can take half a
+        minute. A pipe with no load in either -- one that never loaded, or
+        not within the fetch window -- falls back to its cached SHOW PIPES
+        definition, which names the table only when it is fully qualified
+        (see `pipe_definition.copy_target`). None means none of them says,
+        and callers (PipeView, FetchService._execute) treat it as "nothing to
+        show yet", not an error.
         """
         for row in self.raw_rows(pipe_activity_scope(database, schema)):
             if row.get("PIPE_NAME") != pipe:
@@ -875,6 +880,22 @@ class Repository:
             table = row.get("TABLE_NAME")
             if catalog and table_schema and table:
                 return (str(catalog), str(table_schema), str(table))
+        backfill = pipe_activity_history_scope(database, schema, pipe)
+        with self._store(backfill).connect() as connection:
+            row = connection.execute(
+                "SELECT TABLE_CATALOG_NAME, TABLE_SCHEMA_NAME, TABLE_NAME "
+                f"FROM {spec_for(backfill).name} WHERE _scope = ? "
+                "AND TABLE_CATALOG_NAME IS NOT NULL "
+                "AND TABLE_SCHEMA_NAME IS NOT NULL AND TABLE_NAME IS NOT NULL "
+                "ORDER BY julianday(LAST_LOAD_TIME) DESC LIMIT 1",
+                (backfill.key,),
+            ).fetchone()
+        if row is not None:
+            return (
+                str(row["TABLE_CATALOG_NAME"]),
+                str(row["TABLE_SCHEMA_NAME"]),
+                str(row["TABLE_NAME"]),
+            )
         detail = self.object_detail(ObjectRef(ObjectType.PIPE, database, schema, pipe))
         definition = (detail or {}).get("definition")
         return copy_target(definition) if definition else None

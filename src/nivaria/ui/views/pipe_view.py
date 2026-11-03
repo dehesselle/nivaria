@@ -36,8 +36,9 @@ stays cached either way.
 
 `pipe_history_scope` needs the pipe's target table, which Snowflake exposes
 in no named field: `Repository.pipe_target_table` reads it off whatever
-`pipe_activity_scope` has cached, or else off a fully qualified target in
-the pipe's definition. A pipe with neither has no target to give it. That is
+`pipe_activity_scope` or this pipe's own backfill has cached, or else off a
+fully qualified target in the pipe's definition. A pipe with none of them has
+no target to give it. That is
 a normal, lasting state, not a transient failure: this view does not
 `ensure()` -- or even list in `scopes()` -- the history scope until a target
 is actually resolvable, so such a pipe does not repeatedly fail a fetch it
@@ -46,14 +47,14 @@ cache age like everything else, and its first load gives it a target. Until
 then, only ACCOUNT_USAGE speaks for it, so the History tab carries the lag
 banner (`tables.lag_note`).
 
-`pipe_activity_history_scope` is gated too, on the snapshot showing a load
-for this pipe (`needs_backfill`). For a pipe with no load in the snapshot,
-the snapshot itself is the history's older half: it covers the fetch window
-up to its last refresh, at most one cache age ago, and the 14-day history the
-time since, so the backfill could only repeat its "nothing" (docs/DESIGN.md
-"The pipe the snapshot shows no load for"). `pipe_activity_history_scope`
-needs no such gating: ACCOUNT_USAGE.COPY_HISTORY filters directly by
-PIPE_NAME, with no target table to resolve first.
+`pipe_activity_history_scope` is gated too, on the snapshot not having
+answered without a load for this pipe (`needs_backfill`). For a pipe with no
+load in the snapshot, the snapshot itself is the history's older half: it
+covers the fetch window up to its last refresh, at most one cache age ago,
+and the 14-day history the time since, so the backfill could only repeat its
+"nothing" (docs/DESIGN.md "The pipe the snapshot shows no load for"). Until
+the snapshot answers, the backfill is asked for alongside it: it needs no
+target table, being filtered by PIPE_NAME, and it answers sooner.
 """
 
 from __future__ import annotations
@@ -147,17 +148,27 @@ class PipeView(HistoryView, ObjectView):
     def needs_backfill(self) -> bool:
         """Whether this pipe's own ACCOUNT_USAGE backfill can add anything.
 
-        Only once the PIPE_ACTIVITY snapshot has answered with a load for
-        this pipe. Without one, the backfill reads the same view over the
-        same window with the same lag, and can only repeat the snapshot's
-        "nothing": the snapshot covers the window up to its last refresh, the
-        14-day history from there to now (see the module docstring). Asking before
-        the snapshot answers would pay the full 90-day statement for a pipe
-        that may turn out to have nothing to show.
+        Not once the PIPE_ACTIVITY snapshot has answered without a load for
+        this pipe. The backfill reads the same view over the same window
+        with the same lag, and can only repeat the snapshot's "nothing": the
+        snapshot covers the window up to its last refresh, the 14-day
+        history from there to now (see the module docstring).
+
+        Until the snapshot has answered, it is asked for alongside it rather
+        than after it. The schema-wide snapshot can take half a minute on a
+        busy account, one pipe's backfill a few seconds, and the backfill
+        also names the target table the 14-day history needs
+        (`Repository.pipe_target_table`). Waiting would leave the view empty
+        that long; not waiting costs one backfill for a pipe that turns out
+        idle, once, since later refreshes are window passes. Not while the
+        snapshot's only attempt has failed, though: the backfill reads the
+        same view and would fail the same way.
         """
         entry = self.repo.entry(self.activity_scope())
-        if entry.fetched_at is None or entry.state is CacheState.EMPTY:
+        if entry.state is CacheState.ERROR and entry.fetched_at is None:
             return False
+        if entry.fetched_at is None or entry.state is CacheState.EMPTY:
+            return True
         idle = self.repo.pipe_idle_as_of(
             self.ref.database, self.ref.schema, self.ref.name
         )
