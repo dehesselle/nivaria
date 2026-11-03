@@ -208,8 +208,12 @@ A stage has no view of its own; the stage list shows everything about it.
   there too (up to 45 minutes behind) and carry the same line.
 - **Status** (Pipe list) shows each pipe's `invalid_reason` and the
   execution state Snowflake reports for it (`RUNNING`, `PAUSED`,
-  `STOPPED_...`). The state is read, 50 pipes at a time, only while this tab
-  is open; a pipe whose state has not been read yet shows none.
+  `STOPPED_...`), with the files waiting to be loaded (Pending Files) and
+  when the pipe last took in a file (Last Ingested). Last Ingested is near
+  real time, unlike the Activity tab, and moves on with a failed load too;
+  it is blank for a pipe that never received a file. All of it is read, 50
+  pipes at a time, only while this tab is open; a pipe whose state has not
+  been read yet shows none.
 
 Columns sourced from something other than `SHOW` (Last DDL, pipe and task
 activity, tags, history, data) stay blank when the session has no warehouse

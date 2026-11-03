@@ -324,6 +324,22 @@ Batching calls with `UNION ALL`, on the sandbox (2026-10-25):
   does not exist or not authorized.` (errno 2003). A missing schema fails the
   same way. The other pipes in the statement return nothing.
 
+What it reports about loads, on the sandbox (2026-11-03), for a new pipe
+from an internal stage, each file sent with `ALTER PIPE ... REFRESH`:
+
+- Before the first file, the same three fields as above. All 1871 live pipes
+  on the sandbox, none of which had ever loaded, returned only those.
+- About 30 s after a good file was sent, `lastIngestedTimestamp` and
+  `lastIngestedFilePath` appeared. The timestamp equals the load's
+  `PIPE_RECEIVED_TIME` in `COPY_HISTORY` and comes before its
+  `LAST_LOAD_TIME`: it says when the pipe received the file, not when it was
+  loaded. It is written in UTC with a `Z`, such as
+  `2026-11-03T20:11:26.046Z`.
+- A file that failed to load (`STATUS = 'Load failed'`) moved both fields on
+  to it, like a good one.
+- Whether the fields disappear some time after a pipe's last file is still
+  open: the pipe stays in place to be read again later.
+
 ## Result types
 
 Every timestamp column nivaria reads from `SHOW` (databases, schemas, tables,

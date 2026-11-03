@@ -520,7 +520,7 @@ the same exception `information_schema_columns` established).
 | `PIPE_ACTIVITY` | `ACCOUNT_USAGE.COPY_HISTORY`, latest row per pipe | Pipes (n) activity columns; target-table resolution | warehouse, `IMPORTED PRIVILEGES` |
 | `PIPE_ACTIVITY_HISTORY` | the same view, one pipe, unreduced | Pipe view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
 | `PIPE_HISTORY` | `INFORMATION_SCHEMA.COPY_HISTORY` | Pipe view History (recent half) | warehouse, a resolved target table |
-| `PIPE_STATUS` | `SYSTEM$PIPE_STATUS`, one call per pipe, batched | Pipes (n) Execution State | a fetched pipe list |
+| `PIPE_STATUS` | `SYSTEM$PIPE_STATUS`, one call per pipe, batched | Pipes (n) Execution State, Pending Files, Last Ingested | a fetched pipe list |
 | `TASK_ACTIVITY` | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | Tasks (n): Last Scheduled, Last Run State | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
 | `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view History (recent half) | warehouse |

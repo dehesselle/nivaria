@@ -76,7 +76,14 @@ _STATUS_NOTE = "detail-status-note"
 #: The Status tab's SOURCE_NOTE, for the Execution State column.
 _STATUS_SOURCE_NOTE = "detail-status-source-note"
 
-_STATUS_COLUMNS = ("Name", "Created", "Execution State", "Invalid Reason")
+_STATUS_COLUMNS = (
+    "Name",
+    "Created",
+    "Execution State",
+    "Pending Files",
+    "Last Ingested",
+    "Invalid Reason",
+)
 _ACTIVITY_COLUMNS = (
     "Name",
     "Rows",
@@ -92,7 +99,10 @@ _ACTIVITY_COLUMNS = (
 #: from, keyed by that column's header, one map per tab. Every other column
 #: has no tooltip.
 _TOOLTIP_FIELDS = {"Loaded": "LAST_LOAD_TIME"}
-_STATUS_TOOLTIP_FIELDS = {"Created": "created_on"}
+_STATUS_TOOLTIP_FIELDS = {
+    "Created": "created_on",
+    "Last Ingested": "lastIngestedTimestamp",
+}
 
 
 @register_category_view
@@ -227,8 +237,8 @@ class PipeListView(TabbedView, CategoryView):
         }
         # Read whether or not the tab wants a refresh: what an earlier pass
         # stored is still what Snowflake said, within the cache age.
-        state_by_name = {
-            row["PIPE_NAME"]: _execution_state(row.get("PIPE_STATUS"))
+        status_by_name = {
+            row["PIPE_NAME"]: _pipe_status(row.get("PIPE_STATUS"))
             for row in self.repo.raw_rows(status_scope)
         }
 
@@ -244,7 +254,14 @@ class PipeListView(TabbedView, CategoryView):
             self._rows = {}
             for row in self.repo.raw_rows(self.scope):
                 name = row["name"]
-                merged = {**row, **activity_by_name.get(name, {})}
+                status = status_by_name.get(name, {})
+                merged = {
+                    **row,
+                    **activity_by_name.get(name, {}),
+                    # For the Last Ingested tooltip; no mirrored column shares
+                    # the name.
+                    "lastIngestedTimestamp": status.get("lastIngestedTimestamp"),
+                }
                 self._rows[name] = merged
                 row_count = merged.get("ROW_COUNT")
                 activity_table.add_row(
@@ -260,7 +277,9 @@ class PipeListView(TabbedView, CategoryView):
                 status_table.add_row(
                     Text(name),
                     Text(format_date(row.get("created_on"))),
-                    Text(state_by_name.get(name, "")),
+                    Text(str(status.get("executionState") or "")),
+                    Text(_count(status.get("pendingFileCount"))),
+                    Text(format_timestamp_minutes(status.get("lastIngestedTimestamp"))),
                     Text(row.get("invalid_reason") or ""),
                     key=name,
                 )
@@ -272,12 +291,26 @@ class PipeListView(TabbedView, CategoryView):
             self.update_content()
 
 
-def _execution_state(status: str | None) -> str:
-    """`executionState` out of SYSTEM$PIPE_STATUS' JSON, or blank."""
+def _pipe_status(status: str | None) -> dict[str, Any]:
+    """SYSTEM$PIPE_STATUS' JSON as a dict, or empty.
+
+    `executionState` and `pendingFileCount` are always there.
+    `lastIngestedTimestamp` appears with a pipe's first file and moves on
+    with every file the pipe takes in, loaded or failed: it is the file's
+    PIPE_RECEIVED_TIME, not its load time (docs/snowflake-behavior.md "Pipe
+    execution state"). A pipe that never received one has none, so its
+    cell stays blank.
+    """
     if not status:
-        return ""
+        return {}
     try:
-        return str(json.loads(status).get("executionState") or "")
-    except (ValueError, AttributeError):
+        parsed = json.loads(status)
+    except ValueError:
         # A repaint must not fail on whatever else the function may return.
-        return ""
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _count(value: Any) -> str:
+    """A count from the JSON, or blank when the function did not say."""
+    return f"{value:,}" if isinstance(value, int) else ""

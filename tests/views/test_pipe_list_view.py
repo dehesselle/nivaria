@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, TabbedContent
 
-from nivaria.format import format_date
+from nivaria.format import format_date, format_timestamp_minutes
 from nivaria.models import (
     ObjectRef,
     ObjectType,
@@ -20,6 +20,7 @@ from nivaria.ui.views.pipe_list_view import PipeListView
 from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
+    load,
     put_pipe,
     put_pipe_activity,
     put_pipe_status,
@@ -59,10 +60,10 @@ async def test_the_status_tab_shows_every_pipes_execution_state_from_snowflake(
         assert table.row_count == 2
         assert table.get_cell_at((0, 0)).plain == "LOAD_CUSTOMERS"
         assert table.get_cell_at((0, 2)).plain == "STOPPED_STAGE_DROPPED"
-        assert table.get_cell_at((0, 3)).plain == "stage dropped"
+        assert table.get_cell_at((0, 5)).plain == "stage dropped"
         assert table.get_cell_at((1, 0)).plain == "LOAD_ORDERS"
         assert table.get_cell_at((1, 2)).plain == "PAUSED"
-        assert table.get_cell_at((1, 3)).plain == ""
+        assert table.get_cell_at((1, 5)).plain == ""
 
 
 async def test_a_pipe_whose_status_was_never_read_shows_no_execution_state(
@@ -266,3 +267,49 @@ async def test_the_activity_tab_says_its_columns_lag_behind(repo) -> None:
             "be up to 2 hours behind."
         )
         assert not pane.query_one("#tab-status").query("#detail-lag-note")
+
+
+async def test_the_status_tab_shows_pending_files_and_the_last_file_ingested(
+    repo,
+) -> None:
+    """Both come with the execution state, so they cost no query of their
+    own. Last Ingested is when the pipe received its newest file, loaded or
+    failed, near real time unlike the Activity tab; a pipe that never
+    received one has none, and its cell stays blank."""
+    put_pipe(repo, "LOAD_CUSTOMERS")
+    put_pipe(repo, "LOAD_ORDERS")
+    load(
+        repo,
+        pipe_status_scope("MYDB", "PUBLIC"),
+        [
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "LOAD_CUSTOMERS",
+                "PIPE_STATUS": '{"executionState":"RUNNING","pendingFileCount":0}',
+            },
+            {
+                "PIPE_CATALOG_NAME": "MYDB",
+                "PIPE_SCHEMA_NAME": "PUBLIC",
+                "PIPE_NAME": "LOAD_ORDERS",
+                "PIPE_STATUS": (
+                    '{"executionState":"RUNNING","pendingFileCount":1234,'
+                    '"lastIngestedTimestamp":"2026-11-03T20:11:26.046Z",'
+                    '"lastIngestedFilePath":"bad_1.csv"}'
+                ),
+            },
+        ],
+    )
+    scope = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(120, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        table = pane.query_one("#detail-status", DataTable)
+        assert table.get_cell_at((0, 3)).plain == "0"
+        assert table.get_cell_at((0, 4)).plain == ""
+        assert table.get_cell_at((1, 3)).plain == "1,234"
+        assert table.get_cell_at((1, 4)).plain == format_timestamp_minutes(
+            "2026-11-03T20:11:26.046Z"
+        )
