@@ -479,11 +479,14 @@ CREATE INDEX IF NOT EXISTS account_usage_task_history_detail_scope
 -- history together. Unlike information_schema_copy_history, no target-table
 -- resolution is needed to fetch this: the function accepts TASK_NAME/
 -- DATABASE_NAME/SCHEMA_NAME as direct named arguments. Column names and
--- values verified live on 2026-09-09.
+-- values verified live on 2026-09-09. Keyed like the ACCOUNT_USAGE task
+-- mirrors, not by QUERY_ID: a run that has not started yet, or that failed
+-- before a query was submitted, has none.
 CREATE TABLE IF NOT EXISTS information_schema_task_history (
     NAME              TEXT,
     QUERY_ID          TEXT,
-    SCHEDULED_TIME    TEXT,
+    SCHEDULED_TIME    TEXT NOT NULL,
+    ATTEMPT_NUMBER    INTEGER NOT NULL,
     QUERY_START_TIME  TEXT,
     COMPLETED_TIME    TEXT,
     STATE             TEXT,
@@ -492,7 +495,7 @@ CREATE TABLE IF NOT EXISTS information_schema_task_history (
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
     _fetched_at       REAL    NOT NULL,
-    PRIMARY KEY (_scope, QUERY_ID)
+    PRIMARY KEY (_scope, SCHEDULED_TIME, ATTEMPT_NUMBER)
 );
 CREATE INDEX IF NOT EXISTS information_schema_task_history_scope
     ON information_schema_task_history(_scope);

@@ -628,10 +628,15 @@ older from the other"): that would hide real data whenever one source is thin
 or has failed outright, whereas overlaying needs no reasoning about which
 scope succeeded.
 
-The merge key differs, and the reason is Snowflake's: a task run has
-`QUERY_ID`, Snowflake's own identifier for one run, present in both sources.
-A pipe's file load has no equivalent, so it is keyed on `(FILE_NAME,
-PIPE_RECEIVED_TIME)`.
+The merge key differs, and the reason is Snowflake's. A task run is keyed on
+`(SCHEDULED_TIME, ATTEMPT_NUMBER)`, the same key its mirrors use. `QUERY_ID`
+looks like the natural key and is not: a run that `INFORMATION_SCHEMA` lists
+as `SCHEDULED`, or one that failed before a query was submitted, has none, so
+every such run would collapse into one row. Both sources carry the same
+`SCHEDULED_TIME` for a run (see
+[snowflake-behavior.md](snowflake-behavior.md#task-history)): it is the
+planned instant, not a time each view stamps for itself. A pipe's file load
+has no such column, so it is keyed on `(FILE_NAME, PIPE_RECEIVED_TIME)`.
 
 `LAST_LOAD_TIME` looks like the natural second half of that key and is not:
 the two views stamp it independently, so the same load carries slightly

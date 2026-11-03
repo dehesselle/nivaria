@@ -240,6 +240,19 @@ of them `FAILED`, 8 of those with a `NULL` `QUERY_ID`):
 - `RUN_ID` is not a key for one run: 8140 distinct values over 8245 rows, as
   expected of an identifier shared by the tasks of one graph run.
 
+The same runs in both views, sandbox, 2026-11-03: 6 runs of one task, matched
+by `QUERY_ID` between `ACCOUNT_USAGE.TASK_HISTORY` and
+`INFORMATION_SCHEMA.TASK_HISTORY`. `SCHEDULED_TIME`, `QUERY_START_TIME`,
+`COMPLETED_TIME` and `ATTEMPT_NUMBER` were equal in every pair. Only
+`SCHEDULED_BY_USER` (`DROPPED_USER(0)` against `NULL`) and `ERROR_MESSAGE`
+(`''` against `NULL`) differed. Unlike a load's `LAST_LOAD_TIME` (see [Copy
+history](#copy-history)), a run's times are not stamped separately by each
+view. `INFORMATION_SCHEMA` also listed the task's next run as `SCHEDULED`,
+with a `NULL` `QUERY_ID` but `SCHEDULED_TIME` and `ATTEMPT_NUMBER` set. The
+other tasks with recent runs on the sandbox are Snowflake's own, in schemas
+of the `SNOWFLAKE` database whose `INFORMATION_SCHEMA` the role may not
+read, so the sample is small.
+
 ## Pipe target table
 
 No named field holds the table a pipe loads into. Snowflake's documentation,

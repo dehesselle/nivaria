@@ -112,10 +112,10 @@ async def test_a_tasks_history_ignores_another_tasks_activity_rows(repo) -> None
         assert pane.query_one("#detail-history", DataTable).row_count == 0
 
 
-async def test_the_near_real_time_source_wins_on_an_overlapping_query_id(repo) -> None:
-    """Merged by QUERY_ID alone -- the near-real-time source is inserted
-    last, so an identical id from the backfill is overlaid rather than
-    duplicated."""
+async def test_the_near_real_time_source_wins_on_an_overlapping_run(repo) -> None:
+    """Merged by (SCHEDULED_TIME, ATTEMPT_NUMBER) -- the near-real-time
+    source is inserted last, so the same run from the backfill is overlaid
+    rather than duplicated."""
     ref = put_task(repo, "REFRESH_ORDERS")
     when = _days_ago_iso(10)
     put_task_activity_history(
@@ -140,6 +140,68 @@ async def test_the_near_real_time_source_wins_on_an_overlapping_query_id(repo) -
         table = pane.query_one("#detail-history", DataTable)
         assert table.row_count == 1
         assert table.get_cell_at((0, 3)).plain == "SUCCEEDED"
+
+
+async def test_runs_without_a_query_id_each_keep_their_own_row(repo) -> None:
+    """A run that failed before a query was submitted has no QUERY_ID, and
+    neither has the next run INFORMATION_SCHEMA lists as SCHEDULED. Keyed by
+    QUERY_ID, all of them collapsed into one row."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    for days in (3, 2):
+        put_task_activity_history(
+            repo,
+            "REFRESH_ORDERS",
+            QUERY_ID=None,
+            SCHEDULED_TIME=_days_ago_iso(days),
+            STATE="FAILED",
+        )
+    put_task_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID=None,
+        SCHEDULED_TIME=_days_ago_iso(0),
+        QUERY_START_TIME=None,
+        COMPLETED_TIME=None,
+        STATE="SCHEDULED",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        table = pane.query_one("#detail-history", DataTable)
+        assert [table.get_cell_at((row, 3)).plain for row in range(3)] == [
+            "SCHEDULED",
+            "FAILED",
+            "FAILED",
+        ]
+
+
+async def test_a_retried_run_keeps_a_row_per_attempt(repo) -> None:
+    ref = put_task(repo, "REFRESH_ORDERS")
+    when = _days_ago_iso(1)
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-1",
+        SCHEDULED_TIME=when,
+        ATTEMPT_NUMBER=1,
+        STATE="FAILED",
+    )
+    put_task_activity_history(
+        repo,
+        "REFRESH_ORDERS",
+        QUERY_ID="q-2",
+        SCHEDULED_TIME=when,
+        ATTEMPT_NUMBER=2,
+        STATE="SUCCEEDED",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        assert pane.query_one("#detail-history", DataTable).row_count == 2
 
 
 async def test_rows_older_than_the_task_show_window_are_hidden_but_stay_cached(

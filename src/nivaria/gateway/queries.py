@@ -606,8 +606,8 @@ def task_history(database: str, schema: str, task: str, max_rows: int) -> str:
     target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.TASK_HISTORY"
     result_limit = max(1, min(int(max_rows), TASK_HISTORY_RESULT_LIMIT_MAX))
     return (
-        "SELECT NAME, QUERY_ID, SCHEDULED_TIME, QUERY_START_TIME, COMPLETED_TIME, "
-        "STATE, ERROR_CODE, ERROR_MESSAGE "
+        "SELECT NAME, QUERY_ID, SCHEDULED_TIME, ATTEMPT_NUMBER, QUERY_START_TIME, "
+        "COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
         f"FROM TABLE({target}("
         f"DATABASE_NAME => {quote_literal(database)}, "
         f"SCHEMA_NAME => {quote_literal(schema)}, "

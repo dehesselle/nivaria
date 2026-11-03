@@ -16,15 +16,17 @@ history fetch window" setting -- lazy, fetched only while this view is open,
 unlike the schema-wide `task_activity_scope` the "Tasks (n)" list uses, which
 is reduced to each task's latest row only) and `task_history_scope`
 (INFORMATION_SCHEMA.TASK_HISTORY, near-real-time but limited to Snowflake's
-own 7-day retention for that function). Rows are merged by QUERY_ID alone,
-with the near-real-time source inserted last so it wins on overlap --
-Snowflake's own unique identifier for one run, present in both sources, so
-unlike `pipe_view.py` (which has no such id for a COPY_HISTORY load and needs
-a compound `(FILE_NAME, LAST_LOAD_TIME)` key) a single-column key is both
-correct and simpler here. The result is filtered to the "task history display
-window" setting, which can be shorter than the fetch window: shrinking it
-later is a display-only change, since the wider range stays cached either
-way.
+own 7-day retention for that function). Rows are merged by
+(SCHEDULED_TIME, ATTEMPT_NUMBER), with the near-real-time source inserted
+last so it wins on overlap. Not by QUERY_ID, the obvious candidate: a run
+that has not started yet, or that failed before a query was submitted, has
+none, and every such run would collapse into one row. Both sources carry the
+same SCHEDULED_TIME for a run -- it is the planned instant, not a time each
+view stamps for itself the way they do a load's LAST_LOAD_TIME (see
+docs/snowflake-behavior.md "Task history"). The result is filtered to the
+"task history display window" setting, which can be shorter than the fetch
+window: shrinking it later is a display-only change, since the wider range
+stays cached either way.
 
 Unlike `pipe_view.py`, this view needs no target-table resolution and no
 gating on `scopes()`: INFORMATION_SCHEMA.TASK_HISTORY accepts TASK_NAME/
@@ -61,6 +63,14 @@ from nivaria.ui.views.tables import (
 )
 
 _HISTORY_COLUMNS = ("Scheduled", "Started", "Completed", "State")
+
+
+def _merge_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    """One run's identity across both history sources -- see the module
+    docstring. The scheduled time is compared as an instant, falling back to
+    its text when it does not parse."""
+    scheduled = row.get("SCHEDULED_TIME")
+    return (parse_timestamp(scheduled) or scheduled, row.get("ATTEMPT_NUMBER"))
 
 
 @register_view
@@ -110,13 +120,13 @@ class TaskView(HistoryView, ObjectView):
         history_scope = self.history_scope()
         self.ensure(history_scope, ttl)
 
-        # Merged by QUERY_ID -- see the module docstring for why this needs
-        # no target resolution or compound key the way pipe's does.
-        merged: dict[Any, dict[str, Any]] = {}
+        # Merged by (SCHEDULED_TIME, ATTEMPT_NUMBER) -- see the module
+        # docstring for why that key and not QUERY_ID.
+        merged: dict[tuple[Any, Any], dict[str, Any]] = {}
         for r in self.repo.raw_rows(activity_history_scope):
-            merged[r.get("QUERY_ID")] = r
+            merged[_merge_key(r)] = r
         for r in self.repo.raw_rows(history_scope):
-            merged[r.get("QUERY_ID")] = r
+            merged[_merge_key(r)] = r
 
         show_days = config.get(TASK_HISTORY_SHOW_DAYS)
         cutoff = datetime.now().astimezone() - timedelta(days=show_days)
@@ -148,9 +158,9 @@ class TaskView(HistoryView, ObjectView):
             table.add_columns(*_HISTORY_COLUMNS)
             rows = self.history_panel.rows = {}
             for _, r in dated:
-                # Keyed by QUERY_ID, unlike PipeView's merge key: a task run
-                # has Snowflake's own identifier, a pipe's file load does not.
-                key = str(r.get("QUERY_ID"))
+                # The run's own identity, not its position, so the cursor is
+                # found again by key after a repaint -- same as PipeView.
+                key = str(_merge_key(r))
                 rows[key] = r
                 table.add_row(
                     Text(format_timestamp_minutes(r.get("SCHEDULED_TIME"))),

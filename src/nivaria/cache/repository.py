@@ -441,6 +441,7 @@ _TASK_HISTORY = TableSpec(
         "NAME",
         "QUERY_ID",
         "SCHEDULED_TIME",
+        "ATTEMPT_NUMBER",
         "QUERY_START_TIME",
         "COMPLETED_TIME",
         "STATE",
@@ -448,8 +449,9 @@ _TASK_HISTORY = TableSpec(
         "ERROR_MESSAGE",
     ),
     # _scope disambiguates by task -- the physical table holds every task's
-    # rows together, same as every other mirror table.
-    key=("_scope", "QUERY_ID"),
+    # rows together, same as every other mirror table. Not QUERY_ID, which a
+    # run that has not started yet lacks -- see _TASK_ACTIVITY.
+    key=("_scope", "SCHEDULED_TIME", "ATTEMPT_NUMBER"),
     order_by=("SCHEDULED_TIME",),
 )
 

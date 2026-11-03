@@ -262,8 +262,8 @@ def test_task_history_targets_information_schema_task_history_with_named_args() 
     before being qualified."""
     statement = queries.task_history("MYDB", "PUBLIC", "REFRESH_ORDERS", 5000)
     assert statement == (
-        "SELECT NAME, QUERY_ID, SCHEDULED_TIME, QUERY_START_TIME, COMPLETED_TIME, "
-        "STATE, ERROR_CODE, ERROR_MESSAGE "
+        "SELECT NAME, QUERY_ID, SCHEDULED_TIME, ATTEMPT_NUMBER, QUERY_START_TIME, "
+        "COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
         'FROM TABLE("MYDB".INFORMATION_SCHEMA.TASK_HISTORY('
         "DATABASE_NAME => 'MYDB', "
         "SCHEMA_NAME => 'PUBLIC', "
