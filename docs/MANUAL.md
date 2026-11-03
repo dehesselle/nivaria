@@ -199,7 +199,9 @@ A stage has no view of its own; the stage list shows everything about it.
   read through its target table. When the table is not known from a load and
   the pipe's definition does not name it in full (`database.schema.table`),
   only `ACCOUNT_USAGE` is read, and a line above the history says it can be up
-  to 2 hours behind.
+  to 2 hours behind. When one of the two sources cannot be read, for instance
+  because the target table was dropped or your role may not see it, the note
+  says which part of the history is missing and why.
 - **Activity** (Pipe list) shows each pipe's latest load. It comes from
   `ACCOUNT_USAGE`, which Snowflake says can be up to 2 hours behind, and a
   line above the table says so. The Task list's last-run columns come from

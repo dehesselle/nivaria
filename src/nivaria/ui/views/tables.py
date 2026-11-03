@@ -339,6 +339,12 @@ class HistoryView(TabbedView):
         until every source has answered, the note says what the answered ones
         cover. One that covers the whole display window is the answer.
 
+        A source whose only attempt failed while the other has rows leaves
+        part of the history unread, and says which: the near-real-time days,
+        or the older backfill. Its rows look complete otherwise -- the
+        failure is retried quietly every cache age, so no toast keeps saying
+        it.
+
         Answered means fetched at least once, or failed: a background refresh
         of a cached history keeps its rows and is not waited for, so a
         revisit stays as quiet as before.
@@ -368,17 +374,18 @@ class HistoryView(TabbedView):
             )
             or covered >= show_days
         )
-        errored = next(
+        errored, errored_days = next(
             (
-                entry
-                for entry in entries
+                (entry, days)
+                for entry, days in covers
                 if entry.state is CacheState.ERROR and entry.fetched_at is None
             ),
-            None,
+            (None, None),
         )
         empty = settled and not dated and not capped
         looking = not settled and not capped
         error = empty and errored is not None
+        partial = not capped and not error and errored is not None and bool(dated)
         stale = next(
             (text for entry in entries if (text := failed_refresh(entry))), None
         )
@@ -393,6 +400,13 @@ class HistoryView(TabbedView):
             )
         elif error:
             note.update(Text(f"Could not fetch: {errored.error}"))
+        elif partial:
+            part = (
+                f"The last {errored_days} days of {noun}"
+                if errored_days is not None
+                else f"Older {noun}"
+            )
+            note.update(Text(f"{part} could not be read: {_last_line(errored.error)}"))
         elif stale is not None:
             note.update(Text(stale))
         elif empty:
@@ -400,7 +414,7 @@ class HistoryView(TabbedView):
         elif looking:
             note.update(Text(_looking(dated, noun, covered)))
 
-        failed = not capped and (error or stale is not None)
+        failed = not capped and (error or partial or stale is not None)
         note.set_class(capped, "-capped")
         note.set_class(failed, "-error")
         note.display = capped or failed or empty or looking
@@ -413,6 +427,14 @@ def _has_rows_on_record(entry: Entry) -> bool:
     EMPTY can carry a `fetched_at` with no rows behind it -- see `Entry.due`.
     """
     return entry.fetched_at is not None and entry.state is not CacheState.EMPTY
+
+
+def _last_line(message: str | None) -> str:
+    """A driver error's last line, which is Snowflake's own wording
+    ("Table '...' does not exist or not authorized.") without the error
+    number and compilation preamble before it."""
+    lines = [line for line in (message or "").splitlines() if line.strip()]
+    return lines[-1].strip() if lines else (message or "")
 
 
 def _looking(dated: Sequence[Any], noun: str, covered: int) -> str:

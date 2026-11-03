@@ -726,11 +726,20 @@ Activity tab and the Tasks (n) list (`tables.lag_note`), worded after
 Snowflake's "up to" figure so it promises no maximum. A pipe with a known
 target does not show it: its recent days come from `INFORMATION_SCHEMA`.
 
-A parsed target can still fail: its table may have been dropped, or the role
-may not see it. `PIPE_HISTORY` then fails with "does not exist", which
-refreshes the pipe list and shows the gentle notice, and the query is retried
-every cache age. A `PIPE_ACTIVITY` target whose table was dropped later
-behaves the same.
+A resolved target can still fail: its table may have been dropped, or the
+role may not see it. `PIPE_HISTORY` then fails with "does not exist", which
+here is about the table, never the pipe: the statement names the pipe only as
+a filter value. So it is treated as a lasting state, not a stale listing. It
+refreshes no pipe list (`containing_scopes` gives none) and raises no toast.
+The History note says which part could not be read, in Snowflake's own words,
+and the lag line shows, since only `ACCOUNT_USAGE` is read. The query is
+retried quietly every cache age, a fraction of a second each, so a re-created
+table or a new grant is picked up by itself.
+
+The note is the general rule for a history half that fails while the other
+has rows (`HistoryView.sync_history_note`): those rows would otherwise look
+like the whole history. It names the missing part, "The last 14 days of load
+activity" or "Older run history", and why.
 
 #### The pipe the snapshot shows no load for
 

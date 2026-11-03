@@ -15,6 +15,7 @@ from nivaria.cache.repository import Repository
 from nivaria.models import (
     databases_scope,
     grants_scope,
+    pipe_history_scope,
     roles_scope,
     tag_references_scope,
     warehouses_scope,
@@ -53,6 +54,22 @@ async def test_a_dropped_object_is_reported_as_a_warning_not_an_error() -> None:
         ),
         ("error", "Could not load databases: network down"),
     ]
+
+
+async def test_a_pipes_missing_target_table_raises_no_toast() -> None:
+    """A lasting state, retried every cache age and reported by the pipe's
+    History note; a toast would come back each time."""
+    app = NivariaApp(connector=FakeConnector())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._report_fetch_failure(
+            pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+            "SQL compilation error:\nTable 'MYDB.RAW.ORDERS' does not exist or "
+            "not authorized.",
+            True,
+        )
+        await pilot.pause()
+        assert list(app._notifications) == []
 
 
 async def test_one_dropped_object_failing_several_scopes_toasts_once() -> None:

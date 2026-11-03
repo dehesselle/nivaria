@@ -773,3 +773,54 @@ async def test_a_pipe_whose_load_names_no_target_still_shows_its_history(
         await pilot.pause()
         assert app.query_one(PipeView).query_one(DataTable).row_count == 1
         assert _lag_banner(app) is not None
+
+
+_TABLE_GONE = (
+    "002003 (42S02): SQL compilation error:\n"
+    "Table 'MYDB.RAW.ORDERS' does not exist or not authorized."
+)
+
+
+def _fail_history(repo) -> None:
+    history = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
+    repo.fail_pass(history, repo.begin_pass(history), _TABLE_GONE)
+
+
+async def test_an_unreadable_target_table_says_the_recent_loads_are_missing(
+    repo,
+) -> None:
+    """The backfill's rows would otherwise look like the whole history. The
+    note quotes Snowflake's own last line, and the lag banner shows, since
+    only ACCOUNT_USAGE is read."""
+    ref = put_pipe(repo, "LOAD_ORDERS")
+    put_pipe_activity(repo, "LOAD_ORDERS")
+    put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(20))
+    _fail_history(repo)
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = _note(app)
+        assert note is not None
+        assert str(note.render()) == (
+            "The last 14 days of load activity could not be read: "
+            "Table 'MYDB.RAW.ORDERS' does not exist or not authorized."
+        )
+        assert note.has_class("-error")
+        assert _lag_banner(app) is not None
+        assert app.query_one(PipeView).query_one(DataTable).row_count == 1
+
+
+async def test_an_unreadable_target_with_nothing_else_says_it_could_not_fetch(
+    repo,
+) -> None:
+    ref = put_pipe(repo, "LOAD_ORDERS", definition=_QUALIFIED)
+    put_pipe_activity(repo, "LOAD_OTHER")
+    _fail_history(repo)
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        note = _note(app)
+        assert note is not None
+        assert str(note.render()).startswith("Could not fetch: ")

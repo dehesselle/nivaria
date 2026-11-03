@@ -453,11 +453,14 @@ def containing_scopes(scope: Scope) -> list[Scope]:
                 objects_scope(ObjectType.TABLE, scope.database, scope.schema),
                 objects_scope(ObjectType.VIEW, scope.database, scope.schema),
             ]
-        case (
-            ScopeType.PIPE_HISTORY
-            | ScopeType.PIPE_ACTIVITY_HISTORY
-            | ScopeType.PIPE_STATUS
-        ):
+        case ScopeType.PIPE_HISTORY:
+            # Its statement names the pipe's *target table*, and the pipe only
+            # as a filter value, so "does not exist" is about the table: the
+            # pipe list has nothing to drop. A table dropped or out of the
+            # role's sight is a lasting state the pipe's History note
+            # reports, not a stale listing.
+            return []
+        case ScopeType.PIPE_ACTIVITY_HISTORY | ScopeType.PIPE_STATUS:
             assert scope.database is not None
             assert scope.schema is not None
             return [objects_scope(ObjectType.PIPE, scope.database, scope.schema)]

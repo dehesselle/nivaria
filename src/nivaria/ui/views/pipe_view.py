@@ -244,9 +244,14 @@ class PipeView(HistoryView, ObjectView):
         if history_scope is not None:
             sources.append((history_scope, PIPE_HISTORY_RETENTION_DAYS))
         self.sync_history_note(self.repo, dated, show_days, "load activity", sources)
-        # Only ACCOUNT_USAGE speaks for a pipe without a target. With one,
-        # INFORMATION_SCHEMA covers the recent days near real time.
-        self.query_one(f"#{LAG_NOTE}", Static).display = history_scope is None
+        # Only ACCOUNT_USAGE speaks for a pipe without a target, or one whose
+        # target cannot be read. Otherwise INFORMATION_SCHEMA covers the
+        # recent days near real time.
+        unread = (
+            history_scope is None
+            or self.repo.entry(history_scope).state is CacheState.ERROR
+        )
+        self.query_one(f"#{LAG_NOTE}", Static).display = unread
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
         with self.keeping_cursor(table):

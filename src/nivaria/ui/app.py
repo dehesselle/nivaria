@@ -16,6 +16,7 @@ from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
 from nivaria.gateway.gateway import PoolGateway
 from nivaria.gateway.pool import ConnectionPool, Connector
+from nivaria.models import ScopeType
 from nivaria.profiles import Profile, ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.settings import PAGE_SIZE, POOL_SIZE, config
@@ -219,6 +220,11 @@ class NivariaApp(TerminalTitleMixin, App[None]):
         self.call_from_thread(self._report_fetch_failure, scope, message, missing)
 
     def _report_fetch_failure(self, scope, message: str, missing: bool) -> None:
+        if missing and scope.type is ScopeType.PIPE_HISTORY:
+            # The pipe's target table, not the pipe: a lasting state retried
+            # every cache age, which the History note reports. A toast would
+            # come back each time, promising a refresh that changes nothing.
+            return
         if not missing:
             self.notify(
                 f"Could not load {scope}: {message}", severity="error", timeout=8

@@ -403,3 +403,24 @@ async def test_a_task_whose_sources_both_answered_empty_says_so(repo) -> None:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
         assert _note(app) == "No run history in the last 90 days."
+
+
+async def test_a_failed_backfill_says_the_older_runs_are_missing(repo) -> None:
+    """The recent runs alone would look like the whole history."""
+    ref = put_task(repo, "REFRESH_ORDERS")
+    put_task_history(repo, "REFRESH_ORDERS", SCHEDULED_TIME=_days_ago_iso(1))
+    backfill = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    repo.fail_pass(
+        backfill,
+        repo.begin_pass(backfill),
+        "SQL access control error:\nInsufficient privileges to operate on "
+        "database 'SNOWFLAKE'",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.query_one(DetailPane).show(ref)
+        await pilot.pause()
+        assert _note(app) == (
+            "Older run history could not be read: Insufficient privileges to "
+            "operate on database 'SNOWFLAKE'"
+        )
