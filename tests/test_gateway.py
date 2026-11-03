@@ -450,10 +450,10 @@ def test_pipe_activity_binds_database_and_schema_as_parameters() -> None:
             "ORDERS",
         )
     ]
-    rows = gateway.pipe_activity("MYDB", "PUBLIC", 90)
+    rows = gateway.pipe_activity("MYDB", "PUBLIC", 7_776_000)
     statement, params = connection.executed[-1]
     assert "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY" in statement
-    assert "DATEADD('day', -90," in statement
+    assert "DATEADD('second', -7776000," in statement
     assert params == ("MYDB", "PUBLIC")
     assert rows[0]["PIPE_NAME"] == "MY_PIPE"
 
@@ -490,7 +490,7 @@ def test_pipe_activity_history_binds_database_schema_and_pipe_as_parameters() ->
             "ORDERS",
         )
     ]
-    rows = gateway.pipe_activity_history("MYDB", "PUBLIC", "MY_PIPE", 90, 5000)
+    rows = gateway.pipe_activity_history("MYDB", "PUBLIC", "MY_PIPE", 7_776_000, 5000)
     statement, params = connection.executed[-1]
     assert "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY" in statement
     assert "QUALIFY" not in statement
@@ -555,10 +555,10 @@ def test_task_activity_binds_database_and_schema_as_parameters() -> None:
             None,
         )
     ]
-    rows = gateway.task_activity("MYDB", "PUBLIC", 90)
+    rows = gateway.task_activity("MYDB", "PUBLIC", 7_776_000)
     statement, params = connection.executed[-1]
     assert "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY" in statement
-    assert "DATEADD('day', -90," in statement
+    assert "DATEADD('second', -7776000," in statement
     assert params == ("MYDB", "PUBLIC")
     assert rows[0]["NAME"] == "REFRESH_ORDERS"
 

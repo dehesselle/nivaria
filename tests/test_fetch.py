@@ -6,11 +6,16 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import UTC, datetime
 
 import pytest
 
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
+from nivaria.gateway.queries import (
+    COPY_HISTORY_PUBLISHED_LAG,
+    TASK_HISTORY_PUBLISHED_LAG,
+)
 from nivaria.models import (
     CacheState,
     ObjectType,
@@ -18,12 +23,22 @@ from nivaria.models import (
     databases_scope,
     grants_scope,
     objects_scope,
+    pipe_activity_history_scope,
+    pipe_activity_scope,
     pipe_status_scope,
     schemas_scope,
     tag_references_scope,
+    task_activity_history_scope,
+    task_activity_scope,
 )
 from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import FetchJob, Priority, fetch_page
+from nivaria.settings import (
+    LAG_MARGIN_FACTOR,
+    PIPE_HISTORY_FETCH_DAYS,
+    TASK_HISTORY_FETCH_DAYS,
+    config,
+)
 from tests.fakes import FakeGateway
 
 
@@ -452,6 +467,7 @@ def test_task_activity_is_fetched_in_one_shot() -> None:
                     "SCHEMA_NAME": "PUBLIC",
                     "QUERY_ID": "01ab-query-id",
                     "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "ATTEMPT_NUMBER": 1,
                     "STATE": "SUCCEEDED",
                 }
             ]
@@ -476,6 +492,7 @@ def test_task_activity_history_is_fetched_in_one_shot() -> None:
                     "SCHEMA_NAME": "PUBLIC",
                     "QUERY_ID": "01ab-query-id",
                     "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "ATTEMPT_NUMBER": 1,
                     "STATE": "SUCCEEDED",
                 }
             ]
@@ -504,6 +521,7 @@ def test_task_history_is_fetched_in_one_shot_with_no_target_resolution() -> None
                     "NAME": "REFRESH_ORDERS",
                     "QUERY_ID": "01ab-query-id",
                     "SCHEDULED_TIME": "2026-03-01T08:00:00+00:00",
+                    "ATTEMPT_NUMBER": 1,
                     "STATE": "SUCCEEDED",
                 }
             ]
@@ -1653,6 +1671,7 @@ def test_task_activity_scope_reaches_the_right_gateway_call(repo) -> None:
                     "SCHEMA_NAME": "PUBLIC",
                     "QUERY_ID": "01ab-query-id",
                     "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "ATTEMPT_NUMBER": 1,
                     "STATE": "SUCCEEDED",
                 }
             ]
@@ -1684,6 +1703,7 @@ def test_a_failing_task_activity_fetch_keeps_previously_cached_activity(repo) ->
                     "SCHEMA_NAME": "PUBLIC",
                     "QUERY_ID": "01ab-query-id",
                     "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "ATTEMPT_NUMBER": 1,
                     "STATE": "SUCCEEDED",
                 }
             ]
@@ -1719,6 +1739,7 @@ def test_task_activity_history_scope_reaches_the_right_gateway_call(repo) -> Non
                     "SCHEMA_NAME": "PUBLIC",
                     "QUERY_ID": "01ab-query-id",
                     "SCHEDULED_TIME": "2026-01-02T03:04:05+00:00",
+                    "ATTEMPT_NUMBER": 1,
                     "STATE": "SUCCEEDED",
                 }
             ]
@@ -1748,6 +1769,7 @@ def test_task_history_scope_reaches_the_right_gateway_call(repo) -> None:
                     "NAME": "REFRESH_ORDERS",
                     "QUERY_ID": "01ab-query-id",
                     "SCHEDULED_TIME": "2026-03-01T08:00:00+00:00",
+                    "ATTEMPT_NUMBER": 1,
                     "STATE": "SUCCEEDED",
                 }
             ]
@@ -2013,7 +2035,7 @@ def test_the_history_row_cap_reaches_the_statement(repo) -> None:
     finally:
         service.stop()
     assert gateway.calls == [
-        ("task_activity_history", ("MYDB", "PUBLIC", "MY_TASK", 90, 42))
+        ("task_activity_history", ("MYDB", "PUBLIC", "MY_TASK", 90 * 86400, 42))
     ]
 
 
@@ -2113,3 +2135,160 @@ def test_a_data_preview_inside_its_row_limit_is_the_whole_table() -> None:
     page = fetch_page(gateway, data_preview_scope("MYDB", "PUBLIC", "ORDERS"), None, 1)
     assert len(page.rows) == 2
     assert not page.truncated
+
+
+# ------------------------------------------------------------ window passes
+
+
+def _refetch(service, repo, scope) -> None:
+    """One more pass of `scope`, waited for."""
+    before = repo.entry(scope).generation
+    service.request(scope, Priority.INTERACTIVE)
+    assert wait_until(
+        lambda: (
+            repo.entry(scope).generation > before
+            and repo.entry(scope).state is CacheState.COMPLETE
+        )
+    )
+
+
+def _windows(gateway, name: str) -> list[int]:
+    """The window each `name` call asked for, in seconds."""
+    index = 2 if name in ("pipe_activity", "task_activity") else 3
+    return [args[index] for call, args in gateway.calls if call == name]
+
+
+@pytest.mark.parametrize(
+    ("make_scope", "call", "lag", "fetch_setting"),
+    [
+        (
+            lambda: pipe_activity_scope("MYDB", "PUBLIC"),
+            "pipe_activity",
+            COPY_HISTORY_PUBLISHED_LAG,
+            PIPE_HISTORY_FETCH_DAYS,
+        ),
+        (
+            lambda: pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE"),
+            "pipe_activity_history",
+            COPY_HISTORY_PUBLISHED_LAG,
+            PIPE_HISTORY_FETCH_DAYS,
+        ),
+        (
+            lambda: task_activity_scope("MYDB", "PUBLIC"),
+            "task_activity",
+            TASK_HISTORY_PUBLISHED_LAG,
+            TASK_HISTORY_FETCH_DAYS,
+        ),
+        (
+            lambda: task_activity_history_scope("MYDB", "PUBLIC", "MY_TASK"),
+            "task_activity_history",
+            TASK_HISTORY_PUBLISHED_LAG,
+            TASK_HISTORY_FETCH_DAYS,
+        ),
+    ],
+)
+def test_a_log_scope_is_fetched_in_full_once_and_then_by_window(
+    repo, make_scope, call, lag, fetch_setting
+) -> None:
+    """The first pass asks for the whole fetch window, every later one only
+    since the last pass, reaching back by the margin: the setting's factor
+    times the lag Snowflake publishes for that view."""
+    scope = make_scope()
+    gateway = FakeGateway()
+    service = make_service(gateway, repo)
+    try:
+        _refetch(service, repo, scope)
+        _refetch(service, repo, scope)
+    finally:
+        service.stop()
+    full, window = _windows(gateway, call)
+    assert full == config.get(fetch_setting) * 86400
+    margin = config.get(LAG_MARGIN_FACTOR) * lag
+    assert margin <= window <= margin + 60
+
+
+def test_the_lag_margin_setting_scales_the_window(repo) -> None:
+    config.set(LAG_MARGIN_FACTOR, 4)
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    gateway = FakeGateway()
+    service = make_service(gateway, repo)
+    try:
+        _refetch(service, repo, scope)
+        _refetch(service, repo, scope)
+    finally:
+        service.stop()
+    window = _windows(gateway, "pipe_activity")[1]
+    assert (
+        4 * COPY_HISTORY_PUBLISHED_LAG <= window <= 4 * COPY_HISTORY_PUBLISHED_LAG + 60
+    )
+
+
+def test_a_raised_fetch_window_makes_the_next_pass_full(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    gateway = FakeGateway()
+    service = make_service(gateway, repo)
+    try:
+        _refetch(service, repo, scope)
+        config.set(PIPE_HISTORY_FETCH_DAYS, 120)
+        _refetch(service, repo, scope)
+    finally:
+        service.stop()
+    assert _windows(gateway, "pipe_activity") == [90 * 86400, 120 * 86400]
+
+
+def test_a_window_pass_adds_to_the_stored_activity(repo) -> None:
+    """End to end: a pipe that did not load since the last pass keeps its
+    row, which an ordinary pass would have swept."""
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    gateway = FakeGateway(
+        pipe_activity={("MYDB", "PUBLIC"): [_pipe_load("P_A"), _pipe_load("P_B")]}
+    )
+    service = make_service(gateway, repo)
+    try:
+        _refetch(service, repo, scope)
+        gateway._pipe_activity[("MYDB", "PUBLIC")] = [_pipe_load("P_C")]
+        _refetch(service, repo, scope)
+    finally:
+        service.stop()
+    assert sorted(row["PIPE_NAME"] for row in repo.raw_rows(scope)) == [
+        "P_A",
+        "P_B",
+        "P_C",
+    ]
+
+
+def test_forgetting_coverage_makes_the_next_fetch_full(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    gateway = FakeGateway()
+    service = make_service(gateway, repo)
+    try:
+        _refetch(service, repo, scope)
+        repo.forget_coverage(scope)
+        _refetch(service, repo, scope)
+    finally:
+        service.stop()
+    assert _windows(gateway, "pipe_activity") == [90 * 86400, 90 * 86400]
+
+
+def test_an_ordinary_scope_is_still_swept_in_full(repo) -> None:
+    """Window passes are for the log scopes alone."""
+    scope = databases_scope()
+    gateway = FakeGateway(databases=["A", "B"])
+    service = make_service(gateway, repo)
+    try:
+        _refetch(service, repo, scope)
+        gateway.databases = ["B"]
+        _refetch(service, repo, scope)
+    finally:
+        service.stop()
+    assert [row["name"] for row in repo.raw_rows(scope)] == ["B"]
+
+
+def _pipe_load(pipe: str) -> dict:
+    return {
+        "PIPE_CATALOG_NAME": "MYDB",
+        "PIPE_SCHEMA_NAME": "PUBLIC",
+        "PIPE_NAME": pipe,
+        "FILE_NAME": f"{pipe}.csv",
+        "LAST_LOAD_TIME": str(datetime.now(UTC)),
+    }

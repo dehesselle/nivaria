@@ -235,7 +235,7 @@ class SnowflakeGateway(Protocol):
         self,
         database: str,
         schema: str,
-        fetch_days: int,
+        window_seconds: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -245,7 +245,7 @@ class SnowflakeGateway(Protocol):
         database: str,
         schema: str,
         pipe: str,
-        fetch_days: int,
+        window_seconds: int,
         max_rows: int,
         *,
         allow_reconnect: bool = True,
@@ -275,7 +275,7 @@ class SnowflakeGateway(Protocol):
         self,
         database: str,
         schema: str,
-        fetch_days: int,
+        window_seconds: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -285,7 +285,7 @@ class SnowflakeGateway(Protocol):
         database: str,
         schema: str,
         task: str,
-        fetch_days: int,
+        window_seconds: int,
         max_rows: int,
         *,
         allow_reconnect: bool = True,
@@ -639,12 +639,12 @@ class PoolGateway:
         self,
         database: str,
         schema: str,
-        fetch_days: int,
+        window_seconds: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.pipe_activity(fetch_days),
+            queries.pipe_activity(window_seconds),
             (database, schema),
             allow_reconnect=allow_reconnect,
         )
@@ -654,13 +654,13 @@ class PoolGateway:
         database: str,
         schema: str,
         pipe: str,
-        fetch_days: int,
+        window_seconds: int,
         max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.pipe_activity_history(fetch_days, max_rows),
+            queries.pipe_activity_history(window_seconds, max_rows),
             (database, schema, pipe),
             allow_reconnect=allow_reconnect,
         )
@@ -698,12 +698,12 @@ class PoolGateway:
         self,
         database: str,
         schema: str,
-        fetch_days: int,
+        window_seconds: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.task_activity(fetch_days),
+            queries.task_activity(window_seconds),
             (database, schema),
             allow_reconnect=allow_reconnect,
         )
@@ -713,13 +713,13 @@ class PoolGateway:
         database: str,
         schema: str,
         task: str,
-        fetch_days: int,
+        window_seconds: int,
         max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.task_activity_history(fetch_days, max_rows),
+            queries.task_activity_history(window_seconds, max_rows),
             (database, schema, task),
             allow_reconnect=allow_reconnect,
         )

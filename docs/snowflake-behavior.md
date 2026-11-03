@@ -216,9 +216,29 @@ cause. With `EXECUTE TASK` granted for the test and revoked afterwards:
 - runs of `AS SELECT 1/0` read `FAILED`, `100051: Division by zero`, also with
   both columns set.
 
-Rows with a `NULL` `QUERY_ID` survive the `(_scope, QUERY_ID)` key. Two
+Rows with a `NULL` `QUERY_ID` survived a `(_scope, QUERY_ID)` key. Two
 such runs stored as two rows, over two refresh passes, because SQLite
-treats `NULL`s in a key as distinct.
+treats `NULL`s in a key as distinct. A window pass reads its overlap again
+on every refresh, so the `ACCOUNT_USAGE` task mirrors are keyed by
+`(SCHEDULED_TIME, ATTEMPT_NUMBER)` per task instead.
+
+Snowflake's documentation for `ACCOUNT_USAGE.TASK_HISTORY`, read
+2026-11-03: "the view does not return SCHEDULED or EXECUTING task runs";
+`STATE` is one of `SUCCEEDED`, `FAILED`, `CANCELLED`, `SKIPPED`; "Latency for
+the view may be up to 45 minutes." A run's row therefore appears once, after
+the run has finished, and does not change.
+
+The view's rows on the sandbox, read 2026-11-03 (8245 runs over a year, 10
+of them `FAILED`, 8 of those with a `NULL` `QUERY_ID`):
+
+- `COMPLETED_TIME` was set on every row, the failed-before-submission runs
+  included. That is what a window over task runs filters on: a run is
+  published only once it finishes, so its `SCHEDULED_TIME` can lie before
+  any short window. The longest run took 1318 s from scheduled to completed.
+- `ATTEMPT_NUMBER` was set on every row, always 1. No two rows shared
+  `(DATABASE_NAME, SCHEMA_NAME, NAME, SCHEDULED_TIME)`.
+- `RUN_ID` is not a key for one run: 8140 distinct values over 8245 rows, as
+  expected of an identifier shared by the tasks of one graph run.
 
 ## Pipe target table
 

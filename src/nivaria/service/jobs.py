@@ -29,12 +29,17 @@ from enum import IntEnum
 from typing import Any
 
 from nivaria.gateway.gateway import SnowflakeGateway, is_missing_object
-from nivaria.gateway.queries import MAX_PAGE_SIZE
+from nivaria.gateway.queries import (
+    COPY_HISTORY_PUBLISHED_LAG,
+    MAX_PAGE_SIZE,
+    TASK_HISTORY_PUBLISHED_LAG,
+)
 from nivaria.models import Scope, ScopeType
 from nivaria.settings import (
     DATA_PREVIEW_ROWS,
     DATA_PREVIEW_TIMEOUT,
     HISTORY_MAX_ROWS,
+    LAG_MARGIN_FACTOR,
     PIPE_HISTORY_FETCH_DAYS,
     PRIME_CHUNK_THRESHOLD,
     TASK_HISTORY_FETCH_DAYS,
@@ -102,6 +107,52 @@ NAME_COLUMN = "name"
 
 
 @dataclass(frozen=True)
+class LogPolicy:
+    """The settings a log scope's window pass is planned from.
+
+    Read fresh for every pass, like the fetch-window settings themselves,
+    so a change applies to the next refresh -- see
+    `repository.plan_window`.
+    """
+
+    #: The whole fetch window, in seconds: what a full pass asks for.
+    fetch_seconds: int
+    #: How far before its previous pass a window pass starts.
+    margin: float
+    #: The scope's row cap, or None for a scope reduced to one row per object.
+    max_rows: int | None
+
+
+def log_policy(scope: Scope) -> LogPolicy | None:
+    """The window policy of a log scope, or None for any other scope.
+
+    The four ACCOUNT_USAGE views are the only sources whose rows are past
+    events that never change once they appear, so they alone can be
+    refreshed by asking for what is new (see `Repository.finish_pass`).
+    The margin is a multiple of the lag Snowflake publishes for the view.
+    """
+    factor = config.get(LAG_MARGIN_FACTOR)
+    match scope.type:
+        case ScopeType.PIPE_ACTIVITY | ScopeType.PIPE_ACTIVITY_HISTORY:
+            fetch_days = config.get(PIPE_HISTORY_FETCH_DAYS)
+            lag = COPY_HISTORY_PUBLISHED_LAG
+        case ScopeType.TASK_ACTIVITY | ScopeType.TASK_ACTIVITY_HISTORY:
+            fetch_days = config.get(TASK_HISTORY_FETCH_DAYS)
+            lag = TASK_HISTORY_PUBLISHED_LAG
+        case _:
+            return None
+    capped = scope.type in (
+        ScopeType.PIPE_ACTIVITY_HISTORY,
+        ScopeType.TASK_ACTIVITY_HISTORY,
+    )
+    return LogPolicy(
+        fetch_seconds=int(fetch_days) * 86400,
+        margin=factor * lag,
+        max_rows=config.get(HISTORY_MAX_ROWS) if capped else None,
+    )
+
+
+@dataclass(frozen=True)
 class Page:
     """One page of one scope, and what the caller needs to know about it.
 
@@ -125,6 +176,7 @@ def fetch_page(
     allow_reconnect: bool = True,
     pipe_target: tuple[str, str, str] | None = None,
     pipe_names: Sequence[str] | None = None,
+    window_seconds: int | None = None,
 ) -> Page:
     """Fetch one page.
 
@@ -149,6 +201,10 @@ def fetch_page(
     `pipe_names` is the same kind of context for ScopeType.PIPE_STATUS: the
     schema's pipes as SHOW PIPES last listed them, which the statement has to
     name one by one. The caller reads them from the cache.
+
+    `window_seconds` is how far back a log scope's statement reaches, which
+    depends on the scope's ledger entry (`repository.plan_window`), so the
+    caller supplies it too. None asks for the whole fetch window.
 
     A continuation page asks for one row more than `limit`, because `SHOW
     TASKS ... FROM 'name'` is inclusive: it starts with the cursor row itself,
@@ -249,12 +305,11 @@ def fetch_page(
             assert scope.schema is not None
             # Bounded by pipe count, not by history depth -- see
             # queries.pipe_activity's QUALIFY.
-            fetch_days = config.get(PIPE_HISTORY_FETCH_DAYS)
             return Page(
                 gateway.pipe_activity(
                     scope.database,
                     scope.schema,
-                    fetch_days,
+                    _window(scope, window_seconds),
                     allow_reconnect=allow_reconnect,
                 ),
             )
@@ -265,14 +320,13 @@ def fetch_page(
             # Bounded to one pipe's history -- no target-table resolution
             # needed, unlike PIPE_HISTORY, since ACCOUNT_USAGE.COPY_HISTORY
             # has an ordinary PIPE_NAME column to filter on directly.
-            fetch_days = config.get(PIPE_HISTORY_FETCH_DAYS)
             max_rows = config.get(HISTORY_MAX_ROWS)
             return _capped(
                 gateway.pipe_activity_history(
                     scope.database,
                     scope.schema,
                     scope.table,
-                    fetch_days,
+                    _window(scope, window_seconds),
                     max_rows,
                     allow_reconnect=allow_reconnect,
                 ),
@@ -319,12 +373,11 @@ def fetch_page(
             assert scope.schema is not None
             # Bounded by task count, not by history depth -- see
             # queries.task_activity's QUALIFY.
-            fetch_days = config.get(TASK_HISTORY_FETCH_DAYS)
             return Page(
                 gateway.task_activity(
                     scope.database,
                     scope.schema,
-                    fetch_days,
+                    _window(scope, window_seconds),
                     allow_reconnect=allow_reconnect,
                 ),
             )
@@ -335,14 +388,13 @@ def fetch_page(
             # Bounded to one task's history -- no target-table resolution
             # needed, unlike PIPE_HISTORY: ACCOUNT_USAGE.TASK_HISTORY has an
             # ordinary NAME column to filter on directly.
-            fetch_days = config.get(TASK_HISTORY_FETCH_DAYS)
             max_rows = config.get(HISTORY_MAX_ROWS)
             return _capped(
                 gateway.task_activity_history(
                     scope.database,
                     scope.schema,
                     scope.table,
-                    fetch_days,
+                    _window(scope, window_seconds),
                     max_rows,
                     allow_reconnect=allow_reconnect,
                 ),
@@ -494,6 +546,16 @@ def _pipe_status_page(
         if not rows:
             raise
     return Page(rows, batch[-1] if len(remaining) > len(batch) else None)
+
+
+def _window(scope: Scope, window_seconds: int | None) -> int:
+    """The seconds a log scope's statement reaches back: the caller's, or
+    the whole fetch window."""
+    if window_seconds is not None:
+        return window_seconds
+    policy = log_policy(scope)
+    assert policy is not None, f"{scope.type} is not a log scope"
+    return policy.fetch_seconds
 
 
 def _capped(rows: list[dict[str, Any]], max_rows: int) -> Page:

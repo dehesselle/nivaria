@@ -412,19 +412,21 @@ CREATE INDEX IF NOT EXISTS system_pipe_status_scope
 -- 2026-09-09 (docs/snowflake-behavior.md).
 --
 -- One row per task -- reduced from one row per historical run by a QUALIFY
--- in queries.task_activity, keeping only each task's latest. QUERY_ID is
--- part of the primary key (alongside NAME) rather than NAME alone, so a
--- task's next run lands under a new key and the previous row sweeps away as
--- stale via the ordinary generation sweep, the same mechanism
--- account_usage_copy_history already relies on. A single task's own full
--- history is account_usage_task_history_detail below, fetched separately
--- and lazily.
+-- in queries.task_activity, keeping only each task's latest. A run is keyed
+-- by (SCHEDULED_TIME, ATTEMPT_NUMBER), not QUERY_ID: QUERY_ID is NULL for a
+-- run that failed before a query was submitted, and NULLs in a key never
+-- collide, so a window pass re-reading its overlap would add such a run
+-- again every time (docs/snowflake-behavior.md "Task history"). A task's
+-- next run lands under a new key, and the window pass keeps only the newest
+-- row per task (TableSpec.log). A single task's own full history is
+-- account_usage_task_history_detail below, fetched separately and lazily.
 CREATE TABLE IF NOT EXISTS account_usage_task_history (
     NAME              TEXT NOT NULL,
     DATABASE_NAME     TEXT NOT NULL,
     SCHEMA_NAME       TEXT NOT NULL,
-    QUERY_ID          TEXT NOT NULL,
-    SCHEDULED_TIME    TEXT,
+    QUERY_ID          TEXT,
+    SCHEDULED_TIME    TEXT NOT NULL,
+    ATTEMPT_NUMBER    INTEGER NOT NULL,
     QUERY_START_TIME  TEXT,
     COMPLETED_TIME    TEXT,
     STATE             TEXT,
@@ -433,7 +435,7 @@ CREATE TABLE IF NOT EXISTS account_usage_task_history (
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
     _fetched_at       REAL    NOT NULL,
-    PRIMARY KEY (DATABASE_NAME, SCHEMA_NAME, NAME, QUERY_ID)
+    PRIMARY KEY (DATABASE_NAME, SCHEMA_NAME, NAME, SCHEDULED_TIME, ATTEMPT_NUMBER)
 );
 CREATE INDEX IF NOT EXISTS account_usage_task_history_scope
     ON account_usage_task_history(_scope);
@@ -452,7 +454,8 @@ CREATE TABLE IF NOT EXISTS account_usage_task_history_detail (
     DATABASE_NAME     TEXT,
     SCHEMA_NAME       TEXT,
     QUERY_ID          TEXT,
-    SCHEDULED_TIME    TEXT,
+    SCHEDULED_TIME    TEXT NOT NULL,
+    ATTEMPT_NUMBER    INTEGER NOT NULL,
     QUERY_START_TIME  TEXT,
     COMPLETED_TIME    TEXT,
     STATE             TEXT,
@@ -461,7 +464,8 @@ CREATE TABLE IF NOT EXISTS account_usage_task_history_detail (
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
     _fetched_at       REAL    NOT NULL,
-    PRIMARY KEY (_scope, QUERY_ID)
+    -- Not QUERY_ID, for the reason given on account_usage_task_history.
+    PRIMARY KEY (_scope, SCHEDULED_TIME, ATTEMPT_NUMBER)
 );
 CREATE INDEX IF NOT EXISTS account_usage_task_history_detail_scope
     ON account_usage_task_history_detail(_scope);
@@ -625,5 +629,11 @@ CREATE TABLE IF NOT EXISTS cache_entry (
     -- the rows here are real and current, there are just more of them
     -- upstream. Added in place, which means an existing cache file has to
     -- be deleted -- see the header above.
-    truncated   INTEGER NOT NULL DEFAULT 0
+    truncated   INTEGER NOT NULL DEFAULT 0,
+    -- Only for a log scope (see TableSpec.log): the epoch back to which the
+    -- stored rows are complete, set by a full pass. A window pass asks only
+    -- for what is newer than the last one, which is safe while this still
+    -- reaches as far back as the fetch window. NULL means the next pass
+    -- must be a full one.
+    covered_from REAL
 );

@@ -41,13 +41,15 @@ the pipe's definition. A pipe with neither has no target to give it. That is
 a normal, lasting state, not a transient failure: this view does not
 `ensure()` -- or even list in `scopes()` -- the history scope until a target
 is actually resolvable, so such a pipe does not repeatedly fail a fetch it
-can never succeed at. Nothing on the cache-age cadence watches it then, and
-its note says so (`_unchecked_note`).
+can never succeed at. The snapshot is then its only source, refreshed on the
+cache age like everything else, and its first load gives it a target. Until
+then, only ACCOUNT_USAGE speaks for it, so the History tab carries the lag
+banner (`tables.lag_note`).
 
 `pipe_activity_history_scope` is gated too, on the snapshot showing a load
 for this pipe (`needs_backfill`). For a pipe with no load in the snapshot,
 the snapshot itself is the history's older half: it covers the fetch window
-up to its fetch, at most 13 days ago (its TTL), and the 14-day history the
+up to its last refresh, at most one cache age ago, and the 14-day history the
 time since, so the backfill could only repeat its "nothing" (docs/DESIGN.md
 "The pipe the snapshot shows no load for"). `pipe_activity_history_scope`
 needs no such gating: ACCOUNT_USAGE.COPY_HISTORY filters directly by
@@ -56,16 +58,19 @@ PIPE_NAME, with no target table to resolve first.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, TabbedContent, TabPane, TextArea
+from textual.widgets import DataTable, Static, TabbedContent, TabPane, TextArea
 
 from nivaria.format import format_bytes, format_timestamp_minutes, parse_timestamp
-from nivaria.gateway.queries import PIPE_HISTORY_RETENTION_DAYS
+from nivaria.gateway.queries import (
+    COPY_HISTORY_PUBLISHED_LAG,
+    PIPE_HISTORY_RETENTION_DAYS,
+)
 from nivaria.models import (
     CacheState,
     ObjectType,
@@ -76,15 +81,16 @@ from nivaria.models import (
 )
 from nivaria.settings import (
     CACHE_TTL,
-    PIPE_HISTORY_FETCH_DAYS,
     PIPE_HISTORY_SHOW_DAYS,
     config,
 )
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.tables import (
     HISTORY_TABLE,
+    LAG_NOTE,
     SQL,
     HistoryView,
+    lag_note,
 )
 
 _HISTORY_COLUMNS = ("Rows", "Size", "Loaded", "Status", "File Name")
@@ -111,6 +117,7 @@ class PipeView(HistoryView, ObjectView):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
             with TabPane("[$accent bold]H[/]istory", id="tab-history"):
+                yield lag_note("Load activity", COPY_HISTORY_PUBLISHED_LAG)
                 yield from self.compose_history()
             with TabPane("[$accent bold]S[/]QL", id="tab-sql"):
                 yield TextArea(
@@ -143,8 +150,8 @@ class PipeView(HistoryView, ObjectView):
         Only once the PIPE_ACTIVITY snapshot has answered with a load for
         this pipe. Without one, the backfill reads the same view over the
         same window with the same lag, and can only repeat the snapshot's
-        "nothing": the snapshot covers the window up to its fetch, the 14-day
-        history from there to now (see the module docstring). Asking before
+        "nothing": the snapshot covers the window up to its last refresh, the
+        14-day history from there to now (see the module docstring). Asking before
         the snapshot answers would pay the full 90-day statement for a pipe
         that may turn out to have nothing to show.
         """
@@ -225,18 +232,10 @@ class PipeView(HistoryView, ObjectView):
         sources: list[tuple[Scope, int | None]] = [(backfill, None)]
         if history_scope is not None:
             sources.append((history_scope, PIPE_HISTORY_RETENTION_DAYS))
-        unchecked = None
-        if history_scope is None:
-            days = min(show_days, config.get(PIPE_HISTORY_FETCH_DAYS))
-            unchecked = self._unchecked_note(bool(dated), days)
-        self.sync_history_note(
-            self.repo,
-            dated,
-            show_days,
-            "load activity",
-            sources,
-            unchecked=unchecked,
-        )
+        self.sync_history_note(self.repo, dated, show_days, "load activity", sources)
+        # Only ACCOUNT_USAGE speaks for a pipe without a target. With one,
+        # INFORMATION_SCHEMA covers the recent days near real time.
+        self.query_one(f"#{LAG_NOTE}", Static).display = history_scope is None
 
         table = self.query_one(f"#{HISTORY_TABLE}", DataTable)
         with self.keeping_cursor(table):
@@ -259,38 +258,6 @@ class PipeView(HistoryView, ObjectView):
                     key=key,
                 )
         self.history_panel.sync()
-
-    def _unchecked_note(self, has_rows: bool, days: int) -> str | None:
-        """The note for a pipe without a target table, once anything answered.
-
-        Without a target only ACCOUNT_USAGE speaks for this pipe, and both of
-        its scopes carry the 13-day TTL override, so nothing on the cache-age
-        cadence notices a new load. That gap has to show, with the time of
-        the newest answer and the way to check now.
-        """
-        read = [self.activity_scope()]
-        if self.needs_backfill():
-            read.append(self.activity_history_scope())
-        fetched = [
-            entry.fetched_at
-            for entry in map(self.repo.entry, read)
-            if entry.fetched_at is not None and entry.state is not CacheState.EMPTY
-        ]
-        if not fetched:
-            return None
-        # A time, not an age -- see tables.failed_refresh.
-        as_of = datetime.fromtimestamp(max(fetched), UTC).astimezone()
-        known = (
-            f"Shown as of {as_of:%Y-%m-%d %H:%M}."
-            if has_rows
-            else f"No load activity in the last {days} days as of "
-            f"{as_of:%Y-%m-%d %H:%M}."
-        )
-        return (
-            f"{known} This pipe's target table can't be read from its "
-            "definition, so new loads are not checked for automatically. "
-            "Press F5 to check now."
-        )
 
     def _update_definition(self) -> None:
         row = self.repo.object_detail(self.ref)

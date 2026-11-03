@@ -225,17 +225,16 @@ ClosingDialog > #dialog {
 #detail-list-note,
 #detail-status-note,
 #detail-history-note,
-#detail-data-note {
+#detail-data-note,
+#detail-lag-note {
     height: auto;
     margin-bottom: 1;
     background: $foreground 8%;
     color: $text-muted;
 }
 
-/* Not $error: a capped history is correct data, just not all of it, and an
-   unchecked one is correct as of the time it states. */
-#detail-history-note.-capped,
-#detail-history-note.-unchecked {
+/* Not $error: a capped history is correct data, just not all of it. */
+#detail-history-note.-capped {
     color: $text-warning;
 }
 

@@ -66,12 +66,16 @@ stops background refreshing; `F5` still refreshes the node under the cursor.
 A cache age shorter than one fetch makes that part due again as soon as its
 refresh lands, so it is refetched back to back, one fetch at a time.
 
-The `ACCOUNT_USAGE` half of a pipe's history is refetched at most every 13
-days, since it only changes as data ages out of the 14-day
-`INFORMATION_SCHEMA` window; the Pipes list's activity columns use the same
-interval. For a pipe that the Pipes list's last fetch showed no load for, the
-`ACCOUNT_USAGE` half is not fetched at all: that fetch is the answer, and the
-`INFORMATION_SCHEMA` half covers the days since.
+Pipe and task activity read `ACCOUNT_USAGE`, whose cost follows the time
+window asked for rather than the rows returned: 8-31 s for 90 days of copy
+history on a production account, about 2 s for 2 days (see
+[measurements.md](measurements.md#account_usage-windows)). So each of these
+is fetched in full (the fetch window) only the first time, and after a fetch
+window is raised. Every later refresh asks only for the time since the
+previous one, reaching back by the **lag margin** setting, and keeps
+everything older. For a pipe that the Pipes list shows no load for, the
+`ACCOUNT_USAGE` half of its history is not fetched at all: the Pipes list is
+the answer, and the `INFORMATION_SCHEMA` half covers the days since.
 
 The background refresh shares the connection pool with browsing at the
 lowest priority, so it never delays what you are doing.

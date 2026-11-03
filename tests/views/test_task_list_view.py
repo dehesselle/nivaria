@@ -190,3 +190,18 @@ async def test_a_category_cache_update_repaints_the_list(repo) -> None:
         pane.cache_updated(scope)
         await pilot.pause()
         assert pane.query_one("#detail-list", DataTable).row_count == 1
+
+
+async def test_the_task_list_says_its_run_columns_lag_behind(repo) -> None:
+    put_task(repo, "REFRESH_ORDERS")
+    scope = objects_scope(ObjectType.TASK, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        banner = pane.query_one("#detail-lag-note")
+        assert str(banner.render()) == (
+            "Run history comes from ACCOUNT_USAGE, which Snowflake says can be "
+            "up to 45 minutes behind."
+        )

@@ -319,8 +319,8 @@ def tag_references_all_columns(database: str) -> str:
     )
 
 
-def pipe_activity(fetch_days: int) -> str:
-    """Every pipe's *latest* load in a schema, back to `fetch_days` ago.
+def pipe_activity(window_seconds: int) -> str:
+    """Every pipe's *latest* load in a schema, back to `window_seconds` ago.
 
     SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY, filtered to one schema's pipes and
     reduced to one row per pipe with QUALIFY -- this backs the "Pipes (n)"
@@ -335,8 +335,11 @@ def pipe_activity(fetch_days: int) -> str:
     pipe's full history (for its own detail view) is `pipe_activity_history`
     below instead -- lazy, per pipe, not part of this query.
 
-    `fetch_days` comes from the "pipe history fetch window" setting, read
-    fresh at fetch time. Like `table_stats`, this needs a running warehouse;
+    The window is the whole "pipe history fetch window" setting for a full
+    pass, or the time since the last pass plus the lag margin for a window
+    pass (`repository.plan_window`): the cost follows the window, not the
+    rows, so the 5-minute refresh asks for only a few hours. Like
+    `table_stats`, this needs a running warehouse;
     unlike it, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather than one
     built from the database, so both filter values bind as ordinary `%s`
     parameters -- no `quote_identifier` needed at all. It also needs
@@ -351,13 +354,13 @@ def pipe_activity(fetch_days: int) -> str:
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
-        f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        f"AND LAST_LOAD_TIME >= {_since(window_seconds)} "
         "QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1"
     )
 
 
-def pipe_activity_history(fetch_days: int, max_rows: int) -> str:
-    """One pipe's newest `max_rows` ACCOUNT_USAGE loads, back to `fetch_days` ago.
+def pipe_activity_history(window_seconds: int, max_rows: int) -> str:
+    """One pipe's newest `max_rows` ACCOUNT_USAGE loads, back to `window_seconds` ago.
 
     The backfill half of a single pipe's detail view -- `pipe_activity`
     above deliberately only keeps the latest row per pipe, so a pipe's own
@@ -386,16 +389,32 @@ def pipe_activity_history(fetch_days: int, max_rows: int) -> str:
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
-        f"AND LAST_LOAD_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        f"AND LAST_LOAD_TIME >= {_since(window_seconds)} "
         f"ORDER BY LAST_LOAD_TIME DESC LIMIT {int(max_rows)}"
     )
 
 
 #: Snowflake's own retention limit for INFORMATION_SCHEMA.COPY_HISTORY -- a
-#: platform constant, not a preference, so it is not a Setting. This is also
-#: why ScopeType.PIPE_ACTIVITY's TTL override (models.py) stays one day
-#: under this: the two sources must jointly cover every day with no gap.
+#: platform constant, not a preference, so it is not a Setting.
 PIPE_HISTORY_RETENTION_DAYS = 14
+
+#: How far behind ACCOUNT_USAGE.COPY_HISTORY can be, in seconds: Snowflake's
+#: published "up to 2 hours", a platform figure rather than a preference.
+#: The lag margin a window pass reaches back by is a multiple of it -- see
+#: settings.LAG_MARGIN_FACTOR and repository.plan_window.
+COPY_HISTORY_PUBLISHED_LAG = 2 * 3600
+
+#: The same for ACCOUNT_USAGE.TASK_HISTORY: "up to 45 minutes".
+TASK_HISTORY_PUBLISHED_LAG = 45 * 60
+
+
+def _since(window_seconds: int) -> str:
+    """The start of a window, relative to Snowflake's own clock.
+
+    Relative rather than an absolute time sent from here, so a client
+    clock that is off does not shift the window.
+    """
+    return f"DATEADD('second', -{int(window_seconds)}, CURRENT_TIMESTAMP())"
 
 
 def pipe_history(
@@ -471,8 +490,8 @@ def pipe_status(database: str, schema: str, names: Sequence[str]) -> str:
     )
 
 
-def task_activity(fetch_days: int) -> str:
-    """Every task's *latest* run in a schema, back to `fetch_days` ago.
+def task_activity(window_seconds: int) -> str:
+    """Every task's *latest* run in a schema, completed `window_seconds` ago or later.
 
     SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY, filtered to one schema's tasks and
     reduced to one row per task with QUALIFY -- the same shape `pipe_activity`
@@ -483,24 +502,33 @@ def task_activity(fetch_days: int) -> str:
     view) is `task_activity_history` below instead -- lazy, per task, not
     part of this query.
 
-    `fetch_days` comes from the "task history fetch window" setting, read
-    fresh at fetch time. Like `pipe_activity`, this needs a running warehouse
+    The window is `pipe_activity`'s, with the task history fetch window.
+    It filters by COMPLETED_TIME, not SCHEDULED_TIME: ACCOUNT_USAGE lists a
+    run only once it has finished, so a run that took five hours appears
+    carrying a SCHEDULED_TIME five hours old, which a window pass would
+    already have passed for good. "Latest" is still by SCHEDULED_TIME.
+    ATTEMPT_NUMBER is selected for the key: QUERY_ID is NULL for a run that
+    failed before a query was submitted (docs/snowflake-behavior.md "Task
+    history").
+
+    Like `pipe_activity`, this needs a running warehouse
     (see docs/snowflake-behavior.md) and IMPORTED PRIVILEGES on the SNOWFLAKE
     database (or ACCOUNTADMIN); either gap just fails this one scope, same as
     a missing warehouse does for `table_stats`.
     """
     return (
         "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
-        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "ATTEMPT_NUMBER, QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, "
+        "ERROR_MESSAGE "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
         "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s "
-        f"AND SCHEDULED_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        f"AND COMPLETED_TIME >= {_since(window_seconds)} "
         "QUALIFY ROW_NUMBER() OVER (PARTITION BY NAME ORDER BY SCHEDULED_TIME DESC) = 1"
     )
 
 
-def task_activity_history(fetch_days: int, max_rows: int) -> str:
-    """One task's newest `max_rows` ACCOUNT_USAGE runs, back to `fetch_days` ago.
+def task_activity_history(window_seconds: int, max_rows: int) -> str:
+    """One task's newest `max_rows` ACCOUNT_USAGE runs, completed `window_seconds` ago or later.
 
     The backfill half of a single task's detail view -- `task_activity` above
     deliberately only keeps the latest row per task, so a task's own "Run
@@ -512,22 +540,22 @@ def task_activity_history(fetch_days: int, max_rows: int) -> str:
     `task_activity`'s two. `max_rows` bounds it for the same reason
     `pipe_activity_history` needs one: a minute-schedule task over a 90-day
     window is six figures of runs, and only the newest are ever displayed.
+    Windowed by COMPLETED_TIME, for the reason given on `task_activity`.
     """
     return (
         "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
-        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "ATTEMPT_NUMBER, QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, "
+        "ERROR_MESSAGE "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
         "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND NAME = %s "
-        f"AND SCHEDULED_TIME >= DATEADD('day', -{int(fetch_days)}, CURRENT_TIMESTAMP()) "
+        f"AND COMPLETED_TIME >= {_since(window_seconds)} "
         f"ORDER BY SCHEDULED_TIME DESC LIMIT {int(max_rows)}"
     )
 
 
 #: Snowflake's own hard retention limit for INFORMATION_SCHEMA.TASK_HISTORY --
 #: a platform constant, not a preference, so it is not a Setting. Shorter than
-#: PIPE_HISTORY_RETENTION_DAYS' 14 days. This is also why
-#: ScopeType.TASK_ACTIVITY_HISTORY's TTL override (models.py) stays one day
-#: under this: the two sources must jointly cover every day with no gap.
+#: PIPE_HISTORY_RETENTION_DAYS' 14 days.
 TASK_HISTORY_RETENTION_DAYS = 7
 
 #: The largest RESULT_LIMIT INFORMATION_SCHEMA.TASK_HISTORY accepts. Also a

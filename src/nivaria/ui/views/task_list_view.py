@@ -47,6 +47,7 @@ from textual.widgets import DataTable, Static
 
 from nivaria.cache.repository import Repository
 from nivaria.format import format_timestamp_minutes
+from nivaria.gateway.queries import TASK_HISTORY_PUBLISHED_LAG
 from nivaria.models import ObjectRef, ObjectType, Scope, task_activity_scope
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import ObjectOpened
@@ -55,6 +56,7 @@ from nivaria.ui.views.tables import (
     LIST_NOTE,
     LIST_TABLE,
     HoverTooltipTable,
+    lag_note,
     sync_list_note,
 )
 
@@ -84,6 +86,8 @@ class TaskListView(CategoryView):
         self._rows: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
+        # The last-run columns come from ACCOUNT_USAGE.
+        yield lag_note("Run history", TASK_HISTORY_PUBLISHED_LAG)
         yield Static("", id=LIST_NOTE)
         table: DataTable[Text] = HoverTooltipTable(
             self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"

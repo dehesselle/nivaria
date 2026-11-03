@@ -26,6 +26,7 @@ __all__ = [
     "DATA_PREVIEW_ROWS",
     "DATA_PREVIEW_TIMEOUT",
     "HISTORY_MAX_ROWS",
+    "LAG_MARGIN_FACTOR",
     "MAX_PAGES_PER_PASS",
     "PAGE_SIZE",
     "PIPE_HISTORY_FETCH_DAYS",
@@ -161,6 +162,21 @@ HISTORY_MAX_ROWS = Setting(
     ),
     group="Cache",
     default=5000,
+)
+
+LAG_MARGIN_FACTOR = Setting(
+    key="account_usage_lag_margin",
+    label="ACCOUNT_USAGE lag margin (x published lag)",
+    description=(
+        "How far back each refresh of pipe and task history reaches before "
+        "its previous one, as a multiple of the lag Snowflake publishes for "
+        "ACCOUNT_USAGE (up to 2 hours for copy history, 45 minutes for task "
+        "history). A row Snowflake publishes later than this is not fetched "
+        "again until the history is fetched in full."
+    ),
+    group="Cache",
+    default=2,
+    choices=(2, 3, 4),
 )
 
 DATA_PREVIEW_ROWS = Setting(

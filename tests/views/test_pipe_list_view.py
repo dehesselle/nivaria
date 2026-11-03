@@ -248,3 +248,21 @@ async def test_pressing_enter_on_a_pipe_row_opens_it(repo) -> None:
         await pilot.press("enter")
         await pilot.pause()
     assert app.opened == [ObjectRef(ObjectType.PIPE, "MYDB", "PUBLIC", "LOAD_ORDERS")]
+
+
+async def test_the_activity_tab_says_its_columns_lag_behind(repo) -> None:
+    """Every Activity column but Name comes from ACCOUNT_USAGE. The line sits
+    in that tab only: the Status tab's columns do not lag."""
+    put_pipe(repo, "LOAD_ORDERS")
+    scope = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        await pilot.pause()
+        banner = pane.query_one("#tab-activity").query_one("#detail-lag-note")
+        assert str(banner.render()) == (
+            "Load activity comes from ACCOUNT_USAGE, which Snowflake says can "
+            "be up to 2 hours behind."
+        )
+        assert not pane.query_one("#tab-status").query("#detail-lag-note")

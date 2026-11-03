@@ -15,7 +15,9 @@ from nivaria.models import (
     containing_scopes,
     data_preview_scope,
     databases_scope,
+    due_in,
     grants_scope,
+    is_stale,
     materialized_view_stats_scope,
     object_grants_scope,
     objects_scope,
@@ -25,7 +27,6 @@ from nivaria.models import (
     prime_scope,
     roles_scope,
     schemas_scope,
-    scope_ttl,
     table_stats_scope,
     tag_references_scope,
     task_activity_history_scope,
@@ -254,59 +255,17 @@ def test_a_vanished_object_is_cleared_by_refreshing_the_listing_one_level_up(
     assert containing_scopes(scope) == expected
 
 
-def test_scope_ttl_leaves_an_ordinary_scope_untouched() -> None:
-    """Almost every scope type has no override -- the caller's own TTL wins,
-    whatever it is."""
-    assert scope_ttl(table_stats_scope("MYDB", "PUBLIC"), 900) == 900
-    assert scope_ttl(databases_scope(), 0) == 0
+def test_every_log_scope_ages_on_the_ordinary_cache_age() -> None:
+    """No scope is refreshed less often to save an expensive statement: a log
+    scope is made cheap to refresh instead (repository.plan_window)."""
+    assert due_in(100.0, 300) == 200.0
+    assert is_stale(301.0, 300)
+    assert not is_stale(299.0, 300)
 
 
-def test_scope_ttl_never_shortens_the_callers_own_ttl() -> None:
-    """PIPE_ACTIVITY's override is a floor, not a fixed value -- a caller
-    that already asks for something slower must not be sped up."""
-    generous = 30 * 86400
-    assert scope_ttl(pipe_activity_scope("MYDB", "PUBLIC"), generous) == generous
-
-
-def test_scope_ttl_extends_pipe_activitys_refresh_past_the_ordinary_cadence() -> None:
-    """13 days, one short of INFORMATION_SCHEMA.COPY_HISTORY's 14-day
-    retention -- see models.py's _TTL_OVERRIDES comment for the full
-    reasoning (the two sources must jointly cover every day with no gap)."""
-    ordinary = 900
-    effective = scope_ttl(pipe_activity_scope("MYDB", "PUBLIC"), ordinary)
-    assert effective > ordinary
-    assert effective == 13 * 86400
-
-
-def test_scope_ttl_extends_pipe_activity_historys_refresh_too() -> None:
-    """Same override, same reasoning, for the per-pipe backfill scope."""
-    ordinary = 900
-    effective = scope_ttl(
-        pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"), ordinary
-    )
-    assert effective > ordinary
-    assert effective == 13 * 86400
-
-
-def test_scope_ttl_does_not_extend_task_activitys_refresh() -> None:
-    """Deliberately not the same override as PIPE_ACTIVITY: a task can run
-    every few minutes, so this stays on the caller's ordinary cadence -- see
-    models.py's _TTL_OVERRIDES comment."""
-    ordinary = 900
-    assert scope_ttl(task_activity_scope("MYDB", "PUBLIC"), ordinary) == ordinary
-
-
-def test_scope_ttl_extends_task_activity_historys_refresh_past_the_ordinary_cadence() -> (
-    None
-):
-    """6 days, one short of INFORMATION_SCHEMA.TASK_HISTORY's 7-day
-    retention -- see models.py's _TTL_OVERRIDES comment."""
-    ordinary = 900
-    effective = scope_ttl(
-        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"), ordinary
-    )
-    assert effective > ordinary
-    assert effective == 6 * 86400
+def test_a_zero_cache_age_disables_refreshing_but_not_the_first_fetch() -> None:
+    assert due_in(100.0, 0) is None
+    assert due_in(None, 0) == 0.0
 
 
 def test_warehouses_and_roles_are_flat_scopes_like_databases() -> None:

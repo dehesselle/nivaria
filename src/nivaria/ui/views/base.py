@@ -119,7 +119,7 @@ class _ScopedView(Widget):
         """
         if scope == self._announcing:
             return False
-        if is_stale(scope, self.repo.entry(scope).age(), ttl):
+        if is_stale(self.repo.entry(scope).age(), ttl):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
             return True
         return False

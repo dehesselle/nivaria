@@ -352,7 +352,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
         a longer natural cadence is aged the same way wherever it is asked
         about.
         """
-        if is_stale(scope, self.repo.entry(scope).age(), config.get(CACHE_TTL)):
+        if is_stale(self.repo.entry(scope).age(), config.get(CACHE_TTL)):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
 
     def visible_scopes(self) -> list[Scope]:

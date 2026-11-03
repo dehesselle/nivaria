@@ -73,6 +73,32 @@ ITEM_DETAIL = "detail-item"
 HISTORY_NOTE = "detail-history-note"
 #: A single object's defining SQL.
 SQL = "detail-sql"
+#: The line above a list or history saying its rows come from ACCOUNT_USAGE
+#: and lag behind -- see `lag_note`.
+LAG_NOTE = "detail-lag-note"
+
+
+def lag_note(what: str, lag_seconds: int) -> Static:
+    """The muted line saying `what` comes from ACCOUNT_USAGE and lags.
+
+    Every refresh asks Snowflake for what is new, but ACCOUNT_USAGE itself
+    publishes a row only some time after the event, so the newest load or
+    run can be missing for a while whatever the cache age. Stated as
+    Snowflake's own "up to" figure, which is not a guarantee, so the
+    wording promises no maximum. Muted rather than a warning: it is a
+    property of the data, not a failure.
+    """
+    if lag_seconds % 3600 == 0:
+        lag = f"{lag_seconds // 3600} hours"
+    else:
+        lag = f"{lag_seconds // 60} minutes"
+    return Static(
+        Text(
+            f"{what} comes from ACCOUNT_USAGE, which Snowflake says can be up "
+            f"to {lag} behind."
+        ),
+        id=LAG_NOTE,
+    )
 
 
 def failed_refresh(entry: Entry) -> str | None:
@@ -290,8 +316,6 @@ class HistoryView(TabbedView):
         show_days: int,
         noun: str,
         sources: Sequence[tuple[Scope, int | None]],
-        *,
-        unchecked: str | None = None,
     ) -> None:
         """Say so when a history was capped rather than exhausted, when it
         settled with nothing in the display window, when its only fetch
@@ -314,11 +338,6 @@ class HistoryView(TabbedView):
         blank table under a busy indicator says nothing while that runs. So
         until every source has answered, the note says what the answered ones
         cover. One that covers the whole display window is the answer.
-
-        `unchecked` is the note for a history that nothing on the cache-age
-        cadence keeps current, so that the gap is never silent. It stands in
-        for the empty and the still-looking notes, but not for the cap, an
-        error or a failed refresh, which say more about the rows shown.
 
         Answered means fetched at least once, or failed: a background refresh
         of a cached history keeps its rows and is not waited for, so a
@@ -376,19 +395,15 @@ class HistoryView(TabbedView):
             note.update(Text(f"Could not fetch: {errored.error}"))
         elif stale is not None:
             note.update(Text(stale))
-        elif unchecked is not None:
-            note.update(Text(unchecked))
         elif empty:
             note.update(Text(f"No {noun} in the last {show_days} days."))
         elif looking:
             note.update(Text(_looking(dated, noun, covered)))
 
         failed = not capped and (error or stale is not None)
-        warned = not capped and not failed and unchecked is not None
         note.set_class(capped, "-capped")
         note.set_class(failed, "-error")
-        note.set_class(warned, "-unchecked")
-        note.display = capped or failed or warned or empty or looking
+        note.display = capped or failed or empty or looking
 
 
 def _has_rows_on_record(entry: Entry) -> bool:

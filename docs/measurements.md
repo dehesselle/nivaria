@@ -51,6 +51,23 @@ The `ACCOUNT_USAGE` window, not the row count, sets the cost: 90 days costs
 about five times 14 days with nothing to return. The `INFORMATION_SCHEMA`
 functions answer in well under a second.
 
+## ACCOUNT_USAGE windows
+
+`ACCOUNT_USAGE.COPY_HISTORY` on a production account with 21.8 million loads
+in 90 days, X-Small warehouse, median of three runs:
+
+| Statement | Busy schema (381 248 loads in 90 days) | Quiet schema (1 load) |
+| --- | --- | --- |
+| `pipe_activity`, 90 days | 31.2 s (30.2 s executing) | 7.6 s (4.9 s executing) |
+| `pipe_activity`, 2 days | 2.0 s (1.0 s executing) | 2.5 s (0.9 s executing) |
+| `pipe_activity_history`, one pipe, 90 days | 5.2 s, 5000-row cap reached | 3.4 s |
+
+Compiling took 0.7–2.7 s of each. The cost follows the time window across
+the whole account, not the schema's own loads: the quiet schema's 90 days
+cost almost four times its 2 days. This is why a log scope is fetched in full
+only once and then refreshed by window passes (see
+[DESIGN.md](DESIGN.md#window-passes)).
+
 ## Column scale
 
 `SHOW COLUMNS IN DATABASE` returned 11 511 columns for 614 tables across 25

@@ -69,10 +69,12 @@ that explains it in full.
 4. **Scopes are independent.** Each query is self-contained, so there is no
    ordering or dependency between scopes, and no deadlock surface. See
    "Scopes".
-5. **A refresh is a pass**: rows are deleted only when it finishes, a write
-   carrying a stale generation is rejected, and a failed pass never sweeps, so
-   the UI never flashes empty and yesterday's data beats none. See "The
-   freshness ledger".
+5. **A refresh is a pass, and a finished pass deletes exactly the rows it is
+   responsible for**: every row it did not rewrite for an ordinary pass, what
+   its window supersedes for a log scope's window pass. Rows are deleted only
+   when a pass finishes, a write carrying a stale generation is rejected, and
+   a failed pass never deletes, so the UI never flashes empty and yesterday's
+   data beats none. See "The freshness ledger" and "Window passes".
 6. **One cache file per (account, role)**, because `SHOW` output is filtered
    by role and the SQL carries no role. `FetchService` is stopped *before*
    `ConnectionPool.set_role` changes the role, or a worker writes the new
@@ -99,11 +101,12 @@ that explains it in full.
 13. **An update never moves the tree cursor, and a highlight only shows.**
     Revealing is for jumps from outside the tree. See "The cursor must not
     move" and "A highlight is not a jump".
-14. **Staleness is decided in one place**, `models.due_in`. The sweep and the
-    countdown reach it through `Entry.due`, the tree and the detail views
-    through `models.is_stale`, so none of them can drift apart. See "A scope
-    whose data does not age on the ordinary cadence" and "The staleness
-    sweep".
+14. **Staleness is decided in one place**, `models.due_in`, and every scope
+    ages on the same cache age. The sweep and the countdown reach it through
+    `Entry.due`, the tree and the detail views through `models.is_stale`, so
+    none of them can drift apart. A scope that is expensive to fetch in full
+    is made cheap to refresh, never refreshed less often. See "Staleness is
+    decided in one place" and "The staleness sweep".
 15. **nivaria stores no password.** The driver owns every credential. See
     "Credentials and profiles".
 16. **Modules outside the UI layer do not import Textual, and the gateway is a
@@ -292,6 +295,58 @@ that report a failed first fetch (category lists, History, Data) also report a
 failed refresh, with the time the rows on screen were fetched
 (`tables.failed_refresh`).
 
+#### Window passes
+
+The sweep above suits a source that can change in any way: a `SHOW` shows a
+dropped object only by its absence, so only a full answer can retire a row.
+The four `ACCOUNT_USAGE` scopes are different. `PIPE_ACTIVITY`,
+`PIPE_ACTIVITY_HISTORY`, `TASK_ACTIVITY` and `TASK_ACTIVITY_HISTORY` mirror
+logs of past events, and a row there does not change once it appears:
+`TASK_HISTORY` lists only finished runs (see
+[snowflake-behavior.md](snowflake-behavior.md#task-history)). Their full
+statement costs what its time window costs, not what it returns (8-31 s for
+90 days of copy history on production, about 2 s for 2 days, see
+[measurements.md](measurements.md#account_usage-windows)). So a refresh of
+one of these **log scopes** asks only for what is new: a **window pass**.
+
+`repository.plan_window` decides, from the ledger, how far back a pass asks:
+
+- A **full pass** covers the whole fetch window. It runs the first time, when
+  the ledger's `covered_from` (how far back the rows are complete, set by a
+  full pass) no longer reaches as far as the fetch window because the setting
+  was raised, after `Repository.forget_coverage`, and when the window would
+  be at least as long anyway. It is swept like any other pass.
+- A **window pass** covers the time since the last successful pass plus a
+  **lag margin**. `ACCOUNT_USAGE` publishes a row some time after its event
+  but stamps it with the event's time, and the window filters on that time.
+  A row published after the window has moved past its time would never be
+  asked for again, so each window reaches back by the margin: a multiple of
+  Snowflake's published lag (~2 h for copy history, ~45 min for task
+  history), set by the "lag margin" setting, 2x by default. A failed pass
+  leaves `fetched_at` where it was, so the next window reaches back to the
+  last success by itself.
+
+A window pass is responsible only for what its window supersedes, so
+`finish_pass` sweeps nothing it did not return. Instead it removes rows older
+than the fetch window, keeps only the newest row per pipe or task for a scope
+reduced to one (`LogShape.latest_per`), and keeps a capped history's newest
+`HISTORY_MAX_ROWS`. A window pass that hit its own cap is swept like a full
+one: its rows are then the newest overall, and keeping older ones would leave a
+gap of rows it was not allowed to return. Times are compared with sqlite's
+`julianday()`, never as text, because they are stored with the session's
+offset.
+
+Task scopes filter on `COMPLETED_TIME`, not `SCHEDULED_TIME`: a run is listed
+only once it has finished, so a five-hour run appears carrying a scheduled
+time five hours old, outside any window but the full one. Their key is
+`(SCHEDULED_TIME, ATTEMPT_NUMBER)`, not `QUERY_ID`, which is NULL for a run
+that failed before a query was submitted. NULLs never collide in a key, so an
+overlap read again would add such a run once per pass.
+
+`MainScreen.full_refresh` forgets the coverage of the log scopes on screen
+and asks for them at once, so a row the margin missed can be recovered. It
+has no key or menu item yet.
+
 The cache is an optimisation, never a dependency: if it cannot be opened the
 app still runs, it just has nothing cached. It uses WAL journalling so a
 writing worker never blocks the reading UI, and opens a connection per call
@@ -464,6 +519,9 @@ the same exception `information_schema_columns` established).
 | `COLUMN_TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` | Columns view Tags column + detail panel | warehouse |
 | `DATA_PREVIEW` | `SELECT * FROM <table or view> LIMIT n` | Table/View view Data | warehouse |
 
+The four `ACCOUNT_USAGE` scopes are log scopes, refreshed by window passes
+(see "Window passes").
+
 Two of these are second sources without being `SELECT`s:
 `MATERIALIZED_VIEW_STATS` and `GRANTS` are additional `SHOW` commands, so
 they need no warehouse and degrade the way any `SHOW` scope does. `SHOW
@@ -627,8 +685,8 @@ as quiet as before; the note only speaks during a first fetch.
 The second step is the one place nivaria reads a fact out of SQL text rather
 than a named field, and it exists because the alternative is worse. A pipe
 with no load in the fetch window has no `PIPE_ACTIVITY` row, so without the
-definition its 14-day query, the only one on the cache-age cadence, would
-never run, and nothing would notice its first load for up to 13 days.
+definition its near-real-time 14-day query would not run, and its first load
+would show only once `ACCOUNT_USAGE` published it, up to hours later.
 
 Only the start of the statement is read: `COPY INTO` and up to three
 identifier parts, tokenized by Snowflake's documented rules for unquoted and
@@ -651,11 +709,13 @@ interactive path nor the background sweep (which watches `scopes()` too) ever
 queues it. `fetch_page` still raises if `PIPE_HISTORY` is requested with no
 target: a safety net for a caller that skips the gate, not the expected path.
 
-Such a pipe is only covered by `ACCOUNT_USAGE`, and both of its scopes carry
-the 13-day TTL override, so nothing on the cache-age cadence would notice its
-first load. That gap is not silent: the note above its history says when its
-newest answer was fetched, that new loads are not checked for automatically,
-and that `F5` checks now (see "The staleness sweep").
+Such a pipe is only covered by `ACCOUNT_USAGE`. Its snapshot is refreshed on
+the cache age like everything else, and its first load gives it a target, but
+that load shows only once `ACCOUNT_USAGE` has published it. That delay is not
+silent: its History tab carries the same muted lag line as the Pipes (n)
+Activity tab and the Tasks (n) list (`tables.lag_note`), worded after
+Snowflake's "up to" figure so it promises no maximum. A pipe with a known
+target does not show it: its recent days come from `INFORMATION_SCHEMA`.
 
 A parsed target can still fail: its table may have been dropped, or the role
 may not see it. `PIPE_HISTORY` then fails with "does not exist", which
@@ -677,12 +737,9 @@ only once the snapshot has answered **with** a load for the pipe
 whether the backfill is needed, so it waits too.
 
 For such a pipe the snapshot is the history's older half, and the 14-day
-`PIPE_HISTORY` its recent half. They join without a gap while the snapshot is
-less than 14 days old, less the lag, and the snapshot's 13-day TTL keeps it
-there: the same 13/14 reasoning as `PIPE_ACTIVITY_HISTORY`'s own TTL (see
-"A scope whose data does not age on the ordinary cadence"). Once it goes
-stale, the snapshot is refetched, one schema-wide statement for every pipe in
-the schema, rather than a backfill per pipe. The note treats the snapshot as a
+`PIPE_HISTORY` its recent half. The snapshot is refreshed by a window pass on
+the cache age, so it is never more than one cache age plus `ACCOUNT_USAGE`'s
+lag behind, and the two join without a gap. The note treats the snapshot as a
 lagging source that claims nothing early, so the answer is complete once the
 14-day history has answered, a fraction of a second after the view opens.
 
@@ -703,42 +760,21 @@ of where the task lives (see
 the `ACCOUNT_USAGE` half of the merge still returns data.
 `queries.pipe_history` qualifies `COPY_HISTORY` the same way.
 
-#### A scope whose data does not age on the ordinary cadence
+#### Staleness is decided in one place
 
-`account_usage_copy_history_detail`'s backfill barely needs re-fetching at
-all: once `INFORMATION_SCHEMA.COPY_HISTORY` covers the live last-14-days
-window, the only thing a re-fetch of the `ACCOUNT_USAGE` side can surface is
-data that has freshly aged *past* that 14-day window — which only moves once
-a day. Ordinary scopes just use whatever `CACHE_TTL` the sweep passes in, but
-forcing this one onto the same cadence would repeat the same round trip every
-sweep tick for no new data.
+Every scope ages on the same `CACHE_TTL`. A scope whose full statement is
+expensive is not refreshed less often; it is made cheap to refresh instead
+(see "Window passes"). A longer cache age would save the statement, but
+everything the scope feeds would then be out of date by that much.
 
-Rather than build a new "background job that knows to skip itself" concept,
-`models.scope_ttl(scope, default)` generalizes the existing TTL check itself:
-a small `{ScopeType: float}` override table. It only ever *lengthens* the
-caller's TTL, never shortens it, so an aggressively short `CACHE_TTL` setting
-is still honoured for every scope with no override, and a first-ever fetch
-(nothing cached yet) still happens immediately regardless.
-
-`scope_ttl` is reached only through **`models.due_in(scope, age, ttl)`,
-which is the one place staleness is decided anywhere in the app.** The sweep
-and the footer countdown (`Repository.stale_scopes` and `next_due`) reach it
-through `Entry.due`, which also knows the ledger states (see "The staleness
-sweep"). The paint-time checks go through `models.is_stale`, which is `due_in`
-reaching zero: `_ScopedView.ensure` (a detail view's) and `ObjectTree._ensure`
-(the tree's). Having one function is not tidiness: separate checks drift, and a tree that
-snapshots `CACHE_TTL` at construction or skips `scope_ttl` ignores a settings
-change until restart.
-
-`PIPE_ACTIVITY_HISTORY`'s own override is 13 days, one short of
-`INFORMATION_SCHEMA.COPY_HISTORY`'s 14-day retention rather than the full 14:
-the two sources must jointly cover every day with no gap between them, and
-`ACCOUNT_USAGE`'s own ingestion lag (up to a few hours) eats into a boundary
-cut exactly at 14, so the override stays one day inside it for margin.
-`PIPE_ACTIVITY` carries the same 13-day override, and the same coverage
-argument holds for it: for a pipe with no load in it, the snapshot is the
-older half of that pipe's history (see "The pipe the snapshot shows no load
-for").
+**`models.due_in(age, ttl)` is the one place staleness is decided anywhere
+in the app.** The sweep and the footer countdown (`Repository.stale_scopes`
+and `next_due`) reach it through `Entry.due`, which also knows the ledger
+states (see "The staleness sweep"). The paint-time checks go through
+`models.is_stale`, which is `due_in` reaching zero: `_ScopedView.ensure` (a
+detail view's) and `ObjectTree._ensure` (the tree's). Having one function is
+not tidiness: separate checks drift, and a tree that snapshots `CACHE_TTL` at
+construction ignores a settings change until restart.
 
 `object_type` on a `Scope` means "this is a `SHOW` listing of one object
 type" -- or, on an object-level `GRANTS` scope, which kind of object it names
@@ -1175,8 +1211,7 @@ schema's tables cannot cause a whole-tree rebuild.
 The footer countdown makes one promise: **nothing on screen goes stale before
 it reaches zero.** "On screen" means the watched set: every scope the tree
 has materialised, collapsed or scrolled away included, plus the open detail
-view's. "Stale" is per scope, through `scope_ttl`, so pipe and task history
-age on their own longer TTLs.
+view's. Every scope ages on the same cache age.
 
 The countdown is therefore computed, not run as a timer. On every tick,
 `Repository.next_due` works out from the ledger how long until the first
@@ -1190,9 +1225,8 @@ through the ledger.
 
 `F5` is the explicit refresh, outside the sweep. It requests the scope of the
 tree node under the cursor, and every scope the detail pane reads, whatever
-their age. That is the only way to refresh a scope with a long TTL override
-before it runs out, such as a pipe whose target table cannot be resolved (see
-"Resolving a pipe's target table"). A fixed timer restarted at `CACHE_TTL` cannot keep the
+their age. A log scope's refresh is a window pass either way, so `F5` costs no
+more there than the sweep would. A fixed timer restarted at `CACHE_TTL` cannot keep the
 promise: a refresh lands a moment after the sweep that asked for it, so the
 next zero comes just before that data goes stale, skips it, and leaves it on
 screen for nearly two TTLs.
@@ -1903,15 +1937,20 @@ Detail pane's own `fr` absorbs whatever is left.
 
 ## Accepted design gaps
 
-- `PIPE_ACTIVITY` (the schema-wide latest-per-pipe snapshot the Pipes (n) list
-  reads) carries a 13-day TTL override, and `PipeListView` does not merge in
-  the near-real-time source the way `PipeView` does. The list's Loaded/Status columns can therefore be up to 13
-  days old without a refetch on a busy account. Worth revisiting if the list
-  turns out to need fresher data.
-- A pipe the `PIPE_ACTIVITY` snapshot shows no load for trusts the snapshot to
-  cover the fetch window, but the snapshot covered the window as it was set
-  when it was fetched. After the setting is raised, that pipe's older days
-  stay unread until the snapshot is refetched, at most 13 days later.
+- The Pipes (n) Activity tab, the Tasks (n) list and a pipe without a known
+  target read only `ACCOUNT_USAGE`, so they lag by however long Snowflake
+  takes to publish, up to ~2 h for copy history. The lag line says so; no
+  query can remove it.
+- A row that `ACCOUNT_USAGE` publishes later than the lag margin is never
+  asked for by a window pass. It stays missing until a full pass:
+  `MainScreen.full_refresh` exists for that but has no key yet. For a list
+  that holds each pipe's or task's latest row, it only matters if no later
+  load or run follows.
+- Rows of a dropped pipe or task stay in a log scope's cache until they age
+  out of the fetch window, since a window pass sweeps nothing it did not
+  return. The lists are driven by `SHOW`, so they do not show them, but a
+  pipe re-created under the same name resolves its target from the old row
+  until its first load.
 - The tree/Detail drag-resize does not persist across sessions, and does not
   re-clamp an already-narrow pane if the terminal is then resized smaller.
 - A single stage's own leaf node has no Object view. Deliberate, not an open

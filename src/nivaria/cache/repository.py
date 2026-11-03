@@ -15,10 +15,12 @@ safe to show while it is still running::
     repo.finish_pass(scope, generation)                    # sweep + complete
 
 Every row a pass writes is stamped with that pass's generation. Rows are only
-deleted at `finish_pass`, by sweeping whatever the pass did *not* rewrite. So
-an object that still exists is never briefly absent, and the UI never flashes
-an empty list on the way to a full one -- while a deleted object still
-disappears, exactly one pass later.
+deleted at `finish_pass`, and only those the pass is responsible for: for an
+ordinary pass, whatever it did *not* rewrite. So an object that still exists
+is never briefly absent, and the UI never flashes an empty list on the way to
+a full one -- while a deleted object still disappears, exactly one pass later.
+A window pass of a log scope asks only for what is new and deletes only what
+that supersedes -- see `plan_window` and `finish_pass`.
 
 A write carrying a stale generation is ignored, which is how a superseded job
 that is already mid-flight cannot corrupt the scope that replaced it.
@@ -26,10 +28,12 @@ that is already mid-flight cannot corrupt the scope that replaced it.
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from nivaria.cache.db import Database, MemoryDatabase
@@ -54,6 +58,29 @@ from nivaria.pipe_definition import copy_target
 
 
 @dataclass(frozen=True)
+class LogShape:
+    """How a log scope's rows are ordered in time, for a window pass.
+
+    A log scope mirrors an append-only `ACCOUNT_USAGE` view, whose rows do
+    not change once they appear, so a refresh only has to ask for what is
+    new -- see `Repository.finish_pass`. The column names are the mirror's,
+    and every comparison goes through `julianday()`: the values are ISO
+    strings carrying the session's offset, which do not sort as text.
+    """
+
+    #: The column the statement's time window filters on. Rows older than
+    #: the fetch window by this column are pruned.
+    window_time: str
+    #: The column that decides which row is newer, for `latest_per` and for
+    #: a row cap.
+    newest_by: str
+    #: For a scope reduced to one row per object (`PIPE_ACTIVITY`,
+    #: `TASK_ACTIVITY`), the columns naming that object; None for a scope
+    #: holding every row.
+    latest_per: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
 class TableSpec:
     """Which mirror table backs a scope, and which of its columns we store."""
 
@@ -61,6 +88,8 @@ class TableSpec:
     columns: tuple[str, ...]
     key: tuple[str, ...]
     order_by: tuple[str, ...]
+    #: Set for a log scope, which can be refreshed by a window pass.
+    log: LogShape | None = None
 
 
 _DATABASES = TableSpec(
@@ -286,7 +315,8 @@ _PIPE_ACTIVITY = TableSpec(
         "FIRST_ERROR_LINE_NUMBER",
     ),
     # One row per pipe (the QUALIFY in queries.pipe_activity keeps only the
-    # latest), not per historical load -- see ScopeType.PIPE_ACTIVITY.
+    # latest, and a window pass keeps only the newest per pipe), not per
+    # historical load -- see ScopeType.PIPE_ACTIVITY.
     key=(
         "PIPE_CATALOG_NAME",
         "PIPE_SCHEMA_NAME",
@@ -295,6 +325,11 @@ _PIPE_ACTIVITY = TableSpec(
         "LAST_LOAD_TIME",
     ),
     order_by=("PIPE_NAME", "LAST_LOAD_TIME"),
+    log=LogShape(
+        window_time="LAST_LOAD_TIME",
+        newest_by="LAST_LOAD_TIME",
+        latest_per=("PIPE_NAME",),
+    ),
 )
 
 _PIPE_ACTIVITY_HISTORY = TableSpec(
@@ -318,6 +353,7 @@ _PIPE_ACTIVITY_HISTORY = TableSpec(
     # _scope disambiguates by pipe -- same reasoning as _PIPE_HISTORY below.
     key=("_scope", "FILE_NAME", "LAST_LOAD_TIME"),
     order_by=("LAST_LOAD_TIME",),
+    log=LogShape(window_time="LAST_LOAD_TIME", newest_by="LAST_LOAD_TIME"),
 )
 
 _PIPE_HISTORY = TableSpec(
@@ -354,6 +390,7 @@ _TASK_ACTIVITY = TableSpec(
         "SCHEMA_NAME",
         "QUERY_ID",
         "SCHEDULED_TIME",
+        "ATTEMPT_NUMBER",
         "QUERY_START_TIME",
         "COMPLETED_TIME",
         "STATE",
@@ -361,9 +398,19 @@ _TASK_ACTIVITY = TableSpec(
         "ERROR_MESSAGE",
     ),
     # One row per task (the QUALIFY in queries.task_activity keeps only the
-    # latest), not per historical run -- see ScopeType.TASK_ACTIVITY.
-    key=("DATABASE_NAME", "SCHEMA_NAME", "NAME", "QUERY_ID"),
+    # latest, and a window pass keeps only the newest per task), not per
+    # historical run -- see ScopeType.TASK_ACTIVITY. Not keyed by QUERY_ID,
+    # which can be NULL -- see schema.sql.
+    key=("DATABASE_NAME", "SCHEMA_NAME", "NAME", "SCHEDULED_TIME", "ATTEMPT_NUMBER"),
     order_by=("NAME", "SCHEDULED_TIME"),
+    # Windowed by COMPLETED_TIME: ACCOUNT_USAGE lists a run only once it has
+    # finished, so a long run appears carrying a SCHEDULED_TIME from hours
+    # before -- see queries.task_activity.
+    log=LogShape(
+        window_time="COMPLETED_TIME",
+        newest_by="SCHEDULED_TIME",
+        latest_per=("NAME",),
+    ),
 )
 
 _TASK_ACTIVITY_HISTORY = TableSpec(
@@ -374,6 +421,7 @@ _TASK_ACTIVITY_HISTORY = TableSpec(
         "SCHEMA_NAME",
         "QUERY_ID",
         "SCHEDULED_TIME",
+        "ATTEMPT_NUMBER",
         "QUERY_START_TIME",
         "COMPLETED_TIME",
         "STATE",
@@ -381,8 +429,10 @@ _TASK_ACTIVITY_HISTORY = TableSpec(
         "ERROR_MESSAGE",
     ),
     # _scope disambiguates by task -- same reasoning as _TASK_HISTORY below.
-    key=("_scope", "QUERY_ID"),
+    # Not QUERY_ID, which can be NULL -- see _TASK_ACTIVITY.
+    key=("_scope", "SCHEDULED_TIME", "ATTEMPT_NUMBER"),
     order_by=("SCHEDULED_TIME",),
+    log=LogShape(window_time="COMPLETED_TIME", newest_by="SCHEDULED_TIME"),
 )
 
 _TASK_HISTORY = TableSpec(
@@ -524,11 +574,14 @@ class Entry:
     truncated: bool = False
     #: When the latest pass began, finished or not. See `due`.
     attempted_at: float | None = None
+    #: A log scope's coverage: the epoch back to which its rows are complete,
+    #: or None before a full pass. See `plan_window`.
+    covered_from: float | None = None
 
     def age(self, now: float | None = None) -> float | None:
         return _since(self.fetched_at, now)
 
-    def due(self, scope: Scope, ttl: float, now: float | None = None) -> float | None:
+    def due(self, ttl: float, now: float | None = None) -> float | None:
         """Seconds until a background refresh is due for this entry's scope.
 
         The one answer the sweep and the countdown both read, so they cannot
@@ -545,14 +598,71 @@ class Entry:
         if self.state is CacheState.EMPTY:
             return 0.0
         if self.state is CacheState.ERROR:
-            return due_in(scope, _since(self.attempted_at, now), ttl)
-        return due_in(scope, self.age(now), ttl)
+            return due_in(_since(self.attempted_at, now), ttl)
+        return due_in(self.age(now), ttl)
 
 
 def _since(moment: float | None, now: float | None) -> float | None:
     if moment is None:
         return None
     return max(0.0, (now if now is not None else time.time()) - moment)
+
+
+@dataclass(frozen=True)
+class Window:
+    """How far back one pass of a log scope asks -- see `plan_window`."""
+
+    #: Seconds back from when the statement is sent.
+    seconds: int
+    #: Whether that is the whole fetch window: a full pass, which replaces
+    #: the scope's rows. Otherwise a window pass, which adds to them.
+    full: bool
+
+
+@dataclass(frozen=True)
+class Prune:
+    """What a window pass removes when it finishes -- see `finish_pass`."""
+
+    #: The epoch before which a row is outside the fetch window.
+    cutoff: float
+    #: The scope's row cap, or None for a scope without one.
+    max_rows: int | None = None
+
+
+def plan_window(entry: Entry, fetch_seconds: int, margin: float, now: float) -> Window:
+    """The window the next pass of a log scope should ask for.
+
+    A log scope's rows are past events that do not change once they appear,
+    so a refresh only needs what is newer than the last one. It starts
+    `margin` before the last successful pass, because ACCOUNT_USAGE
+    publishes a row some time after the event it records, stamped with the
+    event's time: a row that was not there yet then would otherwise fall
+    before the window for good.
+
+    A full pass instead when nothing says the stored rows reach back as far
+    as the fetch window: never fetched, coverage forgotten
+    (`Repository.forget_coverage`), or a fetch window raised since. Also
+    when the window would be at least as long as the fetch window anyway.
+    A failed pass leaves `fetched_at` where it was, so the next window
+    reaches back to the last success on its own.
+    """
+    full = Window(seconds=fetch_seconds, full=True)
+    if (
+        entry.state is CacheState.EMPTY
+        or entry.fetched_at is None
+        or entry.covered_from is None
+        or entry.covered_from > now - fetch_seconds
+    ):
+        return full
+    back = math.ceil(now - entry.fetched_at + margin)
+    if back >= fetch_seconds:
+        return full
+    return Window(seconds=back, full=False)
+
+
+def _julian(epoch: float) -> str:
+    """An epoch as text `julianday()` reads, for comparing stored times."""
+    return datetime.fromtimestamp(epoch, UTC).isoformat(sep=" ")
 
 
 MISSING = Entry(
@@ -634,6 +744,7 @@ class Repository:
             error=row["error"],
             truncated=bool(row["truncated"]),
             attempted_at=row["attempted_at"],
+            covered_from=row["covered_from"],
         )
 
     def _select(
@@ -931,7 +1042,7 @@ class Repository:
         return [
             scope
             for scope, entry in self._entries(among)
-            if (due := entry.due(scope, ttl, now)) is not None and due <= 0
+            if (due := entry.due(ttl, now)) is not None and due <= 0
         ]
 
     def next_due(self, ttl: float, among: Iterable[Scope]) -> float | None:
@@ -944,7 +1055,7 @@ class Repository:
         if ttl <= 0:
             return None
         now = time.time()
-        due = [entry.due(scope, ttl, now) for scope, entry in self._entries(among)]
+        due = [entry.due(ttl, now) for _, entry in self._entries(among)]
         return min((d for d in due if d is not None), default=None)
 
     def failed_scopes(self, among: Iterable[Scope]) -> list[Scope]:
@@ -1068,15 +1179,43 @@ class Repository:
         )
 
     def finish_pass(
-        self, scope: Scope, generation: int, *, truncated: bool = False
+        self,
+        scope: Scope,
+        generation: int,
+        *,
+        truncated: bool = False,
+        covered_from: float | None = None,
+        prune: Prune | None = None,
     ) -> bool:
-        """Sweep rows this pass did not rewrite and mark the scope complete.
+        """Delete the rows this pass is responsible for, and mark the scope
+        complete.
+
+        A full pass is responsible for the whole scope, so every row it did
+        not rewrite is swept. A window pass (`prune` set, for a log scope) is
+        responsible only for what its window supersedes, because its
+        statement asked only for what is new: nothing it did not return is
+        swept. Instead, rows older than the fetch window go, a scope reduced
+        to one row per object keeps only the newest per object, and a capped
+        one keeps only its newest `max_rows`. Rows still never disappear
+        before this point, and a failed pass still deletes nothing.
+
+        A window pass that hit its own cap is swept like a full one. The
+        newest rows in its window are then the newest rows overall, which is
+        exactly what a full pass would have kept, and keeping older rows
+        would leave a hole between them.
 
         `truncated` records that the statement behind this pass hit its own
         row cap. The pass is still a complete, swept, COMPLETE one -- the
         rows written are the newest and entirely valid -- so this is not an
         error state; it is the difference between 'this is the history' and
-        'this is as much of the history as was asked for'.
+        'this is as much of the history as was asked for'. A window pass
+        that leaves its scope holding the cap's worth of rows says so too,
+        on the same reasoning as `jobs._capped`.
+
+        `covered_from` is a full pass's coverage, stored for `plan_window`.
+        None leaves the stored value alone, so a window pass keeps the
+        coverage it extended, and a `forget_coverage` that landed while it
+        ran still holds.
 
         The rows count as fetched when the pass began, not now. Its first
         page is that old, and stamping the end would let a long pass's oldest
@@ -1088,23 +1227,77 @@ class Repository:
         with self._store(scope).connect() as connection:
             if self._entry(connection, scope).generation != generation:
                 return False
-            connection.execute(sweep, (scope.key, generation))
+            if prune is None or truncated:
+                connection.execute(sweep, (scope.key, generation))
+            else:
+                self._prune(connection, spec, scope, prune)
             count = connection.execute(count_rows, (scope.key,)).fetchone()["n"]
+            if prune is not None and prune.max_rows is not None:
+                truncated = truncated or count >= prune.max_rows
             connection.execute(
                 """
                 UPDATE cache_entry
                    SET state = ?, fetched_at = attempted_at, next_cursor = NULL,
-                       row_count = ?, error = NULL, truncated = ?
+                       row_count = ?, error = NULL, truncated = ?,
+                       covered_from = COALESCE(?, covered_from)
                  WHERE scope = ?
                 """,
                 (
                     CacheState.COMPLETE.value,
                     count,
                     int(truncated),
+                    covered_from,
                     scope.key,
                 ),
             )
         return True
+
+    @staticmethod
+    def _prune(
+        connection: sqlite3.Connection, spec: TableSpec, scope: Scope, prune: Prune
+    ) -> None:
+        """What a window pass deletes instead of a sweep -- see `finish_pass`."""
+        assert spec.log is not None, f"{scope.type} is not a log scope"
+        window_time = _quote(spec.log.window_time)
+        # A tie goes to the row written last.
+        newest = f"julianday({_quote(spec.log.newest_by)}) DESC, rowid DESC"
+        connection.execute(
+            f"DELETE FROM {spec.name} "
+            f"WHERE _scope = ? AND julianday({window_time}) < julianday(?)",
+            (scope.key, _julian(prune.cutoff)),
+        )
+        if spec.log.latest_per is not None:
+            group = ", ".join(_quote(column) for column in spec.log.latest_per)
+            connection.execute(
+                f"DELETE FROM {spec.name} WHERE _scope = ? AND rowid NOT IN ("
+                "SELECT rowid FROM ("
+                f"SELECT rowid, ROW_NUMBER() OVER (PARTITION BY {group} "
+                f"ORDER BY {newest}) AS n FROM {spec.name} WHERE _scope = ?"
+                ") WHERE n = 1)",
+                (scope.key, scope.key),
+            )
+        if prune.max_rows is not None:
+            connection.execute(
+                f"DELETE FROM {spec.name} WHERE _scope = ? AND rowid NOT IN ("
+                f"SELECT rowid FROM {spec.name} WHERE _scope = ? "
+                f"ORDER BY {newest} LIMIT ?)",
+                (scope.key, scope.key, prune.max_rows),
+            )
+
+    def forget_coverage(self, scope: Scope) -> None:
+        """Make the next pass of a log scope a full one.
+
+        The escape hatch for a window pass that missed a row: one that
+        ACCOUNT_USAGE published later than the lag margin, which no later
+        window asks for again. The rows stay on screen until that full pass
+        replaces them. Cleared before the pass rather than requested with it,
+        so a full pass that fails is retried as a full pass too.
+        """
+        with self._store(scope).connect() as connection:
+            connection.execute(
+                "UPDATE cache_entry SET covered_from = NULL WHERE scope = ?",
+                (scope.key,),
+            )
 
     def replace_grouped(
         self,

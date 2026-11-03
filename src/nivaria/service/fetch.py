@@ -29,7 +29,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from nivaria.cache.repository import Repository
+from nivaria.cache.repository import Prune, Repository, plan_window
 from nivaria.gateway.gateway import SnowflakeGateway, is_missing_object
 from nivaria.models import (
     ObjectType,
@@ -45,6 +45,7 @@ from nivaria.service.jobs import (
     Priority,
     fetch_database,
     fetch_page,
+    log_policy,
 )
 from nivaria.settings import MAX_PAGES_PER_PASS, config
 
@@ -219,7 +220,28 @@ class FetchService:
         # Never let an unattended sweep open a new authenticated session --
         # see ConnectionPool.acquire.
         allow_reconnect = job.priority is not Priority.BACKGROUND
+        # A log scope asks only for what is new since its last pass, unless
+        # its ledger says a full pass is due -- see repository.plan_window.
+        # Planned from the entry as it stands before this pass claims it.
+        policy = log_policy(scope)
+        window = None
+        finish: dict[str, Any] = {}
         try:
+            if policy is not None:
+                started = time.time()
+                window = plan_window(
+                    self._repo.entry(scope),
+                    policy.fetch_seconds,
+                    policy.margin,
+                    started,
+                )
+                if window.full:
+                    finish["covered_from"] = started - policy.fetch_seconds
+                else:
+                    finish["prune"] = Prune(
+                        cutoff=started - policy.fetch_seconds,
+                        max_rows=policy.max_rows,
+                    )
             if generation == 0:
                 generation = self._repo.begin_pass(scope)
             pipe_target = None
@@ -250,6 +272,7 @@ class FetchService:
                 allow_reconnect=allow_reconnect,
                 pipe_target=pipe_target,
                 pipe_names=pipe_names,
+                window_seconds=window.seconds if window is not None else None,
             )
         # A worker thread boundary: the driver, the network and sqlite all
         # raise unrelated exception types, and any escape here would kill the
@@ -266,7 +289,9 @@ class FetchService:
             return
 
         if cursor is None:
-            self._repo.finish_pass(scope, generation, truncated=page.truncated)
+            self._repo.finish_pass(
+                scope, generation, truncated=page.truncated, **finish
+            )
             self._announce(scope, complete=True)
             return
 

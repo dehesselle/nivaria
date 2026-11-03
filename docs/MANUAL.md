@@ -195,10 +195,15 @@ A stage has no view of its own; the stage list shows everything about it.
   sources. A failed load or run shows its error below the table. A note above
   says when the history was capped. While the slower, older source is still
   being read the first time, the note says what is known so far, such as "No
-  run history in the last 7 days. Still looking...". A pipe's recent loads are read through its target table. When the table is
-  not known from a load and the pipe's definition does not name it in full
-  (`database.schema.table`), new loads are not checked for automatically; the
-  note says so, and `F5` checks now.
+  run history in the last 7 days. Still looking...". A pipe's recent loads are
+  read through its target table. When the table is not known from a load and
+  the pipe's definition does not name it in full (`database.schema.table`),
+  only `ACCOUNT_USAGE` is read, and a line above the history says it can be up
+  to 2 hours behind.
+- **Activity** (Pipe list) shows each pipe's latest load. It comes from
+  `ACCOUNT_USAGE`, which Snowflake says can be up to 2 hours behind, and a
+  line above the table says so. The Task list's last-run columns come from
+  there too (up to 45 minutes behind) and carry the same line.
 - **Status** (Pipe list) shows each pipe's `invalid_reason` and the
   execution state Snowflake reports for it (`RUNNING`, `PAUSED`,
   `STOPPED_...`). The state is read, 50 pipes at a time, only while this tab
@@ -243,6 +248,7 @@ role switch.
 | task history fetch window (days) | 90 | Days of task run history fetched and cached. |
 | task history display window (days) | 90 | Days of it shown in the Task view. |
 | history row cap | 5000 | Most rows one history statement returns; the newest are kept. |
+| ACCOUNT_USAGE lag margin (x published lag) | 2 | How far back each refresh of pipe and task activity reaches before the previous one, as a multiple of Snowflake's published lag (2 hours for loads, 45 minutes for task runs): 2, 3 or 4. A load or run Snowflake publishes later than that is not picked up. |
 | data preview rows | 100 | Rows the Data tab fetches. |
 | data preview timeout (seconds) | 15 | How long a Data tab query may run before it is cancelled. `0` means no limit. |
 | max pages per refresh | 50 | Pages one refresh may fetch before it gives up with an error. |

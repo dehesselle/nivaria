@@ -93,10 +93,12 @@ class ScopeType(StrEnum):
     #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
     #: instance of the dual-source pattern TABLE_STATS established (see
     #: docs/DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
-    #: its own mirror table. Its own data barely changes on the ordinary CACHE_TTL cadence, so it carries a much
-    #: longer effective TTL -- see `scope_ttl` below. Reduced to one row per
-    #: pipe in SQL (see queries.pipe_activity) -- a single pipe's own full
-    #: history is PIPE_ACTIVITY_HISTORY below, not this scope.
+    #: its own mirror table. A log scope: after its first full pass, each
+    #: refresh asks only for what is new (`repository.plan_window`), which is
+    #: what makes the ordinary cache age affordable for a statement whose full
+    #: form takes seconds. Reduced to one row per pipe in SQL (see
+    #: queries.pipe_activity) -- a single pipe's own full history is
+    #: PIPE_ACTIVITY_HISTORY below, not this scope.
     PIPE_ACTIVITY = "pipe_activity"
     #: One pipe's full ACCOUNT_USAGE.COPY_HISTORY backfill (bounded by the
     #: "pipe history fetch window" setting, same as PIPE_ACTIVITY), scoped to
@@ -123,11 +125,8 @@ class ScopeType(StrEnum):
     #: against a different ACCOUNT_USAGE view. Scoped to (database, schema)
     #: like PIPE_ACTIVITY, but backed by its own mirror table.
     #: Reduced to one row per task in SQL (see queries.task_activity) -- a
-    #: single task's own full run history is TASK_ACTIVITY_HISTORY below.
-    #: Unlike PIPE_ACTIVITY, this carries no TTL override (see scope_ttl
-    #: below): a task can run every few minutes, so a multi-day-stale "last
-    #: run" column here would be actively misleading, not just questionable
-    #: the way PIPE_ACTIVITY's own inherited override already admits it is.
+    #: single task's own full run history is TASK_ACTIVITY_HISTORY below. A
+    #: log scope, like PIPE_ACTIVITY.
     TASK_ACTIVITY = "task_activity"
     #: One task's full ACCOUNT_USAGE.TASK_HISTORY backfill (bounded by the
     #: "task history fetch window" setting, same as TASK_ACTIVITY), scoped to
@@ -476,52 +475,17 @@ def containing_scopes(scope: Scope) -> list[Scope]:
             ]
 
 
-#: Refresh cadence, in seconds, for a scope whose own data does not change on
-#: the ordinary CACHE_TTL cadence -- see ScopeType.PIPE_ACTIVITY's comment. A
-#: plain constant, not a Setting: it is a correctness bound, not a
-#: preference. 13 days, one short of INFORMATION_SCHEMA.COPY_HISTORY's 14-day
-#: retention limit (`gateway.queries.PIPE_HISTORY_RETENTION_DAYS`) -- the two
-#: sources must jointly cover every day with no gap between them, and
-#: ACCOUNT_USAGE's own ingestion lag (up to a few hours) eats into a boundary
-#: cut exactly at 14, so this stays one day inside it.
-_TTL_OVERRIDES: dict[ScopeType, float] = {
-    ScopeType.PIPE_ACTIVITY: 13 * 86400,
-    ScopeType.PIPE_ACTIVITY_HISTORY: 13 * 86400,
-    # 6 days, one short of INFORMATION_SCHEMA.TASK_HISTORY's 7-day retention
-    # (`gateway.queries.TASK_HISTORY_RETENTION_DAYS`) -- same margin reasoning
-    # as PIPE_ACTIVITY_HISTORY's 13/14 pair above. TASK_ACTIVITY deliberately
-    # carries no override -- see its own comment on ScopeType.TASK_ACTIVITY.
-    ScopeType.TASK_ACTIVITY_HISTORY: 6 * 86400,
-}
-
-
-def scope_ttl(scope: Scope, default: float) -> float:
-    """The TTL that actually governs `scope`'s staleness.
-
-    Almost every scope just uses the caller's TTL (the CACHE_TTL setting).
-    The rare exception is a scope type in `_TTL_OVERRIDES`, whose own data
-    does not change on that cadence -- refreshing it that often would just
-    repeat the same round trip for no new data. Never faster than the
-    caller's own default, only ever slower -- an aggressive default TTL is
-    still honoured for every scope that has no override.
-
-    Reached only through `due_in` below, which is the single decision
-    every staleness check in the app goes through, so the override applies
-    uniformly regardless of which path is asking.
-    """
-    override = _TTL_OVERRIDES.get(scope.type)
-    if override is None:
-        return default
-    return max(default, override)
-
-
-def due_in(scope: Scope, age: float | None, ttl: float) -> float | None:
+def due_in(age: float | None, ttl: float) -> float | None:
     """Seconds until cached rows `age` seconds old are due a refetch.
 
     Zero or less once they are, and None when they never will be because a
     `ttl` of 0 disables *re*-freshing. Never fetched (`age is None`) is due
     now, whatever the `ttl`: that only ever disables refreshing, never the
     first fetch.
+
+    Every scope ages on the same `ttl`. One that is expensive to fetch in
+    full is made cheap to refresh instead, never refreshed less often --
+    see `repository.plan_window`.
 
     The sweep and the footer countdown read this through `Entry.due`, the
     paint-time checks through `is_stale`, so they always agree.
@@ -530,19 +494,19 @@ def due_in(scope: Scope, age: float | None, ttl: float) -> float | None:
         return 0.0
     if ttl <= 0:
         return None
-    return scope_ttl(scope, ttl) - age
+    return ttl - age
 
 
-def is_stale(scope: Scope, age: float | None, ttl: float) -> bool:
+def is_stale(age: float | None, ttl: float) -> bool:
     """Whether cached rows `age` seconds old are due a refetch.
 
     The yes/no form of `due_in`, for the paint-time checks:
     `_ScopedView.ensure` (a detail view's) and `ObjectTree._ensure` (the
     tree's). They drifted apart once already -- the tree was checking a TTL
-    snapshotted at construction and skipping `scope_ttl` entirely -- which is
-    why the decision lives in `due_in` rather than being written out in each.
+    snapshotted at construction -- which is why the decision lives in
+    `due_in` rather than being written out in each.
     """
-    remaining = due_in(scope, age, ttl)
+    remaining = due_in(age, ttl)
     return remaining is not None and remaining <= 0
 
 

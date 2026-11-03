@@ -474,11 +474,11 @@ class FakeGateway:
         self,
         database: str,
         schema: str,
-        fetch_days: int,
+        window_seconds: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
-        self.calls.append(("pipe_activity", (database, schema, fetch_days)))
+        self.calls.append(("pipe_activity", (database, schema, window_seconds)))
         if self.raise_on_pipe_activity:
             raise RuntimeError(
                 "SQL access control error: Insufficient privileges to "
@@ -491,13 +491,13 @@ class FakeGateway:
         database: str,
         schema: str,
         pipe: str,
-        fetch_days: int,
+        window_seconds: int,
         max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         key = (database, schema, pipe)
-        self.calls.append(("pipe_activity_history", (*key, fetch_days, max_rows)))
+        self.calls.append(("pipe_activity_history", (*key, window_seconds, max_rows)))
         if self.raise_on_pipe_activity_history:
             raise RuntimeError(
                 "SQL access control error: Insufficient privileges to "
@@ -549,11 +549,11 @@ class FakeGateway:
         self,
         database: str,
         schema: str,
-        fetch_days: int,
+        window_seconds: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
-        self.calls.append(("task_activity", (database, schema, fetch_days)))
+        self.calls.append(("task_activity", (database, schema, window_seconds)))
         if self.raise_on_task_activity:
             raise RuntimeError(
                 "SQL access control error: Insufficient privileges to "
@@ -566,13 +566,13 @@ class FakeGateway:
         database: str,
         schema: str,
         task: str,
-        fetch_days: int,
+        window_seconds: int,
         max_rows: int,
         *,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         key = (database, schema, task)
-        self.calls.append(("task_activity_history", (*key, fetch_days, max_rows)))
+        self.calls.append(("task_activity_history", (*key, window_seconds, max_rows)))
         if self.raise_on_task_activity_history:
             raise RuntimeError(
                 "SQL access control error: Insufficient privileges to "

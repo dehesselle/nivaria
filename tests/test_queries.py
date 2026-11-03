@@ -159,14 +159,14 @@ def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() ->
     result to one row per pipe: the list only ever wants each pipe's latest
     load, and a single pipe's full history is pipe_activity_history instead
     (see repository._PIPE_ACTIVITY / _PIPE_ACTIVITY_HISTORY)."""
-    assert queries.pipe_activity(90) == (
+    assert queries.pipe_activity(14_400) == (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
         "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, TABLE_CATALOG_NAME, "
         "TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s "
-        "AND LAST_LOAD_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "AND LAST_LOAD_TIME >= DATEADD('second', -14400, CURRENT_TIMESTAMP()) "
         "QUALIFY ROW_NUMBER() OVER (PARTITION BY PIPE_NAME ORDER BY LAST_LOAD_TIME DESC) = 1"
     )
 
@@ -174,15 +174,17 @@ def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() ->
 def test_pipe_activity_history_targets_one_pipe_with_bound_params() -> None:
     """The per-pipe backfill for a single pipe's detail view: same source and
     window as pipe_activity, but filtered to one PIPE_NAME instead of
-    QUALIFY-reduced, since it needs the full history, not just the latest."""
-    assert queries.pipe_activity_history(90, 5000) == (
+    QUALIFY-reduced, since it needs the full history, not just the latest.
+    The window counts seconds back from Snowflake's own clock, so a window
+    pass of a few hours and a full 90-day pass are the same statement."""
+    assert queries.pipe_activity_history(14_400, 5000) == (
         "SELECT PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, "
         "FILE_SIZE, ROW_COUNT, STATUS, LAST_LOAD_TIME, PIPE_RECEIVED_TIME, "
         "TABLE_CATALOG_NAME, TABLE_SCHEMA_NAME, TABLE_NAME, FIRST_ERROR_MESSAGE, "
         "FIRST_ERROR_LINE_NUMBER "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY "
         "WHERE PIPE_CATALOG_NAME = %s AND PIPE_SCHEMA_NAME = %s AND PIPE_NAME = %s "
-        "AND LAST_LOAD_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "AND LAST_LOAD_TIME >= DATEADD('second', -14400, CURRENT_TIMESTAMP()) "
         "ORDER BY LAST_LOAD_TIME DESC LIMIT 5000"
     )
 
@@ -221,13 +223,16 @@ def test_pipe_status_names_each_pipe_as_a_quoted_constant() -> None:
 def test_task_activity_targets_account_usage_task_history_with_bound_params() -> None:
     """Same shape as pipe_activity, against ACCOUNT_USAGE.TASK_HISTORY
     instead: DATABASE_NAME/SCHEMA_NAME bind as ordinary params, QUALIFY
-    collapses the result to each task's latest run."""
-    assert queries.task_activity(90) == (
+    collapses the result to each task's latest run. The window is on
+    COMPLETED_TIME, because a run is published only once it has finished,
+    while "latest" stays by SCHEDULED_TIME."""
+    assert queries.task_activity(5400) == (
         "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
-        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "ATTEMPT_NUMBER, QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, "
+        "ERROR_MESSAGE "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
         "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s "
-        "AND SCHEDULED_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "AND COMPLETED_TIME >= DATEADD('second', -5400, CURRENT_TIMESTAMP()) "
         "QUALIFY ROW_NUMBER() OVER (PARTITION BY NAME ORDER BY SCHEDULED_TIME DESC) = 1"
     )
 
@@ -235,12 +240,13 @@ def test_task_activity_targets_account_usage_task_history_with_bound_params() ->
 def test_task_activity_history_targets_one_task_with_bound_params() -> None:
     """The per-task backfill: same source and window as task_activity, but
     filtered to one NAME instead of QUALIFY-reduced."""
-    assert queries.task_activity_history(90, 5000) == (
+    assert queries.task_activity_history(5400, 5000) == (
         "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, QUERY_ID, SCHEDULED_TIME, "
-        "QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, ERROR_MESSAGE "
+        "ATTEMPT_NUMBER, QUERY_START_TIME, COMPLETED_TIME, STATE, ERROR_CODE, "
+        "ERROR_MESSAGE "
         "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
         "WHERE DATABASE_NAME = %s AND SCHEMA_NAME = %s AND NAME = %s "
-        "AND SCHEDULED_TIME >= DATEADD('day', -90, CURRENT_TIMESTAMP()) "
+        "AND COMPLETED_TIME >= DATEADD('second', -5400, CURRENT_TIMESTAMP()) "
         "ORDER BY SCHEDULED_TIME DESC LIMIT 5000"
     )
 

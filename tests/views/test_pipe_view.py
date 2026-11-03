@@ -591,8 +591,8 @@ async def test_a_pipe_the_snapshot_saw_loading_asks_for_its_backfill(repo) -> No
 
 
 async def test_an_idle_pipe_is_answered_once_its_14_day_history_is(repo) -> None:
-    """The snapshot covers the window up to its fetch, at most 13 days ago,
-    and the 14-day history from there to now."""
+    """The snapshot covers the window up to its last refresh, at most one cache
+    age ago, and the 14-day history from there to now."""
     ref = put_pipe(repo, "LOAD_ORDERS", definition=_QUALIFIED)
     put_pipe_activity(repo, "LOAD_OTHER")
     load(repo, pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"), [])
@@ -691,45 +691,45 @@ async def test_a_never_loaded_pipe_answers_from_its_14_day_history_first(
         )
 
 
-async def test_a_pipe_without_a_readable_target_says_it_is_not_checked(
-    repo,
-) -> None:
-    """Nothing on the cache-age cadence watches such a pipe, and that gap
-    must not be silent."""
+def _lag_banner(app) -> str | None:
+    banner = app.query_one("#detail-lag-note", Static)
+    return str(banner.render()) if banner.display else None
+
+
+async def test_a_pipe_without_a_known_target_shows_the_lag_banner(repo) -> None:
+    """Only ACCOUNT_USAGE speaks for such a pipe, so its newest load can be
+    missing for a while; the wording quotes Snowflake's figure without
+    promising a maximum."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     put_pipe_activity(repo, "LOAD_OTHER")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
-        note = _note(app)
-        assert note is not None
-        assert note.has_class("-unchecked")
-        text = str(note.render())
-        assert text.startswith("No load activity in the last 90 days as of ")
-        assert text.endswith(
-            "This pipe's target table can't be read from its definition, so "
-            "new loads are not checked for automatically. Press F5 to check now."
+        assert _lag_banner(app) == (
+            "Load activity comes from ACCOUNT_USAGE, which Snowflake says can "
+            "be up to 2 hours behind."
         )
+        note = _note(app)
+        assert note is not None
+        assert str(note.render()) == "No load activity in the last 90 days."
 
 
-async def test_the_unchecked_note_shows_while_the_snapshot_is_refreshed(
-    repo,
-) -> None:
-    ref = put_pipe(repo, "LOAD_ORDERS")
-    put_pipe_activity(repo, "LOAD_OTHER")
-    repo.begin_pass(pipe_activity_scope("MYDB", "PUBLIC"))
+async def test_a_pipe_with_a_known_target_shows_no_lag_banner(repo) -> None:
+    """Its recent days come from INFORMATION_SCHEMA, near real time."""
+    ref = put_pipe(repo, "LOAD_ORDERS", definition=_QUALIFIED)
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
-        note = _note(app)
-        assert note is not None
-        assert "Press F5 to check now." in str(note.render())
+        assert _lag_banner(app) is None
 
 
-async def test_an_unchecked_pipe_with_rows_says_when_they_are_from(repo) -> None:
-    """A load whose row names no target table leaves the target unknown."""
+async def test_a_pipe_whose_load_names_no_target_still_shows_its_history(
+    repo,
+) -> None:
+    """A load whose row names no target table leaves the target unknown, so
+    the backfill alone shows the history, under the lag banner."""
     ref = put_pipe(repo, "LOAD_ORDERS")
     put_pipe_activity(repo, "LOAD_ORDERS", TABLE_NAME=None)
     put_pipe_activity_history(repo, "LOAD_ORDERS", LAST_LOAD_TIME=_days_ago(1))
@@ -737,6 +737,5 @@ async def test_an_unchecked_pipe_with_rows_says_when_they_are_from(repo) -> None
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
-        note = _note(app)
-        assert note is not None
-        assert str(note.render()).startswith("Shown as of ")
+        assert app.query_one(PipeView).query_one(DataTable).row_count == 1
+        assert _lag_banner(app) is not None

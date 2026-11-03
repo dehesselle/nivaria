@@ -49,7 +49,7 @@ from nivaria.models import (
 )
 from nivaria.profiles import ProfileStore
 from nivaria.service.fetch import FetchService
-from nivaria.service.jobs import Priority
+from nivaria.service.jobs import Priority, log_policy
 from nivaria.settings import CACHE_TTL, SNOWSIGHT_URL, config
 from nivaria.snowsight import base_url, database_url, object_url, schema_url
 from nivaria.ui.messages import (
@@ -656,10 +656,10 @@ class MainScreen(Screen):
         """Explicitly refresh whatever the cursor is on, and what the detail
         pane shows for it.
 
-        The detail pane's scopes are asked for whatever their age. The sweep
-        leaves a scope with a long TTL override alone for days -- a pipe the
-        PIPE_ACTIVITY snapshot shows no load for is not checked again for
-        up to 13 days -- and F5 is how to check now.
+        The detail pane's scopes are asked for whatever their age. A log
+        scope's refresh is a window pass like any other (see
+        `repository.plan_window`), so this costs no more there than the
+        sweep's own refresh would.
         """
         for scope in self.detail.scopes():
             self._request(_requestable(scope), Priority.INTERACTIVE)
@@ -672,6 +672,22 @@ class MainScreen(Screen):
         if scope is None:
             scope = databases_scope() if not self.databases else None
         if scope is not None:
+            self._request(scope, Priority.INTERACTIVE)
+
+    def full_refresh(self) -> None:
+        """Refetch the detail pane's log scopes in full, ignoring what they
+        already cover.
+
+        The escape hatch for a window pass that missed a row: one Snowflake
+        published later than the lag margin, which no later window asks for
+        again. Each scope's coverage is forgotten first, so its next pass is
+        a full one, then they are asked for now. Deliberately bound to no key
+        and no menu yet; the UI that offers it is still to come.
+        """
+        for scope in self.detail.scopes():
+            if log_policy(scope) is None:
+                continue
+            self.repo.forget_coverage(scope)
             self._request(scope, Priority.INTERACTIVE)
 
     def action_open_in_snowsight(self) -> None:

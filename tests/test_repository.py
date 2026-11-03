@@ -5,11 +5,12 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from nivaria.cache.db import Database
-from nivaria.cache.repository import Repository
+from nivaria.cache.repository import Entry, Prune, Repository, Window, plan_window
 from nivaria.models import (
     CacheState,
     ObjectType,
@@ -403,43 +404,21 @@ def test_only_the_scopes_offered_are_considered(repo) -> None:
     assert unwatched not in repo.stale_scopes(900, [watched])
 
 
-def test_pipe_activitys_ttl_override_outlasts_the_ordinary_sweep_interval(repo) -> None:
-    """An ordinary scope this old is stale at a 0.01s ttl; PIPE_ACTIVITY's
-    13-day floor (models.scope_ttl) must keep it fresh regardless -- see
-    ScopeType.PIPE_ACTIVITY's comment for why re-fetching it on the ordinary
-    cadence would just repeat the same round trip for no new data."""
+def test_every_log_scope_ages_on_the_ordinary_cache_age(repo) -> None:
+    """No scope is refreshed less often because its full statement is
+    expensive: a log scope's refresh is a cheap window pass instead
+    (repository.plan_window)."""
     ordinary = databases_scope()
-    pipes = pipe_activity_scope("MYDB", "PUBLIC")
-    load(repo, ordinary, db_rows("ACME"))
-    load(repo, pipes, [])
+    logs = [
+        pipe_activity_scope("MYDB", "PUBLIC"),
+        pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
+        task_activity_scope("MYDB", "PUBLIC"),
+        task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"),
+    ]
+    for scope in [ordinary, *logs]:
+        load(repo, scope, [])
     time.sleep(0.02)
-    assert repo.stale_scopes(0.01, [ordinary, pipes]) == [ordinary]
-
-
-def test_task_activitys_ttl_does_not_outlast_the_ordinary_sweep_interval(repo) -> None:
-    """Deliberately not the same override as PIPE_ACTIVITY: a task can run
-    every few minutes, so this stays on the ordinary cadence -- see
-    ScopeType.TASK_ACTIVITY's comment."""
-    ordinary = databases_scope()
-    tasks = task_activity_scope("MYDB", "PUBLIC")
-    load(repo, ordinary, db_rows("ACME"))
-    load(repo, tasks, [])
-    time.sleep(0.02)
-    assert set(repo.stale_scopes(0.01, [ordinary, tasks])) == {ordinary, tasks}
-
-
-def test_task_activity_historys_ttl_override_outlasts_the_ordinary_sweep_interval(
-    repo,
-) -> None:
-    """6-day floor (models.scope_ttl), same reasoning as PIPE_ACTIVITY_
-    HISTORY's own test above -- see ScopeType.TASK_ACTIVITY_HISTORY's
-    comment."""
-    ordinary = databases_scope()
-    history = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
-    load(repo, ordinary, db_rows("ACME"))
-    load(repo, history, [])
-    time.sleep(0.02)
-    assert repo.stale_scopes(0.01, [ordinary, history]) == [ordinary]
+    assert set(repo.stale_scopes(0.01, [ordinary, *logs])) == {ordinary, *logs}
 
 
 def test_next_due_is_the_scope_closest_to_going_stale(repo) -> None:
@@ -448,14 +427,6 @@ def test_next_due_is_the_scope_closest_to_going_stale(repo) -> None:
     load(repo, schemas_scope("MYDB"), [])
     due = repo.next_due(900, [schemas_scope("MYDB"), databases_scope()])
     assert due < repo.next_due(900, [schemas_scope("MYDB")])
-
-
-def test_next_due_counts_a_ttl_override(repo) -> None:
-    """A pipe's activity is aged on its own 13-day TTL, so it never pulls the
-    countdown down to the ordinary one."""
-    pipes = pipe_activity_scope("MYDB", "PUBLIC")
-    load(repo, pipes, [])
-    assert repo.next_due(900, [pipes]) > 12 * 86400
 
 
 def test_next_due_of_a_never_fetched_scope_is_now(repo) -> None:
@@ -977,18 +948,6 @@ def test_pipe_activity_history_is_scoped_per_pipe_not_per_schema(repo) -> None:
     )
 
 
-def test_pipe_activity_historys_ttl_override_outlasts_the_ordinary_sweep_interval(
-    repo,
-) -> None:
-    """Same override, same reasoning, as PIPE_ACTIVITY's own test above."""
-    ordinary = databases_scope()
-    history = pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
-    load(repo, ordinary, db_rows("ACME"))
-    load(repo, history, [])
-    time.sleep(0.02)
-    assert repo.stale_scopes(0.01, [ordinary, history]) == [ordinary]
-
-
 def test_pipe_target_table_is_none_with_no_activity_cached(repo) -> None:
     """A pipe that has never loaded anything (or whose schema's activity
     scope has never been fetched) has nothing to resolve a target from --
@@ -1181,6 +1140,7 @@ def test_task_activity_columns_survive_a_round_trip(repo) -> None:
                 "SCHEMA_NAME": "PUBLIC",
                 "QUERY_ID": "01ab-query-id",
                 "SCHEDULED_TIME": "2026-01-02 03:04:05",
+                "ATTEMPT_NUMBER": 1,
                 "QUERY_START_TIME": "2026-01-02 03:04:06",
                 "COMPLETED_TIME": "2026-01-02 03:04:10",
                 "STATE": "SUCCEEDED",
@@ -1212,6 +1172,7 @@ def test_task_activity_table_can_hold_more_than_one_task_per_run(repo) -> None:
                 "SCHEMA_NAME": "PUBLIC",
                 "QUERY_ID": "01ab-query-id-1",
                 "SCHEDULED_TIME": "2026-01-02 03:04:05",
+                "ATTEMPT_NUMBER": 1,
                 "STATE": "SUCCEEDED",
             },
             {
@@ -1220,6 +1181,7 @@ def test_task_activity_table_can_hold_more_than_one_task_per_run(repo) -> None:
                 "SCHEMA_NAME": "PUBLIC",
                 "QUERY_ID": "01ab-query-id-2",
                 "SCHEDULED_TIME": "2026-01-02 03:05:05",
+                "ATTEMPT_NUMBER": 1,
                 "STATE": "FAILED",
             },
         ],
@@ -1242,6 +1204,7 @@ def test_task_activity_history_columns_round_trip(repo) -> None:
                 "SCHEMA_NAME": "PUBLIC",
                 "QUERY_ID": "01ab-query-id",
                 "SCHEDULED_TIME": "2026-01-02 03:04:05",
+                "ATTEMPT_NUMBER": 1,
                 "STATE": "SUCCEEDED",
             }
         ],
@@ -1263,6 +1226,7 @@ def test_task_activity_history_is_scoped_per_task_not_per_schema(repo) -> None:
                 "NAME": "REFRESH_OTHER",
                 "QUERY_ID": "01ab-other",
                 "SCHEDULED_TIME": "2026-01-02 03:04:05",
+                "ATTEMPT_NUMBER": 1,
             }
         ],
     )
@@ -1286,6 +1250,7 @@ def test_task_history_columns_survive_a_round_trip(repo) -> None:
                 "NAME": "REFRESH_ORDERS",
                 "QUERY_ID": "01ab-query-id",
                 "SCHEDULED_TIME": "2026-03-01 08:00:00",
+                "ATTEMPT_NUMBER": 1,
                 "QUERY_START_TIME": "2026-03-01 08:00:01",
                 "COMPLETED_TIME": "2026-03-01 08:00:05",
                 "STATE": "SUCCEEDED",
@@ -1420,3 +1385,311 @@ def test_the_sweep_judges_previews_and_cached_scopes_from_their_own_stores(
         3600, [databases_scope(), preview, fresh_preview, schemas_scope("MYDB")]
     )
     assert stale == [preview, schemas_scope("MYDB")]
+
+
+# ------------------------------------------------------------ window passes
+
+#: A fixed offset other than UTC, so a test sees the stored text and the
+#: instant it means disagree, the way Snowflake's session offset makes them.
+_PACIFIC = timezone(timedelta(hours=-8))
+
+
+def _at(epoch: float, tz: timezone = _PACIFIC) -> str:
+    """An epoch the way a Snowflake timestamp reaches the cache."""
+    return str(datetime.fromtimestamp(epoch, tz))
+
+
+def _load_row(pipe: str, at: float, file: str = "a.csv") -> dict:
+    return {
+        "PIPE_CATALOG_NAME": "MYDB",
+        "PIPE_SCHEMA_NAME": "PUBLIC",
+        "PIPE_NAME": pipe,
+        "FILE_NAME": file,
+        "LAST_LOAD_TIME": _at(at),
+        "TABLE_CATALOG_NAME": "MYDB",
+        "TABLE_SCHEMA_NAME": "PUBLIC",
+        "TABLE_NAME": "ORDERS",
+    }
+
+
+def _full_pass(repo, scope, rows, covered_from: float = 0.0) -> None:
+    generation = repo.begin_pass(scope)
+    repo.write_page(scope, generation, rows, None)
+    repo.finish_pass(scope, generation, covered_from=covered_from)
+
+
+def _window_pass(repo, scope, rows, prune: Prune, *, truncated=False) -> None:
+    generation = repo.begin_pass(scope)
+    repo.write_page(scope, generation, rows, None)
+    repo.finish_pass(scope, generation, truncated=truncated, prune=prune)
+
+
+def _loads(repo, scope) -> list[tuple[str, str]]:
+    return sorted((row["PIPE_NAME"], row["FILE_NAME"]) for row in repo.raw_rows(scope))
+
+
+_DAY = 86400.0
+_LONG_AGO = Prune(cutoff=0.0)
+
+
+def test_a_window_pass_keeps_every_row_its_window_did_not_return(repo) -> None:
+    """A window asks only for what is new, so a pipe that did not load in it
+    keeps its last load -- a full pass would have swept it."""
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    _full_pass(
+        repo, scope, [_load_row("P_A", now - _DAY), _load_row("P_B", now - _DAY)]
+    )
+    _window_pass(repo, scope, [_load_row("P_C", now)], _LONG_AGO)
+    assert _loads(repo, scope) == [
+        ("P_A", "a.csv"),
+        ("P_B", "a.csv"),
+        ("P_C", "a.csv"),
+    ]
+
+
+def test_a_window_pass_keeps_only_the_newest_load_per_pipe(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    _full_pass(repo, scope, [_load_row("P_A", now - _DAY, "old.csv")])
+    _window_pass(repo, scope, [_load_row("P_A", now, "new.csv")], _LONG_AGO)
+    assert _loads(repo, scope) == [("P_A", "new.csv")]
+
+
+def test_an_overlap_read_again_does_not_replace_a_newer_load(repo) -> None:
+    """The window reaches back before the previous pass, so it can return a
+    load older than one already stored."""
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    _full_pass(repo, scope, [_load_row("P_A", now, "new.csv")])
+    _window_pass(repo, scope, [_load_row("P_A", now - 3600, "old.csv")], _LONG_AGO)
+    assert _loads(repo, scope) == [("P_A", "new.csv")]
+
+
+def test_newer_is_judged_by_the_instant_not_by_the_stored_text(repo) -> None:
+    """10:00 at -08:00 is 18:00 UTC, later than 12:00 UTC, though its text
+    sorts first."""
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    west = {
+        **_load_row("P_A", 0, "west.csv"),
+        "LAST_LOAD_TIME": "2026-01-01 10:00:00-08:00",
+    }
+    utc = {
+        **_load_row("P_A", 0, "utc.csv"),
+        "LAST_LOAD_TIME": "2026-01-01 12:00:00+00:00",
+    }
+    _full_pass(repo, scope, [utc])
+    _window_pass(repo, scope, [west], _LONG_AGO)
+    assert _loads(repo, scope) == [("P_A", "west.csv")]
+
+
+def test_julianday_reads_both_stored_timestamp_forms() -> None:
+    """The sqlite3 adapter writes fractional seconds only when there are some;
+    both forms, with an offset, must compare as instants."""
+    import sqlite3
+
+    connection = sqlite3.connect(":memory:")
+    with_fraction, without = connection.execute(
+        "SELECT julianday('2026-11-03 08:51:00.123000-08:00'), "
+        "julianday('2026-11-03 08:51:00-08:00')"
+    ).fetchone()
+    utc = connection.execute(
+        "SELECT julianday('2026-11-03 16:51:00.123+00:00')"
+    ).fetchone()[0]
+    assert with_fraction == pytest.approx(utc)
+    assert with_fraction > without
+
+
+def test_a_window_pass_prunes_rows_older_than_the_fetch_window(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    _full_pass(
+        repo,
+        scope,
+        [_load_row("P_OLD", now - 100 * _DAY), _load_row("P_NEW", now)],
+    )
+    _window_pass(repo, scope, [], Prune(cutoff=now - 90 * _DAY))
+    assert _loads(repo, scope) == [("P_NEW", "a.csv")]
+
+
+def test_a_capped_history_keeps_its_newest_rows_and_says_it_is_truncated(
+    repo,
+) -> None:
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "P_A")
+    now = time.time()
+    hours_ago = (5, 4, 3)
+    _full_pass(
+        repo, scope, [_load_row("P_A", now - h * 3600, f"{h}.csv") for h in hours_ago]
+    )
+    new = [_load_row("P_A", now - h * 3600, f"{h}.csv") for h in (2, 1)]
+    _window_pass(repo, scope, new, Prune(cutoff=0.0, max_rows=4))
+    assert sorted(row["FILE_NAME"] for row in repo.raw_rows(scope)) == [
+        "1.csv",
+        "2.csv",
+        "3.csv",
+        "4.csv",
+    ]
+    assert repo.entry(scope).truncated
+
+
+def test_a_window_pass_under_the_cap_is_not_truncated(repo) -> None:
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "P_A")
+    now = time.time()
+    _full_pass(repo, scope, [_load_row("P_A", now - 3600, "old.csv")])
+    _window_pass(
+        repo, scope, [_load_row("P_A", now, "new.csv")], Prune(0.0, max_rows=10)
+    )
+    entry = repo.entry(scope)
+    assert not entry.truncated
+    assert entry.row_count == 2
+
+
+def test_a_window_pass_that_hit_its_cap_sweeps_like_a_full_pass(repo) -> None:
+    """Its rows are the newest overall; older stored rows would sit behind a
+    gap of rows it was not allowed to return."""
+    scope = pipe_activity_history_scope("MYDB", "PUBLIC", "P_A")
+    now = time.time()
+    _full_pass(repo, scope, [_load_row("P_A", now - _DAY, "old.csv")])
+    _window_pass(
+        repo,
+        scope,
+        [_load_row("P_A", now, "new.csv")],
+        Prune(0.0, max_rows=1),
+        truncated=True,
+    )
+    assert [row["FILE_NAME"] for row in repo.raw_rows(scope)] == ["new.csv"]
+    assert repo.entry(scope).truncated
+
+
+def test_a_window_pass_keeps_the_coverage_its_full_pass_recorded(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    _full_pass(repo, scope, [], covered_from=1234.0)
+    _window_pass(repo, scope, [], _LONG_AGO)
+    assert repo.entry(scope).covered_from == 1234.0
+
+
+def test_forgetting_coverage_makes_the_next_pass_full(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    _full_pass(repo, scope, [], covered_from=now - 90 * _DAY)
+    repo.forget_coverage(scope)
+    entry = repo.entry(scope)
+    assert entry.covered_from is None
+    assert plan_window(entry, int(90 * _DAY), 7200, now) == Window(int(90 * _DAY), True)
+
+
+def test_forgetting_coverage_keeps_the_rows_on_screen(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    _full_pass(repo, scope, [_load_row("P_A", time.time())])
+    repo.forget_coverage(scope)
+    assert _loads(repo, scope) == [("P_A", "a.csv")]
+
+
+def test_a_failed_window_pass_deletes_nothing(repo) -> None:
+    scope = pipe_activity_scope("MYDB", "PUBLIC")
+    _full_pass(repo, scope, [_load_row("P_A", time.time())])
+    generation = repo.begin_pass(scope)
+    repo.fail_pass(scope, generation, "no warehouse")
+    assert _loads(repo, scope) == [("P_A", "a.csv")]
+
+
+def _run(task: str, scheduled: float, completed: float, query_id=None) -> dict:
+    return {
+        "NAME": task,
+        "DATABASE_NAME": "MYDB",
+        "SCHEMA_NAME": "PUBLIC",
+        "QUERY_ID": query_id,
+        "SCHEDULED_TIME": _at(scheduled),
+        "ATTEMPT_NUMBER": 1,
+        "COMPLETED_TIME": _at(completed),
+        "STATE": "FAILED" if query_id is None else "SUCCEEDED",
+    }
+
+
+def test_reading_an_overlap_again_adds_no_duplicate_task_run(repo) -> None:
+    """A run that failed before a query was submitted has no QUERY_ID, which
+    is why a run is keyed by SCHEDULED_TIME and ATTEMPT_NUMBER instead."""
+    scope = task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS")
+    now = time.time()
+    run = _run("REFRESH_ORDERS", now - 600, now - 590)
+    _full_pass(repo, scope, [run])
+    _window_pass(repo, scope, [run], _LONG_AGO)
+    _window_pass(repo, scope, [run], _LONG_AGO)
+    assert len(repo.raw_rows(scope)) == 1
+
+
+def test_a_task_run_without_a_query_id_can_be_its_latest_run(repo) -> None:
+    """The schema-wide table used to require a QUERY_ID, which such a run
+    does not have."""
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    load(repo, scope, [_run("REFRESH_ORDERS", now - 600, now - 590)])
+    assert [row["STATE"] for row in repo.raw_rows(scope)] == ["FAILED"]
+
+
+def test_a_task_keeps_only_its_newest_run(repo) -> None:
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    _full_pass(repo, scope, [_run("T", now - 7200, now - 7100, "old")])
+    _window_pass(repo, scope, [_run("T", now - 600, now - 500, "new")], _LONG_AGO)
+    assert [row["QUERY_ID"] for row in repo.raw_rows(scope)] == ["new"]
+
+
+def test_a_task_is_pruned_by_when_its_run_completed(repo) -> None:
+    """The window filters on COMPLETED_TIME, so pruning does too: a run
+    scheduled before the cutoff but finished after it is inside the window."""
+    scope = task_activity_scope("MYDB", "PUBLIC")
+    now = time.time()
+    _full_pass(repo, scope, [_run("LONG_TASK", now - 91 * _DAY, now - 89 * _DAY, "q")])
+    _window_pass(repo, scope, [], Prune(cutoff=now - 90 * _DAY))
+    assert [row["NAME"] for row in repo.raw_rows(scope)] == ["LONG_TASK"]
+
+
+# ------------------------------------------------------------- plan_window
+
+
+def _entry(**fields) -> Entry:
+    defaults = {
+        "scope_key": "pipe_activity:MYDB.PUBLIC",
+        "state": CacheState.COMPLETE,
+        "generation": 1,
+        "fetched_at": None,
+        "row_count": 0,
+        "error": None,
+    }
+    return Entry(**{**defaults, **fields})
+
+
+_FETCH = int(90 * _DAY)
+_NOW = 1_800_000_000.0
+
+
+def test_the_first_pass_of_a_log_scope_is_a_full_pass() -> None:
+    entry = _entry(state=CacheState.EMPTY)
+    assert plan_window(entry, _FETCH, 7200, _NOW) == Window(_FETCH, True)
+
+
+def test_a_later_pass_reaches_back_to_the_last_one_minus_the_margin() -> None:
+    entry = _entry(fetched_at=_NOW - 300, covered_from=_NOW - _FETCH - 300)
+    assert plan_window(entry, _FETCH, 7200, _NOW) == Window(7500, False)
+
+
+def test_a_failed_refresh_leaves_the_window_reaching_back_to_the_last_success() -> None:
+    entry = _entry(
+        state=CacheState.ERROR,
+        fetched_at=_NOW - 3600,
+        covered_from=_NOW - _FETCH - 3600,
+    )
+    assert plan_window(entry, _FETCH, 7200, _NOW) == Window(10800, False)
+
+
+def test_a_raised_fetch_window_forces_a_full_pass() -> None:
+    entry = _entry(fetched_at=_NOW - 300, covered_from=_NOW - _FETCH - 300)
+    raised = int(120 * _DAY)
+    assert plan_window(entry, raised, 7200, _NOW) == Window(raised, True)
+
+
+def test_a_window_as_long_as_the_fetch_window_is_a_full_pass() -> None:
+    """After the app was closed for longer than the fetch window."""
+    entry = _entry(fetched_at=_NOW - _FETCH, covered_from=_NOW - 2 * _FETCH)
+    assert plan_window(entry, _FETCH, 7200, _NOW) == Window(_FETCH, True)

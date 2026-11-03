@@ -46,6 +46,7 @@ from nivaria.format import (
     format_date,
     format_timestamp_minutes,
 )
+from nivaria.gateway.queries import COPY_HISTORY_PUBLISHED_LAG
 from nivaria.models import (
     ObjectRef,
     ObjectType,
@@ -61,6 +62,7 @@ from nivaria.ui.views.tables import (
     LIST_TABLE,
     HoverTooltipTable,
     TabbedView,
+    lag_note,
     sync_list_note,
 )
 
@@ -105,6 +107,8 @@ class PipeListView(TabbedView, CategoryView):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-status"):
             with TabPane("[$accent bold]A[/]ctivity", id="tab-activity"):
+                # Every column here but Name comes from ACCOUNT_USAGE.
+                yield lag_note("Load activity", COPY_HISTORY_PUBLISHED_LAG)
                 yield Static("", id=LIST_NOTE)
                 activity: DataTable[Text] = HoverTooltipTable(
                     self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"

@@ -502,9 +502,8 @@ async def test_refresh_with_nothing_under_the_cursor_asks_for_nothing(repo) -> N
 async def test_refresh_asks_for_the_detail_panes_scopes_while_they_are_fresh(
     repo,
 ) -> None:
-    """A pipe whose target table cannot be resolved is only read through
-    the PIPE_ACTIVITY snapshot, which the sweep leaves alone for up to 13
-    days; F5 is how to check now."""
+    """F5 asks for what the detail pane shows whatever its age, so a pipe
+    can be checked now rather than at the next sweep."""
     from nivaria.models import pipe_activity_scope
     from nivaria.ui.widgets.detail_pane import DetailPane
     from tests.views.harness import put_pipe, put_pipe_activity
@@ -524,6 +523,39 @@ async def test_refresh_asks_for_the_detail_panes_scopes_while_they_are_fresh(
         screen.action_refresh()
         await pilot.pause()
     assert fetch.scopes == [pipe_activity_scope("MYDB", "PUBLIC").key]
+
+
+async def test_a_full_refresh_forgets_coverage_of_the_log_scopes_on_screen(
+    repo,
+) -> None:
+    """The escape hatch for a row a window pass missed: the detail pane's
+    log scopes are asked for again, each with its coverage forgotten so the
+    pass is a full one. Other scopes on screen, here the SHOW PIPES list,
+    are left alone."""
+    from nivaria.models import ObjectType, objects_scope, pipe_activity_scope
+    from nivaria.ui.widgets.detail_pane import DetailPane
+    from tests.views.harness import put_pipe
+
+    put_databases(repo, "MYDB")
+    put_pipe(repo, "LOAD_ORDERS")
+    activity = pipe_activity_scope("MYDB", "PUBLIC")
+    generation = repo.begin_pass(activity)
+    repo.finish_pass(activity, generation, covered_from=1.0)
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        detail = screen.query_one(DetailPane)
+        detail.show_category(objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC"))
+        await settle(pilot)
+        assert len(detail.scopes()) > 1
+        fetch.requests.clear()
+        screen.full_refresh()
+        await pilot.pause()
+    assert fetch.scopes == [activity.key]
+    assert repo.entry(activity).covered_from is None
 
 
 # ------------------------------------------------------------------ picker
