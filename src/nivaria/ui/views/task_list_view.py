@@ -55,9 +55,12 @@ from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
     LIST_NOTE,
     LIST_TABLE,
+    SOURCE_NOTE,
     HoverTooltipTable,
     lag_note,
+    source_line,
     sync_list_note,
+    sync_source_note,
 )
 
 _COLUMNS = (
@@ -89,6 +92,7 @@ class TaskListView(CategoryView):
         # The last-run columns come from ACCOUNT_USAGE.
         yield lag_note("Run history", TASK_HISTORY_PUBLISHED_LAG)
         yield Static("", id=LIST_NOTE)
+        yield Static("", id=SOURCE_NOTE)
         table: DataTable[Text] = HoverTooltipTable(
             self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
         )
@@ -123,6 +127,14 @@ class TaskListView(CategoryView):
         )
         activity_scope = self.activity_scope()
         self.ensure(activity_scope, ttl)
+        sync_source_note(
+            self.query_one(f"#{SOURCE_NOTE}", Static),
+            [
+                source_line(
+                    self.repo.entry(activity_scope), "Last Scheduled, Last Run State"
+                )
+            ],
+        )
         # The cache already holds at most one row per task -- queries.
         # task_activity's QUALIFY keeps only each task's latest run. Keyed by
         # NAME so a missing/failed activity pass just means an empty dict

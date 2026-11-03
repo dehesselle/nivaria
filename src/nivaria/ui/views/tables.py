@@ -76,6 +76,12 @@ SQL = "detail-sql"
 #: The line above a list or history saying its rows come from ACCOUNT_USAGE
 #: and lag behind -- see `lag_note`.
 LAG_NOTE = "detail-lag-note"
+#: The line above a list saying which of its columns, those another query
+#: fills, are still being fetched or could not be -- see `sync_source_note`.
+SOURCE_NOTE = "detail-source-note"
+#: The note above a Grants tab, and above a Tags tab -- see `sync_scope_note`.
+GRANTS_NOTE = "detail-grants-note"
+TAGS_NOTE = "detail-tags-note"
 
 
 def lag_note(what: str, lag_seconds: int) -> Static:
@@ -118,30 +124,91 @@ def failed_refresh(entry: Entry) -> str | None:
     )
 
 
-def sync_list_note(note: Static, entry: Entry, noun: str) -> None:
-    """Say so when a category's primary scope was positively fetched and
-    came back with nothing, when its only fetch attempt errored with no
-    prior success to fall back on, or when a refresh failed and the rows
-    shown are older -- never when it simply has not been fetched yet.
-    `EMPTY` (never touched) and `PARTIAL` (mid-refresh) both stay silent
-    rather than guess. Same toggle-display, recompute-in-full-every-repaint
-    shape as `HistoryView.sync_history_note`.
+def _answered(entry: Entry) -> bool:
+    """Whether a scope has an answer on record, failed or not.
+
+    A refresh keeps the previous rows and their `fetched_at`, so only a
+    first fetch counts as unanswered. EMPTY can carry a `fetched_at` with no
+    rows behind it -- see `Entry.due`.
+    """
+    if entry.state is CacheState.ERROR:
+        return True
+    return entry.fetched_at is not None and entry.state is not CacheState.EMPTY
+
+
+def sync_scope_note(
+    note: Static, entry: Entry, *, empty: str, looking: str | None = None
+) -> None:
+    """Say why a table showing one scope's rows looks the way it does.
+
+    An empty table reads the same whether the fetch is still out, came back
+    with nothing, or failed, so the note says which: `looking` while a first
+    fetch is out (None stays silent instead), `empty` once it came back with
+    nothing, the error when its only attempt failed, and when the rows shown
+    were fetched when a refresh failed. A refresh of rows already on record
+    is not waited for, so a revisit stays quiet. Same toggle-display,
+    recompute-in-full-every-repaint shape as `HistoryView.sync_history_note`.
     """
     error = entry.state is CacheState.ERROR and entry.fetched_at is None
     stale = failed_refresh(entry)
-    empty = entry.state is CacheState.COMPLETE and entry.row_count == 0
+    is_empty = entry.state is CacheState.COMPLETE and entry.row_count == 0
+    is_looking = looking is not None and not _answered(entry)
     if error:
         note.update(Text(f"Could not fetch: {entry.error}"))
     elif stale is not None:
         note.update(Text(stale))
-    elif empty:
-        note.update(Text(f"No {noun} in this schema."))
+    elif is_empty:
+        note.update(Text(empty))
+    elif is_looking:
+        note.update(Text(looking))
     # Assigned unconditionally, not only in the branches above, so a note
-    # widget reused across CategoryView.show() (switching schemas without
+    # widget reused across a view's show() (another schema or object without
     # remounting) never carries a stale class or visibility from the
-    # previous schema's paint.
+    # previous paint.
     note.set_class(error or stale is not None, "-error")
-    note.display = error or stale is not None or empty
+    note.display = error or stale is not None or is_empty or is_looking
+
+
+def sync_list_note(note: Static, entry: Entry, noun: str) -> None:
+    """The note for a category's primary scope -- see `sync_scope_note`.
+    Silent while it has not been fetched yet."""
+    sync_scope_note(note, entry, empty=f"No {noun} in this schema.")
+
+
+def source_line(
+    entry: Entry, label: str, *, progress: str | None = None
+) -> tuple[str, bool] | None:
+    """What a list's `label` columns cannot show yet, and whether it is a
+    failure; None once they show what Snowflake said.
+
+    Those columns come from another query than the list itself (see
+    docs/DESIGN.md "A second source"), and a blank cell reads the same
+    whether that query is still out, needs a warehouse, or failed. While a
+    first fetch is out the line says so, with `progress` if the pass has
+    some to report. A refresh of values already on record stays quiet.
+    """
+    if entry.state is CacheState.ERROR and entry.fetched_at is None:
+        return f"{label}: could not fetch: {last_line(entry.error)}", True
+    if entry.state is CacheState.ERROR:
+        assert entry.fetched_at is not None
+        fetched = datetime.fromtimestamp(entry.fetched_at, UTC).astimezone()
+        text = (
+            f"{label}: as fetched {fetched:%Y-%m-%d %H:%M}; the refresh failed: "
+            f"{last_line(entry.error)}"
+        )
+        return text, True
+    if not _answered(entry):
+        return f"{label}: {progress or 'looking'}...", False
+    return None
+
+
+def sync_source_note(note: Static, lines: Sequence[tuple[str, bool] | None]) -> None:
+    """Show the `source_line`s that have something to say, one per line."""
+    said = [line for line in lines if line is not None]
+    if said:
+        note.update(Text("\n".join(text for text, _ in said)))
+    note.set_class(any(failed for _, failed in said), "-error")
+    note.display = bool(said)
 
 
 class RowSource(Protocol):
@@ -406,7 +473,7 @@ class HistoryView(TabbedView):
                 if errored_days is not None
                 else f"Older {noun}"
             )
-            note.update(Text(f"{part} could not be read: {_last_line(errored.error)}"))
+            note.update(Text(f"{part} could not be read: {last_line(errored.error)}"))
         elif stale is not None:
             note.update(Text(stale))
         elif empty:
@@ -429,7 +496,7 @@ def _has_rows_on_record(entry: Entry) -> bool:
     return entry.fetched_at is not None and entry.state is not CacheState.EMPTY
 
 
-def _last_line(message: str | None) -> str:
+def last_line(message: str | None) -> str:
     """A driver error's last line, which is Snowflake's own wording
     ("Table '...' does not exist or not authorized.") without the error
     number and compilation preamble before it."""

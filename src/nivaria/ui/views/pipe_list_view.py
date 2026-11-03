@@ -48,6 +48,7 @@ from nivaria.format import (
 )
 from nivaria.gateway.queries import COPY_HISTORY_PUBLISHED_LAG
 from nivaria.models import (
+    CacheState,
     ObjectRef,
     ObjectType,
     Scope,
@@ -60,15 +61,20 @@ from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
     LIST_NOTE,
     LIST_TABLE,
+    SOURCE_NOTE,
     HoverTooltipTable,
     TabbedView,
     lag_note,
+    source_line,
     sync_list_note,
+    sync_source_note,
 )
 
 #: The Status tab's own note -- see LIST_NOTE, reused for the Activity
 #: tab since both go empty/error together (both read `self.scope` alone).
 _STATUS_NOTE = "detail-status-note"
+#: The Status tab's SOURCE_NOTE, for the Execution State column.
+_STATUS_SOURCE_NOTE = "detail-status-source-note"
 
 _STATUS_COLUMNS = ("Name", "Created", "Execution State", "Invalid Reason")
 _ACTIVITY_COLUMNS = (
@@ -110,6 +116,7 @@ class PipeListView(TabbedView, CategoryView):
                 # Every column here but Name comes from ACCOUNT_USAGE.
                 yield lag_note("Load activity", COPY_HISTORY_PUBLISHED_LAG)
                 yield Static("", id=LIST_NOTE)
+                yield Static("", id=SOURCE_NOTE)
                 activity: DataTable[Text] = HoverTooltipTable(
                     self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
                 )
@@ -117,6 +124,7 @@ class PipeListView(TabbedView, CategoryView):
                 yield activity
             with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
                 yield Static("", id=_STATUS_NOTE)
+                yield Static("", id=_STATUS_SOURCE_NOTE)
                 status: DataTable[Text] = HoverTooltipTable(
                     self, _STATUS_TOOLTIP_FIELDS, id="detail-status", cursor_type="row"
                 )
@@ -184,6 +192,30 @@ class PipeListView(TabbedView, CategoryView):
         entry = self.repo.entry(self.scope)
         sync_list_note(self.query_one(f"#{_STATUS_NOTE}", Static), entry, "pipes")
         sync_list_note(self.query_one(f"#{LIST_NOTE}", Static), entry, "pipes")
+        sync_source_note(
+            self.query_one(f"#{SOURCE_NOTE}", Static),
+            [source_line(self.repo.entry(activity_scope), "Load activity")],
+        )
+        # A status pass reads 50 pipes per statement, at about 25 ms of
+        # Snowflake's time each (docs/measurements.md "Pipe status"), so a
+        # first pass over a big schema takes a while: say how far it got.
+        # Its row count grows with every batch written.
+        status_entry = self.repo.entry(status_scope)
+        sync_source_note(
+            self.query_one(f"#{_STATUS_SOURCE_NOTE}", Static),
+            [
+                source_line(
+                    status_entry,
+                    "Execution State",
+                    progress=(
+                        f"reading, {status_entry.row_count:,} of "
+                        f"{entry.row_count:,} pipes"
+                        if status_entry.state is CacheState.PARTIAL
+                        else None
+                    ),
+                )
+            ],
+        )
         # The cache already holds at most one row per pipe -- queries.
         # pipe_activity's QUALIFY keeps only each pipe's latest load. Keyed
         # by PIPE_NAME so a missing/failed activity pass just means an empty

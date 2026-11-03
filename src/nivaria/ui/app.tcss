@@ -226,7 +226,11 @@ ClosingDialog > #dialog {
 #detail-status-note,
 #detail-history-note,
 #detail-data-note,
-#detail-lag-note {
+#detail-lag-note,
+#detail-source-note,
+#detail-status-source-note,
+#detail-grants-note,
+#detail-tags-note {
     height: auto;
     margin-bottom: 1;
     background: $foreground 8%;
@@ -241,7 +245,11 @@ ClosingDialog > #dialog {
 #detail-list-note.-error,
 #detail-status-note.-error,
 #detail-history-note.-error,
-#detail-data-note.-error {
+#detail-data-note.-error,
+#detail-source-note.-error,
+#detail-status-source-note.-error,
+#detail-grants-note.-error,
+#detail-tags-note.-error {
     color: $text-error;
 }
 

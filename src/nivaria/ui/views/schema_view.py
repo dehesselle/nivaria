@@ -41,20 +41,28 @@ from typing import ClassVar
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, TabbedContent, TabPane
+from textual.widgets import DataTable, Static, TabbedContent, TabPane
 
 from nivaria.cache.repository import Repository
 from nivaria.models import SchemaRef, Scope, grants_scope, tag_references_scope
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.views.base import _ScopedView
 from nivaria.ui.views.grants import compose_grants, paint_grants
-from nivaria.ui.views.tables import TabbedView
+from nivaria.ui.views.tables import (
+    GRANTS_NOTE,
+    TAGS_NOTE,
+    TabbedView,
+    sync_scope_note,
+)
 
 _TAGS_COLUMNS = ("Tag", "Value")
 
 
 class _GrantsTagsView(TabbedView, _ScopedView):
     """Shared Grants/Tags tabs and rendering for SchemaView and DatabaseView."""
+
+    #: What the notes call the object, as in "No tags on this schema."
+    NOUN: ClassVar[str]
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("g", "show_tab('grants')", "Grants", show=False),
@@ -64,9 +72,11 @@ class _GrantsTagsView(TabbedView, _ScopedView):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-grants"):
             with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
+                yield Static("", id=GRANTS_NOTE)
                 self.grants_panel = compose_grants()
                 yield self.grants_panel
             with TabPane("[$accent bold]T[/]ags", id="tab-tags"):
+                yield Static("", id=TAGS_NOTE)
                 tags: DataTable[Text] = DataTable(id="detail-tags", cursor_type="row")
                 tags.zebra_stripes = True
                 yield tags
@@ -91,6 +101,18 @@ class _GrantsTagsView(TabbedView, _ScopedView):
         self.ensure(tags, ttl)
 
         paint_grants(self, self.grants_panel, self.repo.raw_rows(grants))
+        sync_scope_note(
+            self.query_one(f"#{GRANTS_NOTE}", Static),
+            self.repo.entry(grants),
+            empty=f"No grants on this {self.NOUN} that your role can see.",
+            looking="Looking for grants...",
+        )
+        sync_scope_note(
+            self.query_one(f"#{TAGS_NOTE}", Static),
+            self.repo.entry(tags),
+            empty=f"No tags on this {self.NOUN}.",
+            looking="Looking for tags...",
+        )
 
         tags_table = self.query_one("#detail-tags", DataTable)
         with self.keeping_cursor(tags_table):
@@ -104,6 +126,8 @@ class _GrantsTagsView(TabbedView, _ScopedView):
 
 
 class SchemaView(_GrantsTagsView):
+    NOUN = "schema"
+
     def __init__(self, repo: Repository, ref: SchemaRef) -> None:
         super().__init__()
         self.repo = repo
@@ -123,6 +147,8 @@ class SchemaView(_GrantsTagsView):
 
 
 class DatabaseView(_GrantsTagsView):
+    NOUN = "database"
+
     def __init__(self, repo: Repository, database: str) -> None:
         super().__init__()
         self.repo = repo

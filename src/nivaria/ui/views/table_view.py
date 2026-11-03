@@ -45,7 +45,16 @@ from nivaria.models import (
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.grants import compose_grants, paint_grants
-from nivaria.ui.views.tables import PanelledTable, TabbedView, failed_refresh
+from nivaria.ui.views.tables import (
+    GRANTS_NOTE,
+    SOURCE_NOTE,
+    PanelledTable,
+    TabbedView,
+    failed_refresh,
+    source_line,
+    sync_scope_note,
+    sync_source_note,
+)
 
 #: Ordering the table falls back to, and returns to whenever this (reused)
 #: view is pointed at a different object -- see `show`.
@@ -119,6 +128,7 @@ class ColumnsView(TabbedView, ObjectView):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-columns"):
             with TabPane("[$accent bold]C[/]olumns", id="tab-columns"):
+                yield Static("", id=SOURCE_NOTE)
                 table = DataTable(id="detail-columns", cursor_type="row")
                 table.zebra_stripes = True
                 self.columns_panel = PanelledTable(table, self.detail_text)
@@ -131,6 +141,7 @@ class ColumnsView(TabbedView, ObjectView):
                 data.zebra_stripes = True
                 yield data
             with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
+                yield Static("", id=GRANTS_NOTE)
                 self.grants_panel = compose_grants()
                 yield self.grants_panel
             yield from self.compose_extra_tabs()
@@ -243,7 +254,12 @@ class ColumnsView(TabbedView, ObjectView):
         # Sorting still has to put an unconfirmed column somewhere, though,
         # so it sorts as a plain 0 even while its cell reads blank -- a
         # transient state that resolves the moment the scope completes.
-        tags_confirmed = self.repo.entry(tags_scope).state is CacheState.COMPLETE
+        tags_entry = self.repo.entry(tags_scope)
+        tags_confirmed = tags_entry.state is CacheState.COMPLETE
+        sync_source_note(
+            self.query_one(f"#{SOURCE_NOTE}", Static),
+            [source_line(tags_entry, "Tags")],
+        )
 
         table = self.query_one("#detail-columns", DataTable)
         if not table.columns:
@@ -302,6 +318,15 @@ class ColumnsView(TabbedView, ObjectView):
         scope = self.grants_scope()
         self.ensure(scope, config.get(CACHE_TTL))
         paint_grants(self, self.grants_panel, self.repo.raw_rows(scope))
+        sync_scope_note(
+            self.query_one(f"#{GRANTS_NOTE}", Static),
+            self.repo.entry(scope),
+            empty=(
+                f"No grants on this {self.ref.type.value.lower()} that your "
+                "role can see."
+            ),
+            looking="Looking for grants...",
+        )
 
     def _update_data(self) -> None:
         scope = self.data_scope()
@@ -336,6 +361,10 @@ class ColumnsView(TabbedView, ObjectView):
         stale = failed_refresh(entry)
         empty = entry.state is CacheState.COMPLETE and count == 0
         capped = entry.truncated and count > 0
+        # Only a first fetch: a refresh keeps the rows on screen.
+        looking = entry.state is not CacheState.ERROR and (
+            entry.fetched_at is None or entry.state is CacheState.EMPTY
+        )
         if error:
             note.update(Text(f"Could not fetch: {entry.error}"))
         elif stale is not None:
@@ -347,8 +376,10 @@ class ColumnsView(TabbedView, ObjectView):
             total = detail.get("rows")
             of = f" of {total:,}" if isinstance(total, int) and total > count else ""
             note.update(Text(f"Showing {count:,}{of} rows, in no particular order."))
+        elif looking:
+            note.update(Text("Looking for rows..."))
         note.set_class(error or stale is not None, "-error")
-        note.display = error or stale is not None or empty or capped
+        note.display = error or stale is not None or empty or capped or looking
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated

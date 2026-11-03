@@ -496,6 +496,16 @@ keeps showing yesterday's data. It gets no special treatment from the sweep
 either: a scope on screen is refreshed on the same TTL as everything else,
 warehouse or not.
 
+A blank column or an empty tab reads the same whether its query is still out,
+came back with nothing, or failed, so a note says which, read off the scope's
+ledger entry like the History note. A list carries one line per second source
+that has not answered, failed, or failed to refresh (`tables.source_line`),
+naming its columns; the pipe Status tab adds how many pipes a first pass has
+read. A Grants, Tags or Data tab says it is still looking, that there is
+nothing to show, or why it could not fetch (`tables.sync_scope_note`). Only a
+first fetch is announced: a refresh keeps the values on screen, so a revisit
+stays quiet.
+
 Each new source has its own mirror table, named and shaped like the view it
 reads (upper-case columns for an `INFORMATION_SCHEMA`/`ACCOUNT_USAGE` source —
 the same exception `information_schema_columns` established).

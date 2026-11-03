@@ -34,8 +34,11 @@ from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
     LIST_NOTE,
     LIST_TABLE,
+    SOURCE_NOTE,
     HoverTooltipTable,
+    source_line,
     sync_list_note,
+    sync_source_note,
 )
 
 _COLUMNS = ("Name", "Rows", "Size", "Created", "Last DDL", "Last Altered", "Comment")
@@ -61,6 +64,7 @@ class TableListView(CategoryView):
 
     def compose(self) -> ComposeResult:
         yield Static("", id=LIST_NOTE)
+        yield Static("", id=SOURCE_NOTE)
         table: DataTable[Text] = HoverTooltipTable(
             self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
         )
@@ -95,6 +99,10 @@ class TableListView(CategoryView):
         )
         stats_scope = self.stats_scope()
         self.ensure(stats_scope, ttl)
+        sync_source_note(
+            self.query_one(f"#{SOURCE_NOTE}", Static),
+            [source_line(self.repo.entry(stats_scope), "Last DDL, Last Altered")],
+        )
         # Keyed by TABLE_NAME so a missing/failed stats pass just means an
         # empty dict here -- every row still renders from show_tables alone.
         stats_by_name = {
