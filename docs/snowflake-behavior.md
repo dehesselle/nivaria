@@ -337,8 +337,20 @@ from an internal stage, each file sent with `ALTER PIPE ... REFRESH`:
   `2026-11-03T20:11:26.046Z`.
 - A file that failed to load (`STATUS = 'Load failed'`) moved both fields on
   to it, like a good one.
-- Whether the fields disappear some time after a pipe's last file is still
-  open: the pipe stays in place to be read again later.
+
+On a production account (2026-11-05), a running pipe that had loaded about an
+hour earlier reported `lastReceivedMessageTimestamp` and
+`lastPulledFromChannelTimestamp` as its only timestamps: no
+`lastIngestedTimestamp` and no `lastForwardedMessageTimestamp`. Snowflake's
+documentation says `lastPulledFromChannelTimestamp` applies to auto-ingest
+loads only, so this is presumably an auto-ingest pipe. The documentation lists
+the `lastIngested...` fields with no such restriction, says fields appear only
+"if applicable", and calls `lastIngestedTimestamp` the last file "loaded
+successfully", which the failed load above contradicts. Neither timestamp
+reported says that this pipe took in a file: the received message may not
+apply to the pipe, and a pull may find nothing. So nivaria shows none of these
+timestamps. Whether the kind of pipe explains the difference was not tested,
+nor whether the fields disappear some time after a pipe's last file.
 
 ## Result types
 

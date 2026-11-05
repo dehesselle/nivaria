@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, TabbedContent
 
-from nivaria.format import format_date, format_timestamp_minutes
+from nivaria.format import format_date
 from nivaria.models import (
     ObjectRef,
     ObjectType,
@@ -60,10 +60,10 @@ async def test_the_status_tab_shows_every_pipes_execution_state_from_snowflake(
         assert table.row_count == 2
         assert table.get_cell_at((0, 0)).plain == "LOAD_CUSTOMERS"
         assert table.get_cell_at((0, 2)).plain == "STOPPED_STAGE_DROPPED"
-        assert table.get_cell_at((0, 5)).plain == "stage dropped"
+        assert table.get_cell_at((0, 4)).plain == "stage dropped"
         assert table.get_cell_at((1, 0)).plain == "LOAD_ORDERS"
         assert table.get_cell_at((1, 2)).plain == "PAUSED"
-        assert table.get_cell_at((1, 5)).plain == ""
+        assert table.get_cell_at((1, 4)).plain == ""
 
 
 async def test_a_pipe_whose_status_was_never_read_shows_no_execution_state(
@@ -269,13 +269,9 @@ async def test_the_activity_tab_says_its_columns_lag_behind(repo) -> None:
         assert not pane.query_one("#tab-status").query("#detail-lag-note")
 
 
-async def test_the_status_tab_shows_pending_files_and_the_last_file_ingested(
-    repo,
-) -> None:
-    """Both come with the execution state, so they cost no query of their
-    own. Last Ingested is when the pipe received its newest file, loaded or
-    failed, near real time unlike the Activity tab; a pipe that never
-    received one has none, and its cell stays blank."""
+async def test_the_status_tab_shows_each_pipes_pending_files(repo) -> None:
+    """It comes with the execution state, so it costs no query of its own. A
+    pipe whose answer does not carry the count shows a blank, not a 0."""
     put_pipe(repo, "LOAD_CUSTOMERS")
     put_pipe(repo, "LOAD_ORDERS")
     load(
@@ -286,17 +282,13 @@ async def test_the_status_tab_shows_pending_files_and_the_last_file_ingested(
                 "PIPE_CATALOG_NAME": "MYDB",
                 "PIPE_SCHEMA_NAME": "PUBLIC",
                 "PIPE_NAME": "LOAD_CUSTOMERS",
-                "PIPE_STATUS": '{"executionState":"RUNNING","pendingFileCount":0}',
+                "PIPE_STATUS": '{"executionState":"RUNNING"}',
             },
             {
                 "PIPE_CATALOG_NAME": "MYDB",
                 "PIPE_SCHEMA_NAME": "PUBLIC",
                 "PIPE_NAME": "LOAD_ORDERS",
-                "PIPE_STATUS": (
-                    '{"executionState":"RUNNING","pendingFileCount":1234,'
-                    '"lastIngestedTimestamp":"2026-11-03T20:11:26.046Z",'
-                    '"lastIngestedFilePath":"bad_1.csv"}'
-                ),
+                "PIPE_STATUS": '{"executionState":"RUNNING","pendingFileCount":1234}',
             },
         ],
     )
@@ -307,9 +299,5 @@ async def test_the_status_tab_shows_pending_files_and_the_last_file_ingested(
         pane.show_category(scope)
         await pilot.pause()
         table = pane.query_one("#detail-status", DataTable)
-        assert table.get_cell_at((0, 3)).plain == "0"
-        assert table.get_cell_at((0, 4)).plain == ""
+        assert table.get_cell_at((0, 3)).plain == ""
         assert table.get_cell_at((1, 3)).plain == "1,234"
-        assert table.get_cell_at((1, 4)).plain == format_timestamp_minutes(
-            "2026-11-03T20:11:26.046Z"
-        )

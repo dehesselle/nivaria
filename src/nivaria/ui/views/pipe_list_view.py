@@ -81,7 +81,6 @@ _STATUS_COLUMNS = (
     "Created",
     "Execution State",
     "Pending Files",
-    "Last Ingested",
     "Invalid Reason",
 )
 _ACTIVITY_COLUMNS = (
@@ -99,10 +98,7 @@ _ACTIVITY_COLUMNS = (
 #: from, keyed by that column's header, one map per tab. Every other column
 #: has no tooltip.
 _TOOLTIP_FIELDS = {"Loaded": "LAST_LOAD_TIME"}
-_STATUS_TOOLTIP_FIELDS = {
-    "Created": "created_on",
-    "Last Ingested": "lastIngestedTimestamp",
-}
+_STATUS_TOOLTIP_FIELDS = {"Created": "created_on"}
 
 
 @register_category_view
@@ -255,13 +251,7 @@ class PipeListView(TabbedView, CategoryView):
             for row in self.repo.raw_rows(self.scope):
                 name = row["name"]
                 status = status_by_name.get(name, {})
-                merged = {
-                    **row,
-                    **activity_by_name.get(name, {}),
-                    # For the Last Ingested tooltip; no mirrored column shares
-                    # the name.
-                    "lastIngestedTimestamp": status.get("lastIngestedTimestamp"),
-                }
+                merged = {**row, **activity_by_name.get(name, {})}
                 self._rows[name] = merged
                 row_count = merged.get("ROW_COUNT")
                 activity_table.add_row(
@@ -279,7 +269,6 @@ class PipeListView(TabbedView, CategoryView):
                     Text(format_date(row.get("created_on"))),
                     Text(str(status.get("executionState") or "")),
                     Text(_count(status.get("pendingFileCount"))),
-                    Text(format_timestamp_minutes(status.get("lastIngestedTimestamp"))),
                     Text(row.get("invalid_reason") or ""),
                     key=name,
                 )
@@ -294,12 +283,11 @@ class PipeListView(TabbedView, CategoryView):
 def _pipe_status(status: str | None) -> dict[str, Any]:
     """SYSTEM$PIPE_STATUS' JSON as a dict, or empty.
 
-    `executionState` and `pendingFileCount` are always there.
-    `lastIngestedTimestamp` appears with a pipe's first file and moves on
-    with every file the pipe takes in, loaded or failed: it is the file's
-    PIPE_RECEIVED_TIME, not its load time (docs/snowflake-behavior.md "Pipe
-    execution state"). A pipe that never received one has none, so its
-    cell stays blank.
+    Its timestamps are deliberately not shown. None says when a pipe last
+    took in a file on every kind of pipe: a production pipe that loaded an
+    hour earlier reports neither `lastIngestedTimestamp` nor
+    `lastForwardedMessageTimestamp`, only times about its queue
+    (docs/snowflake-behavior.md "Pipe execution state").
     """
     if not status:
         return {}
