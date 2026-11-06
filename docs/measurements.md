@@ -97,8 +97,6 @@ Corpus loads:
 | Corpus | Size | Load time |
 | --- | --- | --- |
 | objects or schemas | ~2000 objects | ~5 ms |
-| columns | 30k cached columns | ~55–75 ms |
-| columns | 270k cached columns | ~700 ms |
 
 Ranking a whole object corpus, worst-case query:
 
@@ -108,7 +106,3 @@ Ranking a whole object corpus, worst-case query:
 | 10k | 14 ms |
 | 50k | 70 ms |
 | 100k | 150 ms |
-
-At 270k cached columns, ranking a single query took 73–450 ms depending on how
-selective it was. The column corpus routinely outnumbers the object corpus
-10–20x, which is why ranking runs in a thread.

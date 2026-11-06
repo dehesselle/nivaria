@@ -22,7 +22,6 @@ from nivaria.models import (
     ObjectRef,
     ObjectType,
     SchemaRef,
-    columns_scope,
     objects_scope,
     schemas_scope,
 )
@@ -75,32 +74,6 @@ def put(
                 "comment": "",
             }
             for name in names
-        ],
-    )
-
-
-def put_columns(
-    repo: Repository, schema: str, table: str, *names: str, database="MYDB"
-) -> None:
-    load(
-        repo,
-        columns_scope(database, schema, table),
-        [
-            {
-                "TABLE_CATALOG": database,
-                "TABLE_SCHEMA": schema,
-                "TABLE_NAME": table,
-                "COLUMN_NAME": name,
-                "ORDINAL_POSITION": index + 1,
-                "DATA_TYPE": "TEXT",
-                "IS_NULLABLE": "YES",
-                "COLUMN_DEFAULT": None,
-                "CHARACTER_MAXIMUM_LENGTH": None,
-                "NUMERIC_PRECISION": None,
-                "NUMERIC_SCALE": None,
-                "COMMENT": "",
-            }
-            for index, name in enumerate(names)
         ],
     )
 
@@ -179,51 +152,6 @@ def test_an_empty_database_list_has_an_empty_corpus(repo) -> None:
 
 def test_an_unknown_database_has_an_empty_corpus(repo) -> None:
     assert repo.search_corpus(["NOPE"]) == []
-
-
-# ------------------------------------------------------------ column corpus
-
-
-def test_the_column_corpus_pairs_a_column_with_its_owning_object(repo) -> None:
-    put(repo, ObjectType.TABLE, "SALES", "ORDERS")
-    put_columns(repo, "SALES", "ORDERS", "ID", "CUSTOMER_ID")
-    corpus = repo.search_column_corpus(["MYDB"])
-    assert sorted(column for _, column in corpus) == ["CUSTOMER_ID", "ID"]
-    ((ref, _),) = [pair for pair in corpus if pair[1] == "ID"]
-    assert ref == ObjectRef(
-        type=ObjectType.TABLE, database="MYDB", schema="SALES", name="ORDERS"
-    )
-
-
-def test_a_view_can_own_columns_too(repo) -> None:
-    put(repo, ObjectType.VIEW, "SALES", "ORDERS_V")
-    put_columns(repo, "SALES", "ORDERS_V", "ID")
-    ((ref, column),) = repo.search_column_corpus(["MYDB"])
-    assert ref.type is ObjectType.VIEW
-    assert column == "ID"
-
-
-def test_a_column_with_no_known_owning_object_is_excluded(repo) -> None:
-    """A stale leftover column row from a since-dropped table must not
-    surface, so the corpus is joined back to search_object rather than read
-    off information_schema_columns alone."""
-    put_columns(repo, "SALES", "GHOST", "ID")
-    assert repo.search_column_corpus(["MYDB"]) == []
-
-
-def test_the_column_corpus_is_scoped_to_the_given_databases(repo) -> None:
-    put(repo, ObjectType.TABLE, "SALES", "ORDERS")
-    put_columns(repo, "SALES", "ORDERS", "ID")
-    put(repo, ObjectType.TABLE, "SALES", "ORDERS", database="OTHERDB")
-    put_columns(repo, "SALES", "ORDERS", "OTHER_ID", database="OTHERDB")
-    assert [column for _, column in repo.search_column_corpus(["MYDB"])] == ["ID"]
-    assert sorted(
-        column for _, column in repo.search_column_corpus(["MYDB", "OTHERDB"])
-    ) == ["ID", "OTHER_ID"]
-
-
-def test_an_unknown_database_has_an_empty_column_corpus(repo) -> None:
-    assert repo.search_column_corpus(["NOPE"]) == []
 
 
 # ------------------------------------------------------------ schema corpus
@@ -357,65 +285,6 @@ async def test_a_schema_hit_shows_its_database_prefix_too(repo) -> None:
         await pilot.pause()
         await type_query(pilot, app, "stag")
         assert option_text(app, 0).startswith("MYDB.STAGING")
-
-
-# --------------------------------------------------- column search: disabled
-
-
-async def test_column_search_is_disabled_for_now(repo) -> None:
-    """Cross-database column search is not ready for prime time yet -- the
-    call that would load the column corpus is commented out in
-    SearchDialog.on_mount (see docs/DESIGN.md "Accepted design gaps"), so a query that only
-    matches via a column now surfaces nothing at all."""
-    put(repo, ObjectType.TABLE, "SALES", "ORDERS")
-    put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "custid")
-        assert shown(app) == []
-
-
-async def test_a_query_shorter_than_the_gate_does_not_search_columns(repo) -> None:
-    """A short, generic fragment scoring against the whole column corpus is
-    the expensive, low-relevance case MIN_COLUMN_QUERY_LENGTH exists to skip
-    -- see search.py. Column search is disabled entirely right now anyway
-    (see test_column_search_is_disabled_for_now), so this stays empty either
-    way, but the gate itself is still exercised once the corpus is back."""
-    put(repo, ObjectType.TABLE, "SALES", "ORDERS")
-    put_columns(repo, "SALES", "ORDERS", "ID")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "id")  # 2 chars, below the gate of 3
-        assert shown(app) == []
-
-
-async def test_a_hit_on_the_objects_own_name_still_works(repo) -> None:
-    """The object corpus is unaffected by column search being disabled."""
-    put(repo, ObjectType.TABLE, "SALES", "ORDERS")
-    put_columns(repo, "SALES", "ORDERS", "CUSTOMER_ID")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "orders")
-        assert shown(app) == ["SALES.ORDERS"]
-        assert "CUSTOMER_ID" not in option_text(app, 0)
-
-
-async def test_a_name_match_is_unaffected_by_a_same_object_column(repo) -> None:
-    """A name match ranks the object regardless of whether a column of the
-    same object also happens to share letters with the query -- moot for
-    ranking purposes while columns are disabled, but the object-name path
-    itself must still work."""
-    put(repo, ObjectType.TABLE, "SALES", "ORD")
-    put_columns(repo, "SALES", "ORD", "ORD_STATUS")
-    app = Harness(repo)
-    async with app.run_test(size=(80, 30)) as pilot:
-        await pilot.pause()
-        await type_query(pilot, app, "ord")
-        assert shown(app) == ["SALES.ORD"]
-        assert "ORD_STATUS" not in option_text(app, 0)
 
 
 async def test_a_schema_name_surfaces_as_a_hit(repo) -> None:
@@ -666,11 +535,8 @@ async def test_objects_added_after_opening_are_invisible_until_the_dialog_reopen
         await pilot.pause()
         # Loading is kicked off in on_mount but finishes on its own schedule
         # (see search.py) -- awaited explicitly here so the mutation below is
-        # deterministically *after* the snapshot, not racing it. Column
-        # loading is disabled (self._columns_loaded stays None), so only the
-        # object and schema loads are awaited.
-        await app.screen._objects_loaded
-        await app.screen._schemas_loaded
+        # deterministically *after* the snapshot, not racing it.
+        await app.screen._loaded
         put(repo, ObjectType.TABLE, "SALES", "ORDERS", "CUSTOMERS")
         await type_query(pilot, app, "cust")
         assert shown(app) == []
@@ -716,8 +582,7 @@ async def test_the_list_corrects_itself_once_a_slow_load_lands(repo) -> None:
         await pilot.pause()
         await type_query(pilot, app, "ord")
         release.set()
-        await app.screen._objects_loaded
-        await app.screen._schemas_loaded
+        await app.screen._loaded
         await pilot.pause()
         assert shown(app) == ["SALES.ORDERS"]
 

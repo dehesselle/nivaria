@@ -27,11 +27,7 @@ from nivaria.fuzzy import highlight, rank
 #: More than a screenful is wasted ranking; the query narrows it anyway.
 MAX_RESULTS = 200
 
-#: Separates multiple hints on the same candidate. Same glyph SearchDialog
-#: uses between an object's type and a matched column name, but spaced evenly
-#: on both sides here: SearchDialog's "  · " is a connector appended after an
-#: already-spaced "  {type}" segment, not a `str.join` separator sitting
-#: between two bare strings with nothing else contributing spacing.
+#: Separates multiple hints on the same candidate.
 _HINT_SEPARATOR = " · "
 
 

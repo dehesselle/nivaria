@@ -1714,11 +1714,7 @@ Find-as-you-type over every cached object and schema across every selected
 database, ranked by subsequence matching so `stgord` finds
 `STG_CUSTOMER_ORDERS`. Substring search would not, which is the whole point;
 sqlite's full-text matching cannot express it either, so ranking happens in
-Python over three in-memory corpora — object names, column names (paired with
-their owning object), and schema names. Column search is disabled (see
-"Accepted design gaps"), but the corpus and its ranking logic below are
-described as live, since the code is intact and only its one call site in
-`SearchDialog.on_mount` is commented out.
+Python over two in-memory corpora: object names and schema names.
 
 A trigram/substring index (SQLite's FTS5) was considered as a way to push
 matching into SQL instead. Rejected: it cannot express subsequence matching
@@ -1728,26 +1724,20 @@ prefilter would discard the exact match subsequence matching exists for,
 silently, on every query that relies on it. The two are different matching
 semantics, not one faster than the other for the same job.
 
-### Loading: three corpora, independently
+### Loading
 
-Each corpus loads as its own background task, kicked off in `on_mount` but
-not awaited there — first paint is not delayed behind any of them. Object and
-schema lists are cheap, but the column corpus is real work at scale (see
-[measurements.md](measurements.md#search)). Fetching all three together would
-mean the cheap ones wait on the slowest — splitting them means name and schema
-matches are usable almost immediately, with column matches joining in once
-their own load lands (while column search is disabled, only two of the three
-loads fire).
+The corpora load as one background task, kicked off in `on_mount` but not
+awaited there, so first paint is not delayed behind it (see
+[measurements.md](measurements.md#search)).
 
-Typing never waits on a load either: ranking proceeds against whatever
-corpus already exists — empty, partial, or complete — and each load re-runs
-the current query itself once it finishes, so the list corrects itself in
-place rather than a keystroke ever blocking on it. **Enter is the one
-exception**: choosing a result and closing the dialog is a commitment a
-still-partial corpus should not get to make, so that path alone waits for
-every load that is actually running first.
+Typing never waits on the load either: ranking proceeds against whatever corpus
+already exists, empty or complete, and the load re-runs the current query itself
+once it finishes, so the list corrects itself in place rather than a keystroke
+ever blocking on it. **Enter is the one exception**: choosing a result and closing
+the dialog is a commitment a still-empty corpus should not get to make, so that
+path alone waits for the load first.
 
-None of the three corpora carry live staleness tracking, for the same reason:
+Neither corpus carries live staleness tracking, for the same reason:
 there is no widget left mounted for a cache update to mark them stale while
 the dialog is open. `NivariaApp` routes `CacheUpdated` to `self.screen`,
 which while the modal is open is the modal itself, not `MainScreen`, so a
@@ -1806,31 +1796,20 @@ mid-query edit or a paste. Whatever a filter word matched is highlighted,
 including in the otherwise dim database prefix, so a row shows why it
 stayed.
 
-Column and schema names are matched against the bare name only — there is no
-schema-repeats-in-object-name ambiguity to resolve for either, so the simpler
-matcher is enough. A table matched by both its own name and one of its
-columns keeps whichever scored higher; a schema hit never competes with an
-object/column hit for the same slot, since a schema is its own kind of thing
-(see `SchemaRef` below), not a rival reading of the same one.
-
-Below `MIN_COLUMN_QUERY_LENGTH` characters (a plain module constant in
-`search.py`, not a Setting — a tuning knob for one machine's cache size, not
-a per-user preference), ranking skips the column corpus entirely; object and
-schema names are still matched at any length. A short, generic fragment
-scores against every cached column for little relevance benefit and, with
-a large column cache, real per-keystroke latency. Even so, this only skips
-queries shorter than the constant — a longer fragment still costs whatever
-ranking the full column corpus costs; the constant does not bound that.
+Schema names are matched against the bare name only — there is no
+schema-repeats-in-object-name ambiguity to resolve, so the simpler matcher is
+enough. A schema hit never competes with an object hit for the same slot, since
+a schema is its own kind of thing (see `SchemaRef` below), not a rival reading of
+the same one.
 
 Ranking runs in a thread (`asyncio.to_thread`), not on the event loop, and the
-input is debounced on top. Object corpora alone would be comfortable on the
-event loop, but the column corpus routinely outnumbers the object corpus
-10-20x (see [measurements.md](measurements.md#search)). The matcher is a plain
-function precisely so this stays an easy change.
+input is debounced on top, because a worst-case query over a large selection
+takes long enough to feel (see [measurements.md](measurements.md#search)). The
+matcher is a plain function, so it needs no widget to run there.
 
 ### Choosing a hit
 
-Choosing an object or column hit **reveals it in the tree** (`ObjectTree.
+Choosing an object hit **reveals it in the tree** (`ObjectTree.
 reveal`) as well as opening it in the detail pane, so search leaves you
 somewhere you can keep browsing from. The object is scrolled to the middle
 of the tree rather than the least distance into view, which would pin a hit
@@ -2069,11 +2048,8 @@ Detail pane's own `fr` absorbs whatever is left.
   exercised so far.
 - Databases aren't themselves a *searchable hit* the way a schema is:
   selecting one is a picker action, not a search result.
-- Column search is implemented end to end at the repository layer
-  (`Repository.search_column_corpus`) but its one call site in
-  `SearchDialog.on_mount` is commented out — cross-database column search was
-  judged not ready. Restoring that call alone would find only the columns of
-  tables someone has opened: nothing fills a database's columns in bulk.
+- Column names are not searched. Only the columns of tables someone has opened
+  are cached: nothing fills a database's columns in bulk.
 - The Data tab shows what the driver returns, and the driver loses a little
   on the way: a `DECFLOAT` is rounded to 28 significant digits, `TIME` and
   `TIMESTAMP` values are cut to microseconds, and a `TIMESTAMP_LTZ` comes in
