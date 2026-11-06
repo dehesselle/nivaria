@@ -16,7 +16,10 @@ rendered one row per grantee by `grants.py`, the same as the Table view's) and
 **Tags** (INFORMATION_SCHEMA.TAG_REFERENCES, an ordinary SELECT that needs a
 running warehouse and so degrades to blank without one, the same dual-source
 pattern table_stats/information_schema_tables established -- see docs/DESIGN.md's
-"second source" section). The shared machinery lives in _GrantsTagsView;
+"second source" section). Tags are fetched only while their tab is shown, like
+the Table view's Grants and Data: every cursor stop on a schema would otherwise
+use the warehouse, and nothing shows the result until the tab opens. The shared
+machinery lives in _GrantsTagsView;
 SchemaView and DatabaseView differ only in which scopes they read and how
 they're re-pointed to a new object -- not enough difference to justify two
 independently maintained tab/table implementations (ColumnsView/TableView/
@@ -84,15 +87,18 @@ class _GrantsTagsView(_ScopedView):
     @abstractmethod
     def tags_scope(self) -> Scope: ...
 
+    def _tags_shown(self) -> bool:
+        return self.is_mounted and self.query_one(TabbedContent).active == "tab-tags"
+
     def scopes(self) -> list[Scope]:
-        return [self.grants_scope(), self.tags_scope()]
+        scopes = [self.grants_scope()]
+        if self._tags_shown():
+            scopes.append(self.tags_scope())
+        return scopes
 
     def update_content(self) -> None:
-        ttl = config.get(CACHE_TTL)
         grants = self.grants_scope()
-        tags = self.tags_scope()
-        self.ensure(grants, ttl)
-        self.ensure(tags, ttl)
+        self.ensure(grants, config.get(CACHE_TTL))
 
         paint_grants(self, self.grants_panel, self.repo.raw_rows(grants))
         sync_scope_note(
@@ -101,6 +107,12 @@ class _GrantsTagsView(_ScopedView):
             empty=f"No grants on this {self.NOUN} that your role can see.",
             looking="Looking for grants...",
         )
+        if self._tags_shown():
+            self._update_tags()
+
+    def _update_tags(self) -> None:
+        tags = self.tags_scope()
+        self.ensure(tags, config.get(CACHE_TTL))
         sync_scope_note(
             self.query_one(f"#{TAGS_NOTE}", Static),
             self.repo.entry(tags),
@@ -117,6 +129,12 @@ class _GrantsTagsView(_ScopedView):
                     Text(row.get("TAG_NAME") or ""),
                     Text(row.get("TAG_VALUE") or ""),
                 )
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        if event.pane.id == "tab-tags":
+            self._update_tags()
 
 
 class SchemaView(_GrantsTagsView):

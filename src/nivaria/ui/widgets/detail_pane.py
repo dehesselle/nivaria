@@ -9,18 +9,27 @@ as the one already mounted, the view is re-pointed rather than remounted. That
 is what makes arrowing down a list of three hundred tables cheap -- the widget,
 its columns and its scroll position all survive, and there is no flicker.
 A different type is a genuine change of shape, so that view is replaced.
+
+The pane also holds back what a view asks of Snowflake until the tree cursor
+has rested on it (`CURSOR_SETTLE_MS`). A view still paints what is cached at
+once. Deciding only after the wait, rather than deciding at paint time and
+holding the requests, leaves no list of them to keep up to date, and the
+answer reflects the cache when the cursor stopped.
 """
 
 from __future__ import annotations
 
 from textual.containers import Vertical
+from textual.timer import Timer
 from textual.widgets import Static
 
 from nivaria.cache.repository import Repository
 from nivaria.models import ObjectRef, SchemaRef, Scope
+from nivaria.settings import CACHE_TTL, CURSOR_SETTLE_MS, config
 from nivaria.ui.views.base import (
     CategoryView,
     ObjectView,
+    _ScopedView,
     category_view_for,
     view_for,
 )
@@ -38,6 +47,7 @@ class DetailPane(Vertical):
         self._scope: Scope | None = None
         self._schema: SchemaRef | None = None
         self._database: str | None = None
+        self._settle_timer: Timer | None = None
 
     @property
     def view(self) -> ObjectView | CategoryView | SchemaView | DatabaseView | None:
@@ -72,12 +82,14 @@ class DetailPane(Vertical):
 
         current = self._view
         if current is not None and type(current) is view_class:
+            self._wait_for_cursor(current)
             current.show(ref)
             return current
 
         self.remove_children()
         view = view_class(self.repo, ref)
         self._view = view
+        self._wait_for_cursor(view)
         self.mount(view)
         return view
 
@@ -103,12 +115,14 @@ class DetailPane(Vertical):
 
         current = self._view
         if current is not None and type(current) is view_class:
+            self._wait_for_cursor(current)
             current.show(scope)
             return current
 
         self.remove_children()
         view = view_class(self.repo, scope)
         self._view = view
+        self._wait_for_cursor(view)
         self.mount(view)
         return view
 
@@ -129,12 +143,14 @@ class DetailPane(Vertical):
 
         current = self._view
         if type(current) is SchemaView:
+            self._wait_for_cursor(current)
             current.show(ref)
             return current
 
         self.remove_children()
         view = SchemaView(self.repo, ref)
         self._view = view
+        self._wait_for_cursor(view)
         self.mount(view)
         return view
 
@@ -149,12 +165,14 @@ class DetailPane(Vertical):
 
         current = self._view
         if type(current) is DatabaseView:
+            self._wait_for_cursor(current)
             current.show(database)
             return current
 
         self.remove_children()
         view = DatabaseView(self.repo, database)
         self._view = view
+        self._wait_for_cursor(view)
         self.mount(view)
         return view
 
@@ -181,8 +199,43 @@ class DetailPane(Vertical):
             self._view.cache_updated(scope)
 
     def scopes(self) -> list[Scope]:
-        """What the pane is reading, for the staleness sweep."""
+        """What the pane is reading."""
         return self._view.scopes() if self._view is not None else []
+
+    def watched_scopes(self) -> list[Scope]:
+        """What the staleness sweep may refresh: nothing until the cursor has
+        rested. A scope never fetched is due at once, so the footer's tick
+        would otherwise run a query for whichever row the cursor is passing.
+        """
+        return self.scopes() if self._view is not None and self._view.settled else []
+
+    def _wait_for_cursor(self, view: _ScopedView) -> None:
+        """Hold back what `view` asks for until the cursor has rested on it."""
+        if self._settle_timer is not None:
+            self._settle_timer.stop()
+            self._settle_timer = None
+        # Read here rather than at construction, like every setting, so a
+        # change applies to the next selection.
+        delay = config.get(CURSOR_SETTLE_MS)
+        view.settled = delay <= 0
+        if not view.settled:
+            self._settle_timer = self.set_timer(delay / 1000, self._cursor_rested)
+
+    def _cursor_rested(self) -> None:
+        """Ask what the view on screen needs, now that the cursor has stopped.
+
+        A view not mounted yet asks when it first paints. One that is asks
+        from its own message pump, not from this timer's: Textual stops a
+        message from bubbling past its sender, so a `ScopeNeeded` sent from
+        the pane's pump would never leave the pane.
+        """
+        self._settle_timer = None
+        view = self._view
+        if view is None:
+            return
+        view.settled = True
+        if view.is_mounted:
+            view.call_later(view.ensure_all, config.get(CACHE_TTL))
 
     def _show_placeholder(self, message: str) -> None:
         self._view = None

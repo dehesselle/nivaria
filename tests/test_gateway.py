@@ -12,7 +12,7 @@ import pytest
 from nivaria.gateway.gateway import PoolGateway
 from nivaria.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
 from nivaria.models import ObjectType
-from tests.fakes import CancelledError, MissingObjectError
+from tests.fakes import CancelledError, MissingFromListingError, MissingObjectError
 
 
 class RecordingCursor:
@@ -202,18 +202,20 @@ def test_a_query_that_keeps_failing_surfaces_the_real_error() -> None:
     assert connection.attempts == 2
 
 
-def test_a_missing_object_is_not_retried() -> None:
+@pytest.mark.parametrize("error", [MissingObjectError, MissingFromListingError])
+def test_a_missing_object_is_not_retried(error: type[Exception]) -> None:
     """A dropped schema is just as dropped on a fresh connection, so a retry
     would only double the round trip."""
     gateway, connection, _ = make_gateway()
-    connection.error = MissingObjectError("Schema 'MYDB.GONE' does not exist")
+    connection.error = error("Schema 'MYDB.GONE' does not exist")
     connection.fail_times = 5
-    with pytest.raises(MissingObjectError):
+    with pytest.raises(error):
         gateway.show_grants_on_schema("MYDB", "GONE")
     assert connection.attempts == 1
 
 
-def test_a_missing_object_keeps_its_healthy_connection() -> None:
+@pytest.mark.parametrize("error", [MissingObjectError, MissingFromListingError])
+def test_a_missing_object_keeps_its_healthy_connection(error: type[Exception]) -> None:
     """The session that reported "does not exist" is fine; replacing it would
     open a new one, which can mean an MFA prompt."""
     connection = RecordingConnection()
@@ -226,9 +228,9 @@ def test_a_missing_object_keeps_its_healthy_connection() -> None:
     pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
     pool.connect_all()
     gateway = PoolGateway(pool)
-    connection.error = MissingObjectError("Schema 'MYDB.GONE' does not exist")
+    connection.error = error("Schema 'MYDB.GONE' does not exist")
     connection.fail_times = 1
-    with pytest.raises(MissingObjectError):
+    with pytest.raises(error):
         gateway.show_grants_on_schema("MYDB", "GONE")
     assert len(connects) == 1
     assert pool.size == 1

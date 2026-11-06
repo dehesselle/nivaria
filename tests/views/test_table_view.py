@@ -132,6 +132,7 @@ async def test_the_pane_reports_the_scopes_it_reads(repo) -> None:
         pane.show(ref)
         await pilot.pause()
         assert [s.key for s in pane.scopes()] == [
+            "tables:MYDB.PUBLIC",
             "columns:MYDB.PUBLIC.ORDERS",
             "column_tag_references:MYDB.PUBLIC.ORDERS",
         ]

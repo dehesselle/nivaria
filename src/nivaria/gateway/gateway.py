@@ -77,9 +77,12 @@ def compact_json_text(text: str) -> str:
     return "".join(out)
 
 
-#: Snowflake's error number for "<object> does not exist or not authorized",
-#: printed as `002003 (02000)`.
-_MISSING_OBJECT_ERRNO = 2003
+#: Snowflake's error numbers for what a statement names being gone: 2003 is
+#: "<object> does not exist or not authorized", 2043 "Object does not exist, or
+#: operation cannot be performed". Which one depends on the statement, not the
+#: object: a dropped schema answers `SHOW PIPES` with 2003 and `SHOW TABLES`
+#: with 2043 (see docs/snowflake-behavior.md "Missing objects").
+_MISSING_OBJECT_ERRNOS = frozenset({2003, 2043})
 
 
 def is_missing_object(error: BaseException) -> bool:
@@ -87,11 +90,11 @@ def is_missing_object(error: BaseException) -> bool:
 
     Read off the driver error's `errno` rather than its message: the text
     varies by object kind ("Schema ... does not exist", "Table ... does not
-    exist", "Object does not exist"), the number does not. `getattr` rather
+    exist", "Object does not exist"), the numbers do not. `getattr` rather
     than an isinstance check against the driver's ProgrammingError, so this
     module still never imports the driver and a fake can raise it.
     """
-    return getattr(error, "errno", None) == _MISSING_OBJECT_ERRNO
+    return getattr(error, "errno", None) in _MISSING_OBJECT_ERRNOS
 
 
 #: Snowflake's error number for "SQL execution canceled", printed as

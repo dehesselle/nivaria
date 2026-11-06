@@ -101,8 +101,13 @@ class TaskView(HistoryView, ObjectView):
     def scopes(self) -> list[Scope]:
         # No gating here, unlike PipeView -- see the module docstring: both
         # sources take this task's identity directly, with nothing to resolve
-        # first, so both are always meaningfully "on screen".
-        return [self.activity_history_scope(), self.history_scope()]
+        # first, so both are always meaningfully "on screen". The listing is
+        # here so the SQL tab repaints when it lands.
+        return [
+            self.listing_scope(),
+            self.activity_history_scope(),
+            self.history_scope(),
+        ]
 
     def update_content(self) -> None:
         self._update_history()

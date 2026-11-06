@@ -16,7 +16,8 @@ def test_write_json_atomic_creates_parent_dirs(tmp_path) -> None:
 def test_write_json_atomic_leaves_no_tmp_file_behind(tmp_path) -> None:
     path = tmp_path / "data.json"
     write_json_atomic(path, [1, 2])
-    assert [p.name for p in tmp_path.iterdir()] == ["data.json"]
+    # Files only: tmp_path also holds the isolated config directory.
+    assert [p.name for p in tmp_path.iterdir() if p.is_file()] == ["data.json"]
 
 
 def test_read_json_returns_the_default_for_a_missing_file(tmp_path) -> None:

@@ -31,6 +31,13 @@ class MissingObjectError(Exception):
     errno = 2003
 
 
+class MissingFromListingError(MissingObjectError):
+    """The same for the statements Snowflake answers with errno 2043 instead,
+    "Object does not exist, or operation cannot be performed"."""
+
+    errno = 2043
+
+
 class CancelledError(Exception):
     """Stands in for the driver's error for a statement its timeout
     cancelled: Snowflake reports it as errno 604, "SQL execution canceled",
@@ -332,6 +339,14 @@ class FakeGateway:
         self.calls.append(
             ("show_objects", (object_type, database, schema, after, limit))
         )
+        # As live: which number a dropped schema gets depends on the statement.
+        if object_type in (ObjectType.TABLE, ObjectType.VIEW, ObjectType.STAGE) and (
+            (database, schema) in self.dropped_schemas
+        ):
+            raise MissingFromListingError(
+                "SQL execution error:\n"
+                "Object does not exist, or operation cannot be performed."
+            )
         self._check_schema(database, schema)
         all_names = self.objects.get((database, schema, object_type), [])
         if object_type in self.paging_noop_types:

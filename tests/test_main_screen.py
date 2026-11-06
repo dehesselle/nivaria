@@ -26,19 +26,25 @@ from nivaria.models import (
     columns_scope,
     databases_scope,
     objects_scope,
+    pipe_activity_scope,
+    prime_scope,
     schemas_scope,
+    task_activity_history_scope,
+    task_activity_scope,
+    task_history_scope,
 )
 from nivaria.profiles import Profile, ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import Priority
-from nivaria.settings import SNOWSIGHT_URL, config
-from nivaria.ui.messages import ScopeNeeded
+from nivaria.settings import CURSOR_SETTLE_MS, SNOWSIGHT_URL, config
+from nivaria.ui.messages import CategorySelected, ObjectSelected, ScopeNeeded
 from nivaria.ui.screens.main import CacheUpdated, MainScreen
 from nivaria.ui.screens.multipicker import MultiPickerDialog
 from nivaria.ui.screens.picker import PickerDialog
 from nivaria.ui.views.schema_view import DatabaseView, SchemaView
-from nivaria.ui.widgets.object_tree import ObjectTree
+from nivaria.ui.widgets.object_tree import TREE_TYPES, ObjectTree
 from tests.fakes import FakeConnector, FakeGateway, make_pool
+from tests.views.harness import put_pipe, put_stage, put_table, put_task, put_view
 
 
 class RecordingFetch:
@@ -47,6 +53,7 @@ class RecordingFetch:
     def __init__(self) -> None:
         self.requests: list[tuple[str, int]] = []
         self.cancelled: list[str] = []
+        self.predicates: list = []
         self.busy: set[str] = set()
 
     def request(self, scope, priority) -> bool:
@@ -59,6 +66,7 @@ class RecordingFetch:
 
     def cancel_where(self, predicate) -> list:
         self.cancelled.append("called")
+        self.predicates.append(predicate)
         return []
 
     def is_busy(self, scope) -> bool:
@@ -625,11 +633,7 @@ async def test_refresh_targets_the_scope_under_the_cursor(repo) -> None:
         fetch.requests.clear()
         screen.action_refresh()
         await pilot.pause()
-    assert sorted(fetch.scopes) == [
-        "grants:MYDB",
-        "schemas:MYDB",
-        "tag_references:MYDB",
-    ]
+    assert sorted(fetch.scopes) == ["grants:MYDB", "schemas:MYDB"]
 
 
 async def test_refresh_on_a_schema_node_refreshes_the_list_it_is_in(repo) -> None:
@@ -653,11 +657,84 @@ async def test_refresh_on_a_schema_node_refreshes_the_list_it_is_in(repo) -> Non
         fetch.requests.clear()
         screen.action_refresh()
         await pilot.pause()
-    assert sorted(fetch.scopes) == [
-        "grants:MYDB.AAA",
-        "schemas:MYDB",
-        "tag_references:MYDB.AAA",
-    ]
+    assert sorted(fetch.scopes) == ["grants:MYDB.AAA", "schemas:MYDB"]
+
+
+async def _cursor_on_category(pilot, screen, object_type: ObjectType, schema: str):
+    """Expand down to a category of the first database and put the cursor on it."""
+    tree = screen.query_one(ObjectTree)
+    database_node = tree.root.children[0]
+    database_node.expand()
+    await pilot.pause()
+    schema_node = next(n for n in database_node.children if n.data.key == schema)
+    schema_node.expand()
+    await pilot.pause()
+    category = next(n for n in schema_node.children if n.data.key == object_type.value)
+    tree.focus()
+    tree.move_cursor(category)
+    await settle(pilot)
+    return category
+
+
+@pytest.mark.parametrize("object_type", TREE_TYPES)
+async def test_refresh_on_a_category_asks_for_its_own_schema_not_the_database(
+    repo, object_type: ObjectType
+) -> None:
+    """A prime would succeed on a dropped schema and leave its node standing.
+    The per-schema SHOW fails instead, which refreshes the schema list and
+    removes the node at once."""
+    put_databases(repo, "MYDB")
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        await _cursor_on_category(pilot, screen, object_type, "AAA")
+        fetch.requests.clear()
+        screen.action_refresh()
+        await pilot.pause()
+    assert objects_scope(object_type, "MYDB", "AAA").key in fetch.scopes
+    assert prime_scope(object_type, "MYDB").key not in fetch.scopes
+
+
+@pytest.mark.parametrize(
+    ("object_type", "put"),
+    [
+        (ObjectType.PIPE, put_pipe),
+        (ObjectType.STAGE, put_stage),
+        (ObjectType.TASK, put_task),
+        (ObjectType.TABLE, put_table),
+        (ObjectType.VIEW, put_view),
+    ],
+)
+async def test_refresh_on_an_object_refreshes_the_list_it_is_in(
+    repo, object_type: ObjectType, put
+) -> None:
+    """Its view reads its SQL from that list, and only the list shows that a
+    pipe was dropped: the statements a pipe's view sends succeed without it."""
+    put_databases(repo, "MYDB")
+    put_schemas(repo, "MYDB", "PUBLIC")
+    put(repo, "THING")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        category = await _cursor_on_category(pilot, screen, object_type, "PUBLIC")
+        category.expand()
+        await pilot.pause()
+        screen.query_one(ObjectTree).move_cursor(category.children[0])
+        await settle(pilot)
+        fetch.requests.clear()
+        screen.action_refresh()
+        await pilot.pause()
+    assert objects_scope(object_type, "MYDB", "PUBLIC").key in fetch.scopes
+    assert prime_scope(object_type, "MYDB").key not in fetch.scopes
 
 
 async def test_refresh_with_nothing_under_the_cursor_asks_for_nothing(repo) -> None:
@@ -702,7 +779,124 @@ async def test_refresh_asks_for_the_detail_panes_scopes_while_they_are_fresh(
         fetch.requests.clear()
         screen.action_refresh()
         await pilot.pause()
-    assert fetch.scopes == [pipe_activity_scope("MYDB", "PUBLIC").key]
+    assert fetch.scopes == [
+        objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC").key,
+        pipe_activity_scope("MYDB", "PUBLIC").key,
+    ]
+
+
+async def test_the_sweep_leaves_a_view_alone_until_the_cursor_has_rested(repo) -> None:
+    """A task never fetched is due at once, so the footer's tick would
+    otherwise run a 90-day query for whichever row a held arrow key is on."""
+    config.set(CURSOR_SETTLE_MS, 60_000)
+    ref = put_task(repo, "NIGHTLY")
+    history = task_activity_history_scope("MYDB", "PUBLIC", "NIGHTLY").key
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.on_object_selected(ObjectSelected(ref))
+        await pilot.pause()
+        screen._tick()
+        await pilot.pause()
+        assert history not in fetch.scopes
+        screen.detail._cursor_rested()
+        await pilot.pause()
+        assert history in fetch.scopes
+
+
+async def test_a_real_wait_ends_with_an_interactive_request(repo) -> None:
+    """Through the real timer, which runs in the pane's message pump. Textual
+    stops a message from bubbling past its sender, so a request sent from
+    there would never reach this screen, and only the sweep would fetch it."""
+    config.set(CURSOR_SETTLE_MS, 10)
+    ref = put_task(repo, "NIGHTLY")
+    history = task_activity_history_scope("MYDB", "PUBLIC", "NIGHTLY").key
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.on_object_selected(ObjectSelected(ref))
+        await pilot.pause(0.2)
+    assert (history, int(Priority.INTERACTIVE)) in fetch.requests
+
+
+async def test_refresh_does_not_wait_for_the_cursor_to_rest(repo) -> None:
+    """F5 is a request made on purpose."""
+    config.set(CURSOR_SETTLE_MS, 60_000)
+    ref = put_task(repo, "NIGHTLY")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.on_object_selected(ObjectSelected(ref))
+        await pilot.pause()
+        screen.action_refresh()
+        await pilot.pause()
+    assert task_activity_history_scope("MYDB", "PUBLIC", "NIGHTLY").key in fetch.scopes
+
+
+async def test_moving_on_cancels_what_only_the_previous_view_was_waiting_on(
+    repo,
+) -> None:
+    """Resting on each of ten tasks would otherwise queue ten 90-day
+    statements, with the one on screen behind the rest."""
+    first = put_task(repo, "FIRST")
+    second = put_task(repo, "SECOND")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.on_object_selected(ObjectSelected(first))
+        await pilot.pause()
+        screen.on_object_selected(ObjectSelected(second))
+        await pilot.pause()
+    dropped = fetch.predicates[-1]
+    assert dropped(task_activity_history_scope("MYDB", "PUBLIC", "FIRST"))
+    assert dropped(task_history_scope("MYDB", "PUBLIC", "FIRST"))
+    assert not dropped(task_activity_history_scope("MYDB", "PUBLIC", "SECOND"))
+
+
+async def test_moving_on_keeps_the_listing_the_tree_shares(repo) -> None:
+    """Moving from a list view to anything else must not take the list from
+    under the tree, which reads it too."""
+    put_task(repo, "NIGHTLY")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.on_category_selected(
+            CategorySelected(objects_scope(ObjectType.TASK, "MYDB", "PUBLIC"))
+        )
+        await pilot.pause()
+        screen.on_category_selected(
+            CategorySelected(objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC"))
+        )
+        await pilot.pause()
+    dropped = fetch.predicates[-1]
+    assert dropped(task_activity_scope("MYDB", "PUBLIC"))
+    assert not dropped(objects_scope(ObjectType.TASK, "MYDB", "PUBLIC"))
+
+
+async def test_moving_between_two_pipes_keeps_their_shared_snapshot(repo) -> None:
+    """Both views read the same schema-wide statement, so it stays queued."""
+    first = put_pipe(repo, "FIRST")
+    second = put_pipe(repo, "SECOND")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.on_object_selected(ObjectSelected(first))
+        await pilot.pause()
+        screen.on_object_selected(ObjectSelected(second))
+        await pilot.pause()
+    for dropped in fetch.predicates:
+        assert not dropped(pipe_activity_scope("MYDB", "PUBLIC"))
 
 
 async def test_a_full_refresh_forgets_coverage_of_the_log_scopes_on_screen(

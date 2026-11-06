@@ -654,6 +654,29 @@ def test_a_schema_dropped_elsewhere_leaves_the_cache_once_a_fetch_finds_it_gone(
     assert errors == [("grants:MYDB.GONE", True)]
 
 
+@pytest.mark.parametrize("object_type", list(ObjectType))
+def test_every_listing_of_a_dropped_schema_refreshes_the_schema_list(
+    repo, object_type: ObjectType
+) -> None:
+    """Snowflake answers some of these with errno 2003 and some with 2043, so
+    this is what F5 on any category relies on to remove the schema's node."""
+    gateway = FakeGateway(schemas={"MYDB": ["AAA", "GONE"]})
+    cache_schemas(repo, "MYDB", "AAA", "GONE")
+    gateway.drop_schema("MYDB", "GONE")
+    errors: list[tuple[str, bool]] = []
+    service = make_service(
+        gateway,
+        repo,
+        on_error=lambda s, message, missing: errors.append((s.key, missing)),
+    )
+    try:
+        service.request(objects_scope(object_type, "MYDB", "GONE"))
+        assert wait_until(lambda: cached_schema_names(repo, "MYDB") == ["AAA"])
+    finally:
+        service.stop()
+    assert errors == [(objects_scope(object_type, "MYDB", "GONE").key, True)]
+
+
 def test_a_failure_that_is_not_a_missing_object_refreshes_nothing_else(
     repo,
 ) -> None:

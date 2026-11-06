@@ -12,11 +12,11 @@ The Grants and Data tabs are fetched only while they are shown. Neither
 `SHOW GRANTS ON <object>` nor an object's rows have a schema-wide form to
 prime from, so every table or view is its own round trip, and opening one
 already costs two (its columns and their tags). Fetching either on open as
-well would add to every object the tree cursor passes over, for tabs most
-visits never look at. Data also needs a warehouse, and wakes it -- and for a
-view it runs the view's own query, which the preview's LIMIT does not
-shorten when that query aggregates or sorts. That is what the preview's
-timeout (`PoolGateway.select_data_preview`) is for."""
+well would add to every object the tree cursor rests on, for tabs most
+visits never look at. For a view, Data also runs the view's own query, which
+the preview's LIMIT does not shorten when that query aggregates or sorts.
+That is what the preview's timeout (`PoolGateway.select_data_preview`) is
+for."""
 
 from __future__ import annotations
 
@@ -163,8 +163,14 @@ class ColumnsView(ObjectView):
         # Grants and Data only while their tab is up -- see the module
         # docstring. Listing one otherwise would have the staleness sweep
         # (which watches this) fetch it for a tab nobody is looking at, and
-        # route its updates into a repaint of it.
-        scopes = [self.columns_scope(), self.column_tags_scope()]
+        # route its updates into a repaint of it. The listing is here so what
+        # is read from the SHOW row repaints when it lands: a view's SQL, a
+        # table's row count in the Data note.
+        scopes = [
+            self.listing_scope(),
+            self.columns_scope(),
+            self.column_tags_scope(),
+        ]
         if self._tab_shown("tab-grants"):
             scopes.append(self.grants_scope())
         if self._tab_shown("tab-data"):

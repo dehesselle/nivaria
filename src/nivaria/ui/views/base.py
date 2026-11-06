@@ -33,7 +33,7 @@ from textual.widgets import DataTable
 from textual.widgets.data_table import CellDoesNotExist
 
 from nivaria.cache.repository import Repository
-from nivaria.models import ObjectRef, ObjectType, Scope, is_stale
+from nivaria.models import ObjectRef, ObjectType, Scope, is_stale, objects_scope
 from nivaria.ui.messages import ScopeNeeded
 
 _registry: dict[ObjectType, type[ObjectView]] = {}
@@ -56,6 +56,10 @@ class _ScopedView(Widget):
 
     #: The scope whose cache update this repaint answers, while it runs.
     _announcing: Scope | None = None
+
+    #: Whether the cursor has rested here long enough for `ensure` to ask
+    #: anything. `DetailPane` manages it; a view outside one is always settled.
+    settled: bool = True
 
     def cache_updated(self, scope: Scope) -> None:
         """Repaint if the scope that changed is one this view is showing."""
@@ -116,13 +120,26 @@ class _ScopedView(Widget):
         worker leaving `FetchService._running` before this ran. Reordering
         that would make the loop certain rather than remove it. The sweep and
         navigating back still retry it.
+
+        Nor while the cursor is still moving: `DetailPane` calls this for
+        every scope once it has rested, so the answer reflects the cache then
+        rather than when the cursor passed.
         """
-        if scope == self._announcing:
+        if not self.settled or scope == self._announcing:
             return False
         if is_stale(self.repo.entry(scope).age(), ttl):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
             return True
         return False
+
+    def ensure_all(self, ttl: float) -> None:
+        """Ask for whatever this view reads that is missing or stale.
+
+        `scopes()` already holds the conditions a paint asks under (tab shown,
+        target table resolved), so no second list of them can drift.
+        """
+        for scope in self.scopes():
+            self.ensure(scope, ttl)
 
 
 class ObjectView(_ScopedView):
@@ -137,6 +154,10 @@ class ObjectView(_ScopedView):
 
     def on_mount(self) -> None:
         self.update_content()
+
+    def listing_scope(self) -> Scope:
+        """The list holding this object's SHOW row, for a view that reads it."""
+        return objects_scope(self.ref.type, self.ref.database, self.ref.schema)
 
     def show(self, ref: ObjectRef) -> None:
         """Re-point an already mounted view at another object of its type.

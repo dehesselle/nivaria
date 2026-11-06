@@ -77,14 +77,44 @@ async def test_moving_from_a_database_to_a_schema_replaces_the_view(repo) -> Non
         assert len(pane.query(DatabaseView)) == 0
 
 
-async def test_missing_grants_and_tags_are_requested(repo) -> None:
+async def open_tags(pilot, view) -> None:
+    view.query_one(TabbedContent).active = "tab-tags"
+    await pilot.pause()
+
+
+async def test_missing_grants_are_requested_and_tags_are_not(repo) -> None:
+    """Selecting a schema must not use the warehouse for a tab nobody opened,
+    and nothing shows the result until it is."""
     ref = SchemaRef(database="MYDB", name="PUBLIC")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show_schema(ref)
         await pilot.pause()
     assert grants_scope("MYDB", "PUBLIC").key in app.needed
+    assert tag_references_scope("MYDB", "PUBLIC").key not in app.needed
+
+
+async def test_opening_the_tags_tab_requests_the_missing_tags(repo) -> None:
+    ref = SchemaRef(database="MYDB", name="PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        view = app.query_one(DetailPane).show_schema(ref)
+        await pilot.pause()
+        await open_tags(pilot, view)
     assert tag_references_scope("MYDB", "PUBLIC").key in app.needed
+
+
+async def test_moving_to_another_schema_on_the_tags_tab_requests_its_tags(repo) -> None:
+    """The tab stays open across schemas, so what it shows is the new one's."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC"))
+        await pilot.pause()
+        await open_tags(pilot, view)
+        pane.show_schema(SchemaRef(database="MYDB", name="OTHER"))
+        await pilot.pause()
+    assert tag_references_scope("MYDB", "OTHER").key in app.needed
 
 
 async def test_cached_grants_and_tags_are_not_re_requested(repo) -> None:
@@ -93,8 +123,9 @@ async def test_cached_grants_and_tags_are_not_re_requested(repo) -> None:
     put_tag(repo, "MYDB", "PUBLIC")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
-        app.query_one(DetailPane).show_schema(ref)
+        view = app.query_one(DetailPane).show_schema(ref)
         await pilot.pause()
+        await open_tags(pilot, view)
     assert app.needed == []
 
 
@@ -192,8 +223,9 @@ async def test_the_tags_table_lists_name_and_value_pairs(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
-        pane.show_schema(ref)
+        view = pane.show_schema(ref)
         await pilot.pause()
+        await open_tags(pilot, view)
         table = pane.query_one("#detail-tags", DataTable)
         assert table.row_count == 1
         assert table.get_cell_at((0, 0)).plain == "COST_CENTER"
@@ -207,8 +239,9 @@ async def test_the_tags_table_lists_each_value_of_a_multi_value_tag(repo) -> Non
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
-        pane.show_schema(ref)
+        view = pane.show_schema(ref)
         await pilot.pause()
+        await open_tags(pilot, view)
         table = pane.query_one("#detail-tags", DataTable)
         assert table.row_count == 2
         assert table.get_cell_at((0, 1)).plain == "ENG"
@@ -251,8 +284,9 @@ async def test_a_cache_update_for_the_shown_schemas_tags_repaints(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
-        pane.show_schema(ref)
+        view = pane.show_schema(ref)
         await pilot.pause()
+        await open_tags(pilot, view)
         assert pane.query_one("#detail-tags", DataTable).row_count == 0
 
         put_tag(repo, "MYDB", "PUBLIC")
@@ -261,17 +295,33 @@ async def test_a_cache_update_for_the_shown_schemas_tags_repaints(repo) -> None:
         assert pane.query_one("#detail-tags", DataTable).row_count == 1
 
 
-def test_schema_view_scopes_includes_both_grants_and_tags(repo) -> None:
-    ref = SchemaRef(database="MYDB", name="PUBLIC")
-    view = SchemaView(repo, ref)
-    assert grants_scope("MYDB", "PUBLIC") in view.scopes()
-    assert tag_references_scope("MYDB", "PUBLIC") in view.scopes()
+async def test_a_schema_view_reads_its_tags_only_while_their_tab_is_shown(repo) -> None:
+    """`scopes()` is what the sweep watches, so a tag scope listed with the
+    tab closed would be fetched for nobody every cache age."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC"))
+        await pilot.pause()
+        assert view.scopes() == [grants_scope("MYDB", "PUBLIC")]
+        await open_tags(pilot, view)
+        assert view.scopes() == [
+            grants_scope("MYDB", "PUBLIC"),
+            tag_references_scope("MYDB", "PUBLIC"),
+        ]
 
 
-def test_database_view_scopes_includes_both_grants_and_tags(repo) -> None:
-    view = DatabaseView(repo, "MYDB")
-    assert grants_scope("MYDB") in view.scopes()
-    assert tag_references_scope("MYDB") in view.scopes()
+async def test_a_database_view_reads_its_tags_only_while_their_tab_is_shown(
+    repo,
+) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_database("MYDB")
+        await pilot.pause()
+        assert view.scopes() == [grants_scope("MYDB")]
+        await open_tags(pilot, view)
+        assert view.scopes() == [grants_scope("MYDB"), tag_references_scope("MYDB")]
 
 
 async def test_the_grants_tab_is_active_by_default(repo) -> None:

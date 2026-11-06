@@ -279,11 +279,13 @@ async def test_a_schemas_tabs_say_what_they_know(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
-        pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC"))
+        view = pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC"))
         await pilot.pause()
         assert _text(pane, "detail-grants-note") == (
             "No grants on this schema that your role can see."
         )
+        view.query_one(TabbedContent).active = "tab-tags"
+        await pilot.pause()
         assert _text(pane, "detail-tags-note") == "Looking for tags..."
 
 
@@ -292,6 +294,8 @@ async def test_a_databases_empty_tags_tab_says_there_are_none(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
-        pane.show_database("MYDB")
+        view = pane.show_database("MYDB")
+        await pilot.pause()
+        view.query_one(TabbedContent).active = "tab-tags"
         await pilot.pause()
         assert _text(pane, "detail-tags-note") == "No tags on this database."

@@ -175,8 +175,9 @@ class PipeView(HistoryView, ObjectView):
         # keeps both the interactive ensure() below and the background sweep
         # (MainScreen._sweep, which watches self.detail.scopes()) from ever
         # requesting a fetch that cannot succeed. activity_history_scope is
-        # gated the same way, on needs_backfill.
-        scopes = [self.activity_scope()]
+        # gated the same way, on needs_backfill. The listing is here so the
+        # SQL tab repaints when it lands.
+        scopes = [self.listing_scope(), self.activity_scope()]
         if self.needs_backfill():
             scopes.append(self.activity_history_scope())
         if self.target_table() is not None:

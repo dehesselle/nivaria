@@ -23,6 +23,7 @@ configure(APP_NAME)
 
 __all__ = [
     "CACHE_TTL",
+    "CURSOR_SETTLE_MS",
     "DATA_PREVIEW_ROWS",
     "DATA_PREVIEW_TIMEOUT",
     "HISTORY_MAX_ROWS",
@@ -52,6 +53,19 @@ CACHE_TTL = Setting(
     ),
     group="Cache",
     default=300,
+)
+
+CURSOR_SETTLE_MS = Setting(
+    key="cursor_settle_ms",
+    label="cursor settle delay (milliseconds)",
+    description=(
+        "How long the tree cursor has to rest on a node before what it shows "
+        "is checked and fetched if needed, so that moving through a list "
+        "does not run a query for every row it passes. What is cached shows "
+        "at once either way. 0 means no wait."
+    ),
+    group="Cache",
+    default=250,
 )
 
 POOL_SIZE = Setting(

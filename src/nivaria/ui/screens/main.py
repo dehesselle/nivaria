@@ -11,7 +11,7 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from importlib.resources import files
 from math import ceil
 from typing import ClassVar
@@ -294,7 +294,7 @@ class MainScreen(Screen):
         """
         return [
             scope
-            for scope in [*self.tree.visible_scopes(), *self.detail.scopes()]
+            for scope in [*self.tree.visible_scopes(), *self.detail.watched_scopes()]
             if not self._busy(scope)
         ]
 
@@ -376,7 +376,7 @@ class MainScreen(Screen):
         # re-highlights a node whose line merely shifted, so a highlight
         # that moves the cursor can answer another one forever -- see
         # docs/DESIGN.md "A highlight is not a jump".
-        self.detail.show(event.ref)
+        self._show_detail(lambda: self.detail.show(event.ref))
 
     def on_object_opened(self, event: ObjectOpened) -> None:
         self._select(event.ref)
@@ -388,15 +388,15 @@ class MainScreen(Screen):
         # No tree.reveal(...) needed here either, same reasoning as
         # _select_category: the cursor is already on the schema node that
         # was just highlighted.
-        self.detail.show_schema(event.ref)
+        self._show_detail(lambda: self.detail.show_schema(event.ref))
 
     def on_database_selected(self, event: DatabaseSelected) -> None:
-        self.detail.show_database(event.database)
+        self._show_detail(lambda: self.detail.show_database(event.database))
 
     def _select_category(self, scope: Scope) -> None:
         # No tree.reveal(...) needed here, unlike _select: the cursor is
         # already on the category node that was just highlighted.
-        self.detail.show_category(scope)
+        self._show_detail(lambda: self.detail.show_category(scope))
 
     def _select(self, ref: ObjectRef) -> None:
         # A search hit or an Enter in a list view leaves the tree somewhere
@@ -405,7 +405,29 @@ class MainScreen(Screen):
         # only: see on_object_selected for why a tree highlight must not
         # come here.
         self.tree.reveal(ref)
-        self.detail.show(ref)
+        self._show_detail(lambda: self.detail.show(ref))
+
+    def _show_detail(self, show: Callable[[], object]) -> None:
+        """Point the detail pane elsewhere and drop what only it was waiting on.
+
+        The cursor settling (`DetailPane`) only spares what a fast move would
+        ask for. Resting on each of ten tasks in turn still queues ten 90-day
+        statements, and the newest would wait behind the others. A statement
+        already running cannot be stopped; `cancel_where` skips its result's
+        continuation at most. Listings stay, because the tree reads them too.
+        """
+        before = self.detail.scopes()
+        show()
+        if self.fetch is None:
+            return
+        after = self.detail.scopes()
+        left = {
+            scope
+            for scope in before
+            if scope not in after and scope.type is not ScopeType.OBJECTS
+        }
+        if left:
+            self.fetch.cancel_where(left.__contains__)
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         """The tree found something missing or stale."""
@@ -640,20 +662,26 @@ class MainScreen(Screen):
         self.fetch = self.app.fetch
 
     def action_refresh(self) -> None:
-        """Explicitly refresh whatever the cursor is on, and what the detail
-        pane shows for it.
+        """Refresh what the screen shows now, whatever its age.
 
-        The detail pane's scopes are asked for whatever their age. A log
-        scope's refresh is a window pass like any other (see
-        `repository.plan_window`), so this costs no more there than the
-        sweep's own refresh would.
+        Listings go out as themselves, not upgraded to a database prime as
+        the sweep's are. A prime succeeds on a dropped schema and leaves its
+        node standing, where the per-schema SHOW fails and carries the
+        refresh up to the schema list (`FetchService._fail`). A log scope's
+        refresh is a window pass like any other (see
+        `repository.plan_window`); `full_refresh` is the way to a full one.
         """
         for scope in self.detail.scopes():
-            self._request(_requestable(scope), Priority.INTERACTIVE)
+            self._request(scope, Priority.INTERACTIVE)
         node = self.tree.cursor_node
-        if node is not None and node.data and node.data.type is NodeType.SCHEMA:
-            # A schema node owns no scope; the list it appears in is its
-            # database's, and refreshing that is what drops it if it is gone.
+        if (
+            node is not None
+            and node.data
+            and node.data.type in (NodeType.SCHEMA, NodeType.OBJECT)
+        ):
+            # Neither owns a scope; refreshing the list it appears in is what
+            # drops it if it is gone. An object's list is also where its view
+            # reads its SQL, and a pipe's other statements succeed without it.
             node = node.parent
         scope = node.data.scope if node is not None and node.data else None
         if scope is None:

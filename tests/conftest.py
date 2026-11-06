@@ -26,9 +26,13 @@ def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     lazily, so `configure(path=...)` is enough and it takes effect for every
     module that already imported `config` by name.
     """
-    from tcoda.settings import configure
+    from tcoda.settings import config, configure
 
     from nivaria import paths
+
+    # Imported before configure() below, because importing it configures the
+    # real app path.
+    from nivaria.settings import CURSOR_SETTLE_MS
 
     monkeypatch.setattr(paths, "config_dir", lambda: tmp_path / "config")
     monkeypatch.setattr(paths, "cache_dir", lambda: tmp_path / "cache")
@@ -43,6 +47,9 @@ def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # isolating that one function is enough to keep it under tmp_path too.
 
     configure(path=tmp_path / "config" / "settings.json")
+    # No wait for the tree cursor to settle, so a test sees a view's requests
+    # as soon as it is shown. The tests of the wait itself set a real delay.
+    config.set(CURSOR_SETTLE_MS, 0)
     yield
     # Put the real app config back, so a later non-test import of
     # nivaria.settings is not left pointing at a deleted tmp_path.
