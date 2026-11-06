@@ -114,6 +114,21 @@ def is_cancelled(error: BaseException) -> bool:
     return getattr(error, "errno", None) == _CANCELLED_ERRNO
 
 
+#: Snowflake's error number for "No active warehouse selected in the current
+#: session", printed as `000606 (57P03)`.
+_NO_WAREHOUSE_ERRNO = 606
+
+
+def is_no_warehouse(error: BaseException) -> bool:
+    """Whether a statement was refused because the session has no warehouse.
+
+    A new session would come up with the same warehouse, or the same lack of
+    one, so this says nothing about the connection. Read off `errno` for the
+    same reasons as `is_missing_object`.
+    """
+    return getattr(error, "errno", None) == _NO_WAREHOUSE_ERRNO
+
+
 def _keeps_connection(error: BaseException) -> bool:
     """Whether an error came back over a session that is still healthy.
 
@@ -121,7 +136,7 @@ def _keeps_connection(error: BaseException) -> bool:
     repeating it would fail the same way, and replacing the connection
     can mean an MFA prompt.
     """
-    return is_missing_object(error) or is_cancelled(error)
+    return is_missing_object(error) or is_cancelled(error) or is_no_warehouse(error)
 
 
 class SnowflakeGateway(Protocol):
@@ -401,8 +416,8 @@ class PoolGateway:
             except Exception as error:
                 # Anything escaping this block makes the pool discard the
                 # connection and open a replacement -- right for a dead
-                # session, but a "does not exist" or a cancellation came back
-                # over a perfectly healthy one, and a reconnect can mean an MFA
+                # session, but `_keeps_connection`'s errors came back over a
+                # perfectly healthy one, and a reconnect can mean an MFA
                 # prompt. So those leave the block normally and are raised
                 # outside. Kept this narrow on purpose: an expired session is
                 # a ProgrammingError too, and that one must still be discarded.

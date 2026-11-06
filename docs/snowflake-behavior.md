@@ -77,6 +77,14 @@ Tested directly with no warehouse active: `INFORMATION_SCHEMA.TASK_HISTORY`,
 `No active warehouse selected in the current session`. `SHOW` commands need
 none.
 
+That error is errno 606, printed as `000606 (57P03)`, and the session that
+reports it stays usable. On the sandbox on 2026-11-06, connecting as `SYSADMIN`
+without a warehouse left `CURRENT_WAREHOUSE()` `NULL`. On one connection, every
+statement behind table and view stats, tags, the data preview, and pipe and task
+activity and history answered with errno 606, the `ACCOUNT_USAGE` ones included,
+and `SHOW ROLES` then succeeded on that same connection. Materialized view stats
+come from `SHOW`, so they need no warehouse.
+
 Context functions need neither a warehouse nor a privilege: on the sandbox on
 2026-11-02, `SELECT CURRENT_WAREHOUSE(), CURRENT_ORGANIZATION_NAME(),
 CURRENT_ACCOUNT_NAME()` succeeded as `PUBLIC` with `CURRENT_WAREHOUSE()`

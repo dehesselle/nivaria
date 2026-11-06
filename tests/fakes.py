@@ -46,6 +46,14 @@ class CancelledError(Exception):
     errno = 604
 
 
+class NoWarehouseError(Exception):
+    """Stands in for the driver's error for a statement refused for lack of a
+    warehouse: Snowflake reports it as errno 606, and that number is all
+    `is_no_warehouse` reads."""
+
+    errno = 606
+
+
 class FakeCursor:
     def __init__(self, owner: FakeConnection) -> None:
         self._owner = owner

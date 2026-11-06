@@ -42,6 +42,9 @@ These need a running warehouse and stay blank without one:
 - Tags on schemas, databases and columns;
 - the Data tab.
 
+A statement refused for lack of a warehouse fails once and keeps its
+connection, so it costs no new login and no MFA prompt.
+
 Pipe and task activity, and the older half of each History, read
 `SNOWFLAKE.ACCOUNT_USAGE` and also need `IMPORTED PRIVILEGES` on the
 `SNOWFLAKE` database. The statement-by-statement list is in

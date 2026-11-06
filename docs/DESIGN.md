@@ -1085,9 +1085,11 @@ reasons are here.
   and open two new ones, each a possible MFA prompt. A data preview cancelled
   by its timeout (errno 604, see "Bounding a result") is treated the same:
   cancelling one query leaves its session fine, and a retry would only run
-  out the timeout again. Kept to those two error numbers on purpose: an
-  expired session is the same driver exception type, and that one must still
-  be discarded.
+  out the timeout again. So is a statement refused for having no warehouse
+  (errno 606): a new session would come up with the same lack of one, so each
+  refusal would cost two logins for nothing. Kept to those error numbers on
+  purpose: an expired session is the same driver exception type, and that one
+  must still be discarded.
 
 ### Stragglers on quit and reconnect
 

@@ -12,7 +12,12 @@ import pytest
 from nivaria.models import ObjectType
 from nivaria.snowflake.gateway import PoolGateway
 from nivaria.snowflake.pool import ConnectionError_, ConnectionPool, ConnectParams
-from tests.fakes import CancelledError, MissingFromListingError, MissingObjectError
+from tests.fakes import (
+    CancelledError,
+    MissingFromListingError,
+    MissingObjectError,
+    NoWarehouseError,
+)
 
 
 class RecordingCursor:
@@ -304,6 +309,41 @@ def test_a_cancelled_query_keeps_its_healthy_connection() -> None:
     connection.fail_times = 1
     with pytest.raises(CancelledError):
         gateway.select_data_preview("MYDB", "PUBLIC", "V", 100, 15)
+    assert len(connects) == 1
+    assert pool.size == 1
+    assert pool.in_use == 0
+    assert gateway.show_databases() == [{"name": "ACME"}]
+    assert len(connects) == 1
+
+
+def test_a_statement_refused_for_lack_of_a_warehouse_is_not_retried() -> None:
+    """A new session would come up with the same lack of one, so a retry could
+    only fail the same way."""
+    gateway, connection, _ = make_gateway()
+    connection.error = NoWarehouseError("No active warehouse selected")
+    connection.fail_times = 5
+    with pytest.raises(NoWarehouseError):
+        gateway.table_stats("MYDB", "PUBLIC")
+    assert connection.attempts == 1
+
+
+def test_a_statement_refused_for_lack_of_a_warehouse_keeps_its_connection() -> None:
+    """Replacing the connection each time cost two logins per refusal, each a
+    possible MFA prompt, for a session that was never the problem."""
+    connection = RecordingConnection()
+    connects: list[dict[str, Any]] = []
+
+    def connector(**kwargs: Any) -> RecordingConnection:
+        connects.append(kwargs)
+        return connection
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    gateway = PoolGateway(pool)
+    connection.error = NoWarehouseError("No active warehouse selected")
+    connection.fail_times = 1
+    with pytest.raises(NoWarehouseError):
+        gateway.table_stats("MYDB", "PUBLIC")
     assert len(connects) == 1
     assert pool.size == 1
     assert pool.in_use == 0
