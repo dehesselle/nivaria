@@ -201,7 +201,4 @@ async def test_the_task_list_says_its_run_columns_lag_behind(repo) -> None:
         pane.show_category(scope)
         await pilot.pause()
         banner = pane.query_one("#detail-lag-note")
-        assert str(banner.render()) == (
-            "Run history comes from ACCOUNT_USAGE, which Snowflake says can be "
-            "up to 45 minutes behind."
-        )
+        assert str(banner.render()) == "Run history can be up to 45 minutes behind."

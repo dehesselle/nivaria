@@ -264,10 +264,7 @@ async def test_the_activity_tab_says_its_columns_lag_behind(repo) -> None:
         pane.show_category(scope)
         await pilot.pause()
         banner = pane.query_one("#tab-activity").query_one("#detail-lag-note")
-        assert str(banner.render()) == (
-            "Load activity comes from ACCOUNT_USAGE, which Snowflake says can "
-            "be up to 2 hours behind."
-        )
+        assert str(banner.render()) == "Load activity can be up to 2 hours behind."
         assert not pane.query_one("#tab-status").query("#detail-lag-note")
 
 

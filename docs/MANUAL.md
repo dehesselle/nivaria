@@ -217,8 +217,8 @@ A stage has no view of its own; the stage list shows everything about it.
   read only while this tab is open.
 - **Activity** (Pipe list) shows each pipe's latest load. It comes from
   `ACCOUNT_USAGE`, which Snowflake says can be up to 2 hours behind, and a
-  line above the table says so. The Task list's last-run columns come from
-  there too (up to 45 minutes behind) and carry the same line.
+  line above the table gives that lag. The Task list's last-run columns come
+  from there too (up to 45 minutes behind) and carry the same line.
 - **Status** (Pipe list) shows each pipe's `invalid_reason` and the
   execution state Snowflake reports for it (`RUNNING`, `PAUSED`,
   `STOPPED_...`), with the files waiting to be loaded (Pending Files). Both

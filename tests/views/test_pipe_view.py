@@ -740,10 +740,7 @@ async def test_a_pipe_without_a_known_target_shows_the_lag_banner(repo) -> None:
     async with app.run_test(size=(100, 30)) as pilot:
         app.query_one(DetailPane).show(ref)
         await pilot.pause()
-        assert _lag_banner(app) == (
-            "Load activity comes from ACCOUNT_USAGE, which Snowflake says can "
-            "be up to 2 hours behind."
-        )
+        assert _lag_banner(app) == "Load activity can be up to 2 hours behind."
         note = _note(app)
         assert note is not None
         assert str(note.render()) == "No load activity in the last 90 days."

@@ -82,7 +82,7 @@ TAGS_NOTE = "detail-tags-note"
 
 
 def lag_note(what: str, lag_seconds: int) -> Static:
-    """The muted line saying `what` comes from ACCOUNT_USAGE and lags.
+    """The muted line saying `what`, read from ACCOUNT_USAGE, lags.
 
     Every refresh asks Snowflake for what is new, but ACCOUNT_USAGE itself
     publishes a row only some time after the event, so the newest load or
@@ -95,13 +95,7 @@ def lag_note(what: str, lag_seconds: int) -> Static:
         lag = f"{lag_seconds // 3600} hours"
     else:
         lag = f"{lag_seconds // 60} minutes"
-    return Static(
-        Text(
-            f"{what} comes from ACCOUNT_USAGE, which Snowflake says can be up "
-            f"to {lag} behind."
-        ),
-        id=LAG_NOTE,
-    )
+    return Static(Text(f"{what} can be up to {lag} behind."), id=LAG_NOTE)
 
 
 def failed_refresh(entry: Entry) -> str | None:
@@ -432,9 +426,8 @@ class HistoryView:
         if capped:
             note.update(
                 Text(
-                    "Showing the newest rows only -- this history reached the "
-                    "history row cap, so older rows were not fetched. Raise "
-                    "it in Settings, or narrow the fetch window."
+                    "Showing newest rows only, raise history row cap in settings "
+                    "or narrow fetch window."
                 )
             )
         elif error:
