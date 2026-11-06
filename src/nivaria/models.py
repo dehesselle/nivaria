@@ -181,7 +181,7 @@ class CacheState(StrEnum):
     ERROR = "error"
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class Scope:
     """One separately-refreshable set of rows in the cache.
 
@@ -515,13 +515,11 @@ def is_stale(age: float | None, ttl: float) -> bool:
 @dataclass(frozen=True)
 class Database:
     name: str
-    comment: str = ""
 
 
 @dataclass(frozen=True)
 class Warehouse:
     name: str
-    comment: str = ""
     size: str = ""
     is_default: bool = False
 
@@ -529,14 +527,12 @@ class Warehouse:
 @dataclass(frozen=True)
 class Role:
     name: str
-    comment: str = ""
 
 
 @dataclass(frozen=True)
 class Schema:
     database_name: str
     name: str
-    comment: str = ""
 
 
 @dataclass(frozen=True)
@@ -547,20 +543,15 @@ class SFObject:
     schema_name: str
     name: str
     type: ObjectType
-    comment: str = ""
 
 
 @dataclass(frozen=True)
 class Column:
-    table_catalog: str
-    table_schema: str
-    table_name: str
     column_name: str
     ordinal_position: int
-    data_type: str
     is_nullable: bool
     #: The full type as DESC TABLE prints it, e.g. NUMBER(38,0) where
-    #: `data_type` is just NUMBER -- what the column list shows.
+    #: DATA_TYPE is just NUMBER -- what the column list shows.
     desc_type: str = ""
     default: str = ""
     comment: str = ""

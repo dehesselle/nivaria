@@ -145,13 +145,6 @@ def test_show_materialized_views_scopes_to_a_quoted_schema() -> None:
     )
 
 
-def test_show_materialized_views_pages_with_a_keyset_cursor() -> None:
-    assert (
-        queries.show_materialized_views("MYDB", "PUBLIC", after="TOTALS_MV", limit=1000)
-        == 'SHOW MATERIALIZED VIEWS IN SCHEMA "MYDB"."PUBLIC" LIMIT 1000 FROM \'TOTALS_MV\''
-    )
-
-
 def test_pipe_activity_targets_account_usage_copy_history_with_bound_params() -> None:
     """Unlike table_stats, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather
     than one built from the database, so both filter values bind as ordinary

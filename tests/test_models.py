@@ -77,10 +77,6 @@ def test_scope_str_is_its_key() -> None:
     assert str(schemas_scope("MYDB")) == "schemas:MYDB"
 
 
-def test_scope_is_orderable_so_it_can_break_priority_queue_ties() -> None:
-    assert min([schemas_scope("B"), schemas_scope("A")]).database == "A"
-
-
 def test_scope_kind_covers_every_key_shape() -> None:
     for object_type in ScopeType:
         assert object_type.value

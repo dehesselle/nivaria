@@ -47,7 +47,7 @@ from nivaria.service.jobs import (
     fetch_page,
     log_policy,
 )
-from nivaria.settings import MAX_PAGES_PER_PASS, config
+from nivaria.settings import MAX_PAGES_PER_PASS, PAGE_SIZE, config
 from nivaria.snowflake.gateway import SnowflakeGateway, is_missing_object
 
 _log = logging.getLogger(__name__)
@@ -65,14 +65,12 @@ class FetchService:
         repo: Repository,
         *,
         workers: int = 1,
-        page_size: int = 1000,
         notify: Notify | None = None,
         on_error: OnError | None = None,
     ) -> None:
         self._gateway = gateway
         self._repo = repo
         self._workers = max(1, workers)
-        self._page_size = page_size
         self._notify = notify
         self._on_error = on_error
 
@@ -277,13 +275,13 @@ class FetchService:
                     obj.name
                     for obj in self._repo.objects(
                         objects_scope(ObjectType.PIPE, scope.database, scope.schema)
-                    ).rows
+                    )
                 ]
             page = fetch_page(
                 self._gateway,
                 scope,
                 job.cursor,
-                self._page_size,
+                config.get(PAGE_SIZE),
                 allow_reconnect=allow_reconnect,
                 pipe_target=pipe_target,
                 pipe_names=pipe_names,
@@ -308,19 +306,11 @@ class FetchService:
             # A newer pass claimed this scope while the page was in flight.
             return
 
-        if cursor is None:
-            self._repo.finish_pass(
-                scope, generation, truncated=page.truncated, **finish
-            )
-            self._release(job)
-            self._announce(scope, complete=True)
-            return
-
         # Two guards on the continuation chain, and neither is belt-and-braces:
         # the chain re-issues the same statement with a new cursor and trusts
         # the result to shrink, which is precisely the assumption Snowflake
         # has been observed to break.
-        if cursor == job.cursor:
+        if cursor is not None and cursor == job.cursor:
             # The cursor did not move, so this page is the last one's result
             # again -- a statement that accepted LIMIT/FROM and ignored both.
             # Not data loss: that response was the entire result, so the pass
@@ -332,7 +322,11 @@ class FetchService:
                 scope,
                 cursor,
             )
-            self._repo.finish_pass(scope, generation, truncated=page.truncated)
+            cursor = None
+        if cursor is None:
+            self._repo.finish_pass(
+                scope, generation, truncated=page.truncated, **finish
+            )
             self._release(job)
             self._announce(scope, complete=True)
             return
@@ -406,7 +400,7 @@ class FetchService:
         # Every schema already known gets an entry, so one that returned no
         # objects still completes a pass and reads as "fetched, none" rather
         # than "never fetched" -- otherwise its node would never settle.
-        for schema in self._repo.schemas(schemas_scope(database)).rows:
+        for schema in self._repo.schemas(schemas_scope(database)):
             grouped[objects_scope(object_type, database, schema.name)] = []
         for row in rows:
             schema_name = row.get("schema_name")
@@ -426,7 +420,7 @@ class FetchService:
         self, object_type: ObjectType, database: str, priority: Priority
     ) -> None:
         """Queue one job per known schema, the correct-but-slower path."""
-        for schema in self._repo.schemas(schemas_scope(database)).rows:
+        for schema in self._repo.schemas(schemas_scope(database)):
             self.request(objects_scope(object_type, database, schema.name), priority)
 
     def _fail(self, job: FetchJob, error: Exception, generation: int = 0) -> None:

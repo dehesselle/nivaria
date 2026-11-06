@@ -137,8 +137,7 @@ STAGES`, at both `IN SCHEMA` and `IN DATABASE` scope.**
 
 Neither account had a schema with more than 1000 pipes, so the continuation
 loop this implies (see [DESIGN.md](DESIGN.md#why-a-paging-no-op-is-a-hang-not-a-slow-fetch))
-was never observed firing in the wild; lowering `PAGE_SIZE` below a schema's
-pipe count reproduces it.
+was never observed firing in the wild.
 
 ## SHOW row counts
 

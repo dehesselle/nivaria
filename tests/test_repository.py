@@ -66,19 +66,19 @@ def load(repo: Repository, scope, rows) -> None:
 def test_an_unknown_scope_reads_as_empty_rather_than_raising(repo) -> None:
     """The cache is an optimisation, never a dependency -- a scope nobody has
     fetched is 'no data', not an error on the UI path."""
-    cached = repo.databases(databases_scope())
-    assert cached.rows == []
-    assert cached.state is CacheState.EMPTY
-    assert cached.age() is None
+    assert repo.databases(databases_scope()) == []
+    entry = repo.entry(databases_scope())
+    assert entry.state is CacheState.EMPTY
+    assert entry.age() is None
 
 
 def test_a_completed_pass_is_readable_and_fresh(repo) -> None:
     scope = databases_scope()
     load(repo, scope, db_rows("BETA", "ACME"))
-    cached = repo.databases(scope)
-    assert [d.name for d in cached.rows] == ["ACME", "BETA"]
-    assert cached.state is CacheState.COMPLETE
-    assert cached.age() < 5
+    assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
+    entry = repo.entry(scope)
+    assert entry.state is CacheState.COMPLETE
+    assert entry.age() < 5
 
 
 def test_rows_come_back_in_name_order_regardless_of_arrival_order(repo) -> None:
@@ -86,7 +86,7 @@ def test_rows_come_back_in_name_order_regardless_of_arrival_order(repo) -> None:
     ordering has to live here rather than in every caller."""
     scope = databases_scope()
     load(repo, scope, db_rows("ZULU", "ALPHA", "MIKE"))
-    assert [d.name for d in repo.databases(scope).rows] == ["ALPHA", "MIKE", "ZULU"]
+    assert [d.name for d in repo.databases(scope)] == ["ALPHA", "MIKE", "ZULU"]
 
 
 def test_warehouses_and_roles_read_back_by_name(repo) -> None:
@@ -94,11 +94,11 @@ def test_warehouses_and_roles_read_back_by_name(repo) -> None:
     flat, unpaged SHOW results."""
     load(repo, warehouses_scope(), db_rows("COMPUTE_WH", "ETL_WH"))
     load(repo, roles_scope(), db_rows("SYSADMIN", "ACCOUNTADMIN"))
-    assert [w.name for w in repo.warehouses(warehouses_scope()).rows] == [
+    assert [w.name for w in repo.warehouses(warehouses_scope())] == [
         "COMPUTE_WH",
         "ETL_WH",
     ]
-    assert [r.name for r in repo.roles(roles_scope()).rows] == [
+    assert [r.name for r in repo.roles(roles_scope())] == [
         "ACCOUNTADMIN",
         "SYSADMIN",
     ]
@@ -113,8 +113,8 @@ def test_scopes_do_not_leak_into_each_other(repo) -> None:
         other,
         [{**row, "schema_name": "STAGING"} for row in table_rows("CUSTOMERS")],
     )
-    assert [o.name for o in repo.objects(tables).rows] == ["ORDERS"]
-    assert [o.name for o in repo.objects(other).rows] == ["CUSTOMERS"]
+    assert [o.name for o in repo.objects(tables)] == ["ORDERS"]
+    assert [o.name for o in repo.objects(other)] == ["CUSTOMERS"]
 
 
 def test_tables_and_views_in_one_schema_are_separate_scopes(repo) -> None:
@@ -135,8 +135,8 @@ def test_tables_and_views_in_one_schema_are_separate_scopes(repo) -> None:
             }
         ],
     )
-    assert [o.name for o in repo.objects(tables).rows] == ["ORDERS"]
-    assert [o.name for o in repo.objects(views).rows] == ["ORDERS_V"]
+    assert [o.name for o in repo.objects(tables)] == ["ORDERS"]
+    assert [o.name for o in repo.objects(views)] == ["ORDERS_V"]
 
 
 # ------------------------------------------------------- the pass protocol
@@ -148,12 +148,12 @@ def test_pages_become_visible_before_the_pass_finishes(repo) -> None:
     scope = databases_scope()
     generation = repo.begin_pass(scope)
     repo.write_page(scope, generation, db_rows("ACME"), next_cursor="ACME")
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME"]
-    assert repo.databases(scope).state is CacheState.PARTIAL
+    assert [d.name for d in repo.databases(scope)] == ["ACME"]
+    assert repo.entry(scope).state is CacheState.PARTIAL
 
     repo.write_page(scope, generation, db_rows("BETA"), next_cursor=None)
     repo.finish_pass(scope, generation)
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME", "BETA"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
 
 
 def test_a_refresh_never_shows_an_empty_list_on_the_way_to_a_full_one(repo) -> None:
@@ -163,18 +163,18 @@ def test_a_refresh_never_shows_an_empty_list_on_the_way_to_a_full_one(repo) -> N
     load(repo, scope, db_rows("ACME", "BETA"))
 
     generation = repo.begin_pass(scope)
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME", "BETA"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
     repo.write_page(scope, generation, db_rows("ACME"), next_cursor="ACME")
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME", "BETA"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
     repo.finish_pass(scope, generation)
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME"]
 
 
 def test_a_deleted_object_disappears_after_the_sweep(repo) -> None:
     scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
     load(repo, scope, table_rows("ORDERS", "CUSTOMERS"))
     load(repo, scope, table_rows("ORDERS"))
-    assert [o.name for o in repo.objects(scope).rows] == ["ORDERS"]
+    assert [o.name for o in repo.objects(scope)] == ["ORDERS"]
 
 
 def test_an_unfinished_pass_sweeps_nothing(repo) -> None:
@@ -184,7 +184,7 @@ def test_an_unfinished_pass_sweeps_nothing(repo) -> None:
     load(repo, scope, db_rows("ACME", "BETA"))
     generation = repo.begin_pass(scope)
     repo.write_page(scope, generation, db_rows("ACME"), next_cursor="ACME")
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME", "BETA"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
 
 
 def test_the_age_shown_during_a_refresh_is_still_the_age_of_the_visible_rows(
@@ -197,7 +197,7 @@ def test_the_age_shown_during_a_refresh_is_still_the_age_of_the_visible_rows(
     before = repo.entry(scope).fetched_at
     repo.begin_pass(scope)
     assert repo.entry(scope).fetched_at == before
-    assert repo.databases(scope).age() is not None
+    assert repo.entry(scope).age() is not None
 
 
 def test_updating_an_existing_row_replaces_its_columns(repo) -> None:
@@ -220,13 +220,13 @@ def test_a_superseded_pass_cannot_write(repo) -> None:
     assert stale != current
 
     assert repo.write_page(scope, stale, db_rows("GHOST"), None) is False
-    assert repo.databases(scope).rows == []
+    assert repo.databases(scope) == []
     assert repo.finish_pass(scope, stale) is False
     assert repo.fail_pass(scope, stale, "boom") is False
 
     assert repo.write_page(scope, current, db_rows("ACME"), None) is True
     assert repo.finish_pass(scope, current) is True
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME"]
 
 
 def test_a_failed_pass_keeps_the_stale_rows_visible(repo) -> None:
@@ -236,10 +236,10 @@ def test_a_failed_pass_keeps_the_stale_rows_visible(repo) -> None:
     load(repo, scope, db_rows("ACME"))
     generation = repo.begin_pass(scope)
     repo.fail_pass(scope, generation, "network down")
-    cached = repo.databases(scope)
-    assert [d.name for d in cached.rows] == ["ACME"]
-    assert cached.state is CacheState.ERROR
-    assert cached.entry.error == "network down"
+    assert [d.name for d in repo.databases(scope)] == ["ACME"]
+    entry = repo.entry(scope)
+    assert entry.state is CacheState.ERROR
+    assert entry.error == "network down"
 
 
 def test_row_count_reflects_what_actually_survived_the_sweep(repo) -> None:
@@ -270,9 +270,8 @@ def test_columns_keep_information_schemas_own_shape(repo) -> None:
             }
         ],
     )
-    column = repo.columns(scope).rows[0]
+    column = repo.columns(scope)[0]
     assert column.column_name == "ID"
-    assert column.data_type == "NUMBER"
     assert column.is_nullable is False
     assert column.comment == "pk"
 
@@ -297,8 +296,7 @@ def test_columns_carry_the_desc_type_through_the_cache(repo) -> None:
             }
         ],
     )
-    column = repo.columns(scope).rows[0]
-    assert column.data_type == "NUMBER"
+    column = repo.columns(scope)[0]
     assert column.desc_type == "NUMBER(38,0)"
 
 
@@ -322,7 +320,7 @@ def test_columns_are_ordered_by_position_not_name(repo) -> None:
             for position, name in enumerate(["ZIP", "ADDRESS", "ID"], start=1)
         ],
     )
-    assert [c.column_name for c in repo.columns(scope).rows] == ["ZIP", "ADDRESS", "ID"]
+    assert [c.column_name for c in repo.columns(scope)] == ["ZIP", "ADDRESS", "ID"]
 
 
 # -------------------------------------------------------------- robustness
@@ -333,19 +331,19 @@ def test_unmirrored_snowflake_columns_are_dropped_not_fatal(repo) -> None:
     subset on purpose and must not break when it sees an unfamiliar one."""
     scope = databases_scope()
     load(repo, scope, [{"name": "ACME", "some_new_column_snowflake_added": "x"}])
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME"]
 
 
 def test_a_missing_column_in_a_row_becomes_null(repo) -> None:
     scope = databases_scope()
     load(repo, scope, [{"name": "ACME"}])
-    assert repo.databases(scope).rows[0].comment == ""
+    assert repo.raw_rows(scope)[0]["comment"] is None
 
 
 def test_names_containing_quotes_survive_a_round_trip(repo) -> None:
     scope = databases_scope()
     load(repo, scope, db_rows('WE"IRD'))
-    assert [d.name for d in repo.databases(scope).rows] == ['WE"IRD']
+    assert [d.name for d in repo.databases(scope)] == ['WE"IRD']
 
 
 # ------------------------------------------------------------ child counts
@@ -1091,30 +1089,19 @@ def _other_pipes_activity(repo) -> None:
     )
 
 
-def test_an_unfetched_snapshot_says_nothing_about_a_pipe_being_idle(repo) -> None:
-    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_ORDERS") is None
-
-
-def test_a_fetched_snapshot_without_the_pipe_says_it_was_idle_then(repo) -> None:
+def test_a_snapshot_holds_activity_only_for_the_pipes_that_loaded(repo) -> None:
+    assert not repo.pipe_has_activity("MYDB", "PUBLIC", "LOAD_OTHER")
     _other_pipes_activity(repo)
-    fetched_at = repo.entry(pipe_activity_scope("MYDB", "PUBLIC")).fetched_at
-    assert fetched_at is not None
-    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_ORDERS") == fetched_at
+    assert repo.pipe_has_activity("MYDB", "PUBLIC", "LOAD_OTHER")
+    assert not repo.pipe_has_activity("MYDB", "PUBLIC", "LOAD_ORDERS")
 
 
-def test_a_snapshot_with_the_pipes_load_does_not_call_it_idle(repo) -> None:
-    _other_pipes_activity(repo)
-    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_OTHER") is None
-
-
-def test_a_refreshing_snapshot_still_says_the_pipe_was_idle(repo) -> None:
+def test_a_refreshing_snapshot_still_answers_from_its_earlier_rows(repo) -> None:
     """A refresh keeps the earlier rows until it finishes, so their answer
     still holds as of when they were fetched."""
     _other_pipes_activity(repo)
-    scope = pipe_activity_scope("MYDB", "PUBLIC")
-    fetched_at = repo.entry(scope).fetched_at
-    repo.begin_pass(scope)
-    assert repo.pipe_idle_as_of("MYDB", "PUBLIC", "LOAD_ORDERS") == fetched_at
+    repo.begin_pass(pipe_activity_scope("MYDB", "PUBLIC"))
+    assert repo.pipe_has_activity("MYDB", "PUBLIC", "LOAD_OTHER")
 
 
 def test_pipe_history_columns_survive_a_round_trip(repo) -> None:

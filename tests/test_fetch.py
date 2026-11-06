@@ -34,6 +34,7 @@ from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import FetchJob, Priority, fetch_page
 from nivaria.settings import (
     LAG_MARGIN_FACTOR,
+    PAGE_SIZE,
     PIPE_HISTORY_FETCH_DAYS,
     TASK_HISTORY_FETCH_DAYS,
     config,
@@ -61,10 +62,23 @@ def wait_until(predicate, timeout: float = 3.0) -> bool:
     return predicate()
 
 
-def make_service(gateway, repo, **kwargs) -> FetchService:
+def make_service(gateway, repo, *, page_size=None, **kwargs) -> FetchService:
+    if page_size is not None:
+        config.set(PAGE_SIZE, page_size)
     service = FetchService(gateway, repo, **kwargs)
     service.start()
     return service
+
+
+def test_a_changed_page_size_applies_without_a_restart(repo) -> None:
+    gateway = FakeGateway(databases=["ACME"])
+    service = make_service(gateway, repo)
+    try:
+        config.set(PAGE_SIZE, 7)
+        service.request(databases_scope())
+        assert wait_until(lambda: ("show_databases", (None, 7)) in gateway.calls)
+    finally:
+        service.stop()
 
 
 def _refetch(service, repo, scope) -> None:
@@ -314,7 +328,13 @@ def test_pipe_activity_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    page = fetch_page(gateway, pipe_activity_scope("MYDB", "PUBLIC"), None, limit=1)
+    page = fetch_page(
+        gateway,
+        pipe_activity_scope("MYDB", "PUBLIC"),
+        None,
+        limit=1,
+        window_seconds=3600,
+    )
     assert len(page.rows) == 1
     assert page.cursor is None
 
@@ -345,7 +365,11 @@ def test_pipe_activity_history_is_fetched_in_one_shot() -> None:
         }
     )
     page = fetch_page(
-        gateway, pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE"), None, limit=1
+        gateway,
+        pipe_activity_history_scope("MYDB", "PUBLIC", "MY_PIPE"),
+        None,
+        limit=1,
+        window_seconds=3600,
     )
     assert len(page.rows) == 1
     assert page.cursor is None
@@ -491,7 +515,13 @@ def test_task_activity_is_fetched_in_one_shot() -> None:
             ]
         }
     )
-    page = fetch_page(gateway, task_activity_scope("MYDB", "PUBLIC"), None, limit=1)
+    page = fetch_page(
+        gateway,
+        task_activity_scope("MYDB", "PUBLIC"),
+        None,
+        limit=1,
+        window_seconds=3600,
+    )
     assert len(page.rows) == 1
     assert page.cursor is None
 
@@ -521,6 +551,7 @@ def test_task_activity_history_is_fetched_in_one_shot() -> None:
         task_activity_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS"),
         None,
         limit=1,
+        window_seconds=3600,
     )
     assert len(page.rows) == 1
     assert page.cursor is None
@@ -568,7 +599,7 @@ def test_a_scope_is_fetched_and_lands_in_the_cache(repo) -> None:
         )
     finally:
         service.stop()
-    assert [d.name for d in repo.databases(databases_scope()).rows] == ["ACME", "BETA"]
+    assert [d.name for d in repo.databases(databases_scope())] == ["ACME", "BETA"]
 
 
 def test_a_large_scope_arrives_in_pages(repo) -> None:
@@ -591,7 +622,7 @@ def test_a_large_scope_arrives_in_pages(repo) -> None:
 
     # 10 + 10 + 5: three pages, so two partial announcements then a final one.
     assert [complete for _, complete in seen] == [False, False, True]
-    assert len(repo.databases(databases_scope()).rows) == 25
+    assert len(repo.databases(databases_scope())) == 25
 
 
 def test_every_page_is_readable_as_soon_as_it_lands(repo) -> None:
@@ -599,7 +630,7 @@ def test_every_page_is_readable_as_soon_as_it_lands(repo) -> None:
     gateway = FakeGateway(databases=[f"DB_{i:03d}" for i in range(25)])
 
     def on_page(scope, complete) -> None:
-        counts.append(len(repo.databases(scope).rows))
+        counts.append(len(repo.databases(scope)))
 
     service = make_service(gateway, repo, page_size=10, notify=on_page)
     try:
@@ -635,7 +666,7 @@ def test_a_failing_fetch_records_the_error_and_keeps_stale_rows(repo) -> None:
 
     assert errors[0] == ("databases", "network down")
     assert repo.entry(scope).state is CacheState.ERROR
-    assert [d.name for d in repo.databases(scope).rows] == ["ACME"]
+    assert [d.name for d in repo.databases(scope)] == ["ACME"]
 
 
 def cache_schemas(repo, database: str, *names: str) -> None:
@@ -647,7 +678,7 @@ def cache_schemas(repo, database: str, *names: str) -> None:
 
 
 def cached_schema_names(repo, database: str) -> list[str]:
-    return [row.name for row in repo.schemas(schemas_scope(database)).rows]
+    return [row.name for row in repo.schemas(schemas_scope(database))]
 
 
 def test_a_schema_dropped_elsewhere_leaves_the_cache_once_a_fetch_finds_it_gone(
@@ -876,7 +907,8 @@ def test_a_worker_handing_on_a_page_leaves_the_next_workers_claim_alone(repo) ->
             return result
 
     gateway = Checking(databases=[f"DB{index:02d}" for index in range(12)])
-    service = FetchService(gateway, repo, workers=2, page_size=2)
+    config.set(PAGE_SIZE, 2)
+    service = FetchService(gateway, repo, workers=2)
     holder["service"] = service
     put = service._queue.put
 
@@ -1058,10 +1090,10 @@ def test_a_cancelled_scope_stops_paging_after_the_current_page(repo) -> None:
 
     gateway = Gated(databases=[f"DB_{i:03d}" for i in range(100)])
     pages: list[bool] = []
+    config.set(PAGE_SIZE, 10)
     service = FetchService(
         gateway,
         repo,
-        page_size=10,
         notify=lambda scope, complete: pages.append(complete),
     )
     scope = databases_scope()
@@ -1116,7 +1148,7 @@ def test_objects_scopes_reach_the_right_gateway_call(repo) -> None:
         assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
     finally:
         service.stop()
-    assert [o.name for o in repo.objects(scope).rows] == ["P1", "P2"]
+    assert [o.name for o in repo.objects(scope)] == ["P1", "P2"]
 
 
 def test_stopping_with_work_still_queued_does_not_raise(repo) -> None:
@@ -1125,7 +1157,8 @@ def test_stopping_with_work_still_queued_does_not_raise(repo) -> None:
     TypeError the moment the queue was not empty -- which is every real
     shutdown, and none of the unit tests that stopped an idle service."""
     gateway = FakeGateway(databases=[f"DB_{i:03d}" for i in range(200)])
-    service = FetchService(gateway, repo, page_size=5)
+    config.set(PAGE_SIZE, 5)
+    service = FetchService(gateway, repo)
     service.request(databases_scope(), Priority.BACKGROUND)
     service.request(schemas_scope("A"), Priority.BACKGROUND)
     service.request(schemas_scope("B"), Priority.INTERACTIVE)
@@ -1195,7 +1228,7 @@ def test_a_worker_still_mid_query_when_the_service_stops_writes_nothing(
     the cache it would be written to."""
     notified, _ = _straggle(repo, _StragglingGateway())
     assert notified == []
-    assert repo.databases(databases_scope()).is_empty
+    assert not repo.databases(databases_scope())
     assert repo.entry(databases_scope()).state is not CacheState.COMPLETE
 
 
@@ -1279,8 +1312,8 @@ def test_one_prime_fills_every_schemas_scope(repo) -> None:
 
     aaa = objects_scope(ObjectType.TABLE, "MYDB", "AAA")
     bbb = objects_scope(ObjectType.TABLE, "MYDB", "BBB")
-    assert [o.name for o in repo.objects(aaa).rows] == ["A1", "A2", "A3"]
-    assert [o.name for o in repo.objects(bbb).rows] == ["B1", "B2"]
+    assert [o.name for o in repo.objects(aaa)] == ["A1", "A2", "A3"]
+    assert [o.name for o in repo.objects(bbb)] == ["B1", "B2"]
 
 
 def test_a_prime_costs_one_round_trip_not_one_per_schema(repo) -> None:
@@ -1319,8 +1352,8 @@ def test_a_schema_with_no_objects_still_completes_a_pass(repo) -> None:
         assert wait_until(lambda: repo.entry(empty).state is CacheState.COMPLETE)
     finally:
         service.stop()
-    assert repo.objects(empty).rows == []
-    assert repo.objects(empty).age() is not None
+    assert repo.objects(empty) == []
+    assert repo.entry(empty).age() is not None
 
 
 def test_a_prime_announces_each_schema_it_filled(repo) -> None:
@@ -1485,7 +1518,7 @@ def test_columns_are_fetched_without_a_warehouse(repo) -> None:
         assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
     finally:
         service.stop()
-    assert [c.column_name for c in repo.columns(scope).rows] == ["ID", "TOTAL"]
+    assert [c.column_name for c in repo.columns(scope)] == ["ID", "TOTAL"]
     assert [c[0] for c in gateway.calls] == ["show_columns"]
 
 

@@ -96,7 +96,6 @@ def show_objects_in_database(
     object_type: ObjectType,
     database: str,
     *,
-    after: str | None = None,
     limit: int = 1000,
 ) -> str:
     """Every object of a type in a whole database, in one statement.
@@ -107,20 +106,16 @@ def show_objects_in_database(
     completely -- payload is nearly free -- so priming a database this way is
     an order of magnitude cheaper than filling it schema by schema.
 
-    The paging tail is omitted for an unpageable type, same as `show_objects`.
+    It takes no cursor: names repeat across schemas, so resuming after one
+    would skip rows (docs/DESIGN.md "Database priming"). The limit is omitted
+    for an unpageable type, same as `show_objects`.
     """
     scope = quote_identifier(database)
-    tail = _paging(after, limit) if object_type.pageable else ""
+    tail = _paging(None, limit) if object_type.pageable else ""
     return f"SHOW {object_type.plural.upper()} IN DATABASE {scope}{tail}"
 
 
-def show_materialized_views(
-    database: str,
-    schema: str,
-    *,
-    after: str | None = None,
-    limit: int = 1000,
-) -> str:
+def show_materialized_views(database: str, schema: str, *, limit: int = 1000) -> str:
     """Row/byte stats for materialized views in a schema.
 
     SHOW VIEWS never returns rows/bytes, even for materialized views (see
@@ -130,7 +125,7 @@ def show_materialized_views(
     `view_stats` this needs no warehouse.
     """
     scope = f"{quote_identifier(database)}.{quote_identifier(schema)}"
-    return f"SHOW MATERIALIZED VIEWS IN SCHEMA {scope}{_paging(after, limit)}"
+    return f"SHOW MATERIALIZED VIEWS IN SCHEMA {scope}{_paging(None, limit)}"
 
 
 def show_warehouses() -> str:

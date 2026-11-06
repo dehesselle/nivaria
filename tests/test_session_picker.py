@@ -250,7 +250,7 @@ async def test_switching_back_to_a_role_reopens_its_own_warm_cache(repo) -> None
             await pilot.pause()
         assert pool.params.role == "ROLE_B"
         # A brand-new identity's cache starts with nothing in it.
-        assert app.repo.databases(databases_scope()).is_empty
+        assert not app.repo.databases(databases_scope())
         # SHOW ROLES would return the same roles regardless of which one is
         # active, so ROLE_B's own cache offers ROLE_A again too.
         put_roles(app.repo, "ROLE_A", "ROLE_B")
@@ -270,7 +270,7 @@ async def test_switching_back_to_a_role_reopens_its_own_warm_cache(repo) -> None
     assert pool.params.role == "ROLE_A"
     # The database cached before ever switching away is still there, warm --
     # nothing had to be refetched to see it again.
-    assert [d.name for d in app.repo.databases(databases_scope()).rows] == ["ROLE_A_DB"]
+    assert [d.name for d in app.repo.databases(databases_scope())] == ["ROLE_A_DB"]
 
 
 async def test_reselecting_the_current_warehouse_does_nothing(repo) -> None:

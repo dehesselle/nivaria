@@ -49,7 +49,7 @@ SCHEMA_VERSION = 9
 
 
 class Database:
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path) -> None:
         self.path = path
         self._usable = False
 
@@ -57,11 +57,10 @@ class Database:
         """Create the file's schema, replacing a file from another schema
         version. Returns whether the cache is usable."""
         try:
-            if isinstance(self.path, Path):
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                if self.path.exists() and self._version() != SCHEMA_VERSION:
-                    self._discard(self.path)
-            with self._raw() as connection:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            if self.path.exists() and self._version() != SCHEMA_VERSION:
+                self._discard(self.path)
+            with self.connect() as connection:
                 for script in _SCHEMA_SCRIPTS:
                     connection.executescript(script)
                 # A PRAGMA takes no bound parameters; the value is a constant.
@@ -72,7 +71,7 @@ class Database:
         return self._usable
 
     def _version(self) -> int:
-        with self._raw() as connection:
+        with self.connect() as connection:
             return connection.execute("PRAGMA user_version").fetchone()[0]
 
     @staticmethod
@@ -87,7 +86,8 @@ class Database:
         return self._usable
 
     @contextmanager
-    def _raw(self) -> Iterator[sqlite3.Connection]:
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """A short-lived connection for one unit of work."""
         connection = sqlite3.connect(self.path, timeout=10.0)
         try:
             connection.row_factory = sqlite3.Row
@@ -101,12 +101,6 @@ class Database:
             raise
         finally:
             connection.close()
-
-    @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
-        """A short-lived connection for one unit of work."""
-        with self._raw() as connection:
-            yield connection
 
 
 #: schema.sql for the freshness ledger, which has to be the same `cache_entry`

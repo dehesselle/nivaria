@@ -204,7 +204,7 @@ def fetch_page(
 
     `window_seconds` is how far back a log scope's statement reaches, which
     depends on the scope's ledger entry (`repository.plan_window`), so the
-    caller supplies it too. None asks for the whole fetch window.
+    caller supplies it too.
 
     A continuation page asks for one row more than `limit`, because `SHOW
     TASKS ... FROM 'name'` is inclusive: it starts with the cursor row itself,
@@ -305,11 +305,12 @@ def fetch_page(
             assert scope.schema is not None
             # Bounded by pipe count, not by history depth -- see
             # queries.pipe_activity's QUALIFY.
+            assert window_seconds is not None
             return Page(
                 gateway.pipe_activity(
                     scope.database,
                     scope.schema,
-                    _window(scope, window_seconds),
+                    window_seconds,
                     allow_reconnect=allow_reconnect,
                 ),
             )
@@ -320,13 +321,14 @@ def fetch_page(
             # Bounded to one pipe's history -- no target-table resolution
             # needed, unlike PIPE_HISTORY, since ACCOUNT_USAGE.COPY_HISTORY
             # has an ordinary PIPE_NAME column to filter on directly.
+            assert window_seconds is not None
             max_rows = config.get(HISTORY_MAX_ROWS)
             return _capped(
                 gateway.pipe_activity_history(
                     scope.database,
                     scope.schema,
                     scope.table,
-                    _window(scope, window_seconds),
+                    window_seconds,
                     max_rows,
                     allow_reconnect=allow_reconnect,
                 ),
@@ -373,11 +375,12 @@ def fetch_page(
             assert scope.schema is not None
             # Bounded by task count, not by history depth -- see
             # queries.task_activity's QUALIFY.
+            assert window_seconds is not None
             return Page(
                 gateway.task_activity(
                     scope.database,
                     scope.schema,
-                    _window(scope, window_seconds),
+                    window_seconds,
                     allow_reconnect=allow_reconnect,
                 ),
             )
@@ -388,13 +391,14 @@ def fetch_page(
             # Bounded to one task's history -- no target-table resolution
             # needed, unlike PIPE_HISTORY: ACCOUNT_USAGE.TASK_HISTORY has an
             # ordinary NAME column to filter on directly.
+            assert window_seconds is not None
             max_rows = config.get(HISTORY_MAX_ROWS)
             return _capped(
                 gateway.task_activity_history(
                     scope.database,
                     scope.schema,
                     scope.table,
-                    _window(scope, window_seconds),
+                    window_seconds,
                     max_rows,
                     allow_reconnect=allow_reconnect,
                 ),
@@ -548,16 +552,6 @@ def _pipe_status_page(
     return Page(rows, batch[-1] if len(remaining) > len(batch) else None)
 
 
-def _window(scope: Scope, window_seconds: int | None) -> int:
-    """The seconds a log scope's statement reaches back: the caller's, or
-    the whole fetch window."""
-    if window_seconds is not None:
-        return window_seconds
-    policy = log_policy(scope)
-    assert policy is not None, f"{scope.type} is not a log scope"
-    return policy.fetch_seconds
-
-
 def _capped(rows: list[dict[str, Any]], max_rows: int) -> Page:
     """A single-call result that carried its own row cap.
 
@@ -647,7 +641,6 @@ def fetch_database(
     rows = gateway.show_objects_in_database(
         scope.object_type,
         scope.database,
-        after=None,
         limit=cap,
         allow_reconnect=allow_reconnect,
     )

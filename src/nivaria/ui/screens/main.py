@@ -97,11 +97,7 @@ def _requestable(scope: Scope) -> Scope:
     plausibly share that shape; only OBJECTS actually means "a SHOW listing
     for one schema", which is the only thing a SHOW prime can stand in for.
     """
-    if scope.type is not ScopeType.OBJECTS:
-        return scope
-    assert scope.object_type is not None
-    assert scope.database is not None
-    return prime_scope(scope.object_type, scope.database)
+    return filling_prime(scope) or scope
 
 
 class MainScreen(Screen):
@@ -275,7 +271,7 @@ class MainScreen(Screen):
         without it a prime cannot complete an empty schema, and one over the
         chunk threshold would fan out to nothing.
         """
-        schemas = self.repo.schemas(schemas_scope(database)).rows
+        schemas = self.repo.schemas(schemas_scope(database))
         for object_type in TREE_TYPES:
             listings = [
                 objects_scope(object_type, database, schema.name) for schema in schemas
@@ -350,7 +346,8 @@ class MainScreen(Screen):
 
     def on_cache_updated(self, event: CacheUpdated) -> None:
         scope = event.scope
-        self._route_cache_update(scope)
+        self.tree.cache_updated(scope)
+        self.detail.cache_updated(scope)
         if (
             event.complete
             and scope.type is ScopeType.SCHEMAS
@@ -365,10 +362,6 @@ class MainScreen(Screen):
         for database in self.databases:
             self._prime_unfetched(database)
 
-    def _route_cache_update(self, scope: Scope) -> None:
-        self.tree.cache_updated(scope)
-        self.detail.cache_updated(scope)
-
     def on_object_selected(self, event: ObjectSelected) -> None:
         # Show, not _select: the cursor is already on the object, and
         # revealing it again queues a cursor move of its own. Textual
@@ -381,21 +374,17 @@ class MainScreen(Screen):
         self._select(event.ref)
 
     def on_category_selected(self, event: CategorySelected) -> None:
-        self._select_category(event.scope)
+        # No tree.reveal(...) needed here, unlike _select: the cursor is
+        # already on the category node that was just highlighted.
+        self._show_detail(lambda: self.detail.show_category(event.scope))
 
     def on_schema_selected(self, event: SchemaSelected) -> None:
-        # No tree.reveal(...) needed here either, same reasoning as
-        # _select_category: the cursor is already on the schema node that
-        # was just highlighted.
+        # No tree.reveal(...) needed here either: the cursor is already on
+        # the schema node that was just highlighted.
         self._show_detail(lambda: self.detail.show_schema(event.ref))
 
     def on_database_selected(self, event: DatabaseSelected) -> None:
         self._show_detail(lambda: self.detail.show_database(event.database))
-
-    def _select_category(self, scope: Scope) -> None:
-        # No tree.reveal(...) needed here, unlike _select: the cursor is
-        # already on the category node that was just highlighted.
-        self._show_detail(lambda: self.detail.show_category(scope))
 
     def _select(self, ref: ObjectRef) -> None:
         # A search hit or an Enter in a list view leaves the tree somewhere
@@ -480,8 +469,8 @@ class MainScreen(Screen):
     @work
     async def action_pick_databases(self) -> None:
         """Open the database picker."""
-        cached = self.repo.databases(databases_scope())
-        if cached.is_empty:
+        names = [row.name for row in self.repo.databases(databases_scope())]
+        if not names:
             # Nothing to choose from yet; ask, and let the user try again once
             # the answer lands rather than opening an empty dialog.
             self._request(databases_scope(), Priority.INTERACTIVE)
@@ -489,7 +478,7 @@ class MainScreen(Screen):
             return
         chosen = await self.app.push_screen_wait(
             MultiPickerDialog(
-                [row.name for row in cached.rows],
+                names,
                 title="Databases",
                 placeholder="type to filter databases",
                 current=self.databases,
@@ -528,19 +517,19 @@ class MainScreen(Screen):
         """Open the warehouse picker."""
         if self.pool is None:
             return
-        cached = self.repo.warehouses(warehouses_scope())
-        if cached.is_empty:
+        rows = self.repo.warehouses(warehouses_scope())
+        if not rows:
             self._request(warehouses_scope(), Priority.INTERACTIVE)
             self.notify("Loading warehouses...", timeout=3)
             return
         current = self.pool.params.warehouse
         chosen = await self.app.push_screen_wait(
             PickerDialog(
-                [row.name for row in cached.rows],
+                [row.name for row in rows],
                 title="Warehouse",
                 placeholder="type to filter warehouses",
                 current=current,
-                hints=self._warehouse_hints(cached.rows),
+                hints=self._warehouse_hints(rows),
             )
         )
         if chosen is not None and chosen != current:
@@ -564,15 +553,15 @@ class MainScreen(Screen):
         """Open the role picker."""
         if self.pool is None:
             return
-        cached = self.repo.roles(roles_scope())
-        if cached.is_empty:
+        names = [row.name for row in self.repo.roles(roles_scope())]
+        if not names:
             self._request(roles_scope(), Priority.INTERACTIVE)
             self.notify("Loading roles...", timeout=3)
             return
         current = self.pool.params.role
         chosen = await self.app.push_screen_wait(
             PickerDialog(
-                [row.name for row in cached.rows],
+                names,
                 title="Role",
                 placeholder="type to filter roles",
                 current=current,

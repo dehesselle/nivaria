@@ -16,9 +16,9 @@ from nivaria import paths
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
 from nivaria.models import ScopeType
-from nivaria.profiles import Profile, ProfileStore
+from nivaria.profiles import ProfileStore
 from nivaria.service.fetch import FetchService
-from nivaria.settings import PAGE_SIZE, POOL_SIZE, config
+from nivaria.settings import POOL_SIZE, config
 from nivaria.snowflake.gateway import PoolGateway
 from nivaria.snowflake.pool import LOGIN_TIMED_OUT, ConnectionPool, Connector
 from nivaria.ui.messages import CacheUpdated
@@ -65,13 +65,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         pool exists: which file that is depends on the connection's identity
         (see `paths.cache_file`), which is not known any earlier than this.
         """
-        pool = await self.push_screen_wait(
-            ConnectScreen(
-                self.profiles,
-                pool_size=config.get(POOL_SIZE),
-                connector=self._connector,
-            )
-        )
+        pool = await self.push_screen_wait(self._connect_dialog())
         if pool is None:
             self.exit()
             return
@@ -82,14 +76,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         # would try to pop a result callback it never had.
         screen = MainScreen(self.repo, self.fetch, pool, self.profiles)
         await self.push_screen(screen)
-        # Restore whatever databases were selected the last time this
-        # identity was browsed -- a picker confirmation is what *records* a
-        # selection (MainScreen._remember_databases), not this; re-recording
-        # an unchanged restore would also incorrectly refresh role/warehouse
-        # on every plain startup.
-        profile = self._matching_profile(pool)
-        if profile is not None and profile.databases:
-            screen.set_databases(list(profile.databases))
+        self._restore_databases(screen, pool)
 
     async def open_connect(self) -> None:
         """Reopen the connect dialog and swap in the resulting pool.
@@ -117,13 +104,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         "please wait" dialog that makes the wait visible instead of the app
         appearing to hang.
         """
-        pool = await self.push_screen_wait(
-            ConnectScreen(
-                self.profiles,
-                pool_size=config.get(POOL_SIZE),
-                connector=self._connector,
-            )
-        )
+        pool = await self.push_screen_wait(self._connect_dialog())
         if pool is None:
             return
         old_fetch, old_pool = self.fetch, self.pool
@@ -145,14 +126,26 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             # identity's cache.
             self.screen.set_repo(self.repo)
             self.screen.prefetch_session_lists()
-            profile = self._matching_profile(pool)
-            if profile is not None and profile.databases:
-                self.screen.set_databases(list(profile.databases))
+            self._restore_databases(self.screen, pool)
 
-    def _matching_profile(self, pool: ConnectionPool) -> Profile | None:
-        """The stored profile for `pool`'s identity, if any -- used to
-        restore a previously remembered database selection."""
-        return self.profiles.find(pool.params)
+    def _connect_dialog(self) -> ConnectScreen:
+        return ConnectScreen(
+            self.profiles,
+            pool_size=config.get(POOL_SIZE),
+            connector=self._connector,
+        )
+
+    def _restore_databases(self, screen: MainScreen, pool: ConnectionPool) -> None:
+        """Select whatever databases this identity last browsed.
+
+        A picker confirmation is what *records* a selection
+        (MainScreen._remember_databases), not this; re-recording an unchanged
+        restore would also incorrectly refresh role/warehouse on every plain
+        startup.
+        """
+        profile = self.profiles.find(pool.params)
+        if profile is not None and profile.databases:
+            screen.set_databases(list(profile.databases))
 
     def _open_repo(self, pool: ConnectionPool) -> Repository:
         """The cache for whatever identity `pool.params` currently describes.
@@ -191,7 +184,6 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             PoolGateway(pool),
             self.repo,
             workers=pool.size,
-            page_size=config.get(PAGE_SIZE),
             notify=self._cache_updated,
             on_error=self._fetch_failed,
         )

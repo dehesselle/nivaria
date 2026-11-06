@@ -150,10 +150,9 @@ class PipeView(HistoryView):
             return False
         if entry.fetched_at is None:
             return True
-        idle = self.repo.pipe_idle_as_of(
+        return self.repo.pipe_has_activity(
             self.ref.database, self.ref.schema, self.ref.name
         )
-        return idle is None
 
     def scopes(self) -> list[Scope]:
         # history_scope is only meaningfully "on screen" once a target table

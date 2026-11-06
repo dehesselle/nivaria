@@ -22,10 +22,8 @@ import queue
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
-from time import monotonic
 from typing import Any, Protocol
 
-from nivaria.errors import NivariaError
 from nivaria.snowflake import queries, sql_log
 
 _log = logging.getLogger(__name__)
@@ -74,7 +72,7 @@ def _login_failure_text(error: Exception) -> str:
 _WAIT_RECHECK_SECONDS = 0.5
 
 
-class ConnectionError_(NivariaError):
+class ConnectionError_(Exception):
     """Raised when the pool cannot establish its connections."""
 
 
@@ -190,7 +188,6 @@ class ConnectionPool:
         size: int,
         *,
         connector: Connector | None = None,
-        on_usage_change: Callable[[int, int], None] | None = None,
     ) -> None:
         if size < 1:
             raise ValueError("pool size must be at least 1")
@@ -204,7 +201,6 @@ class ConnectionPool:
         #: knows there is a gap worth repairing.
         self._target_size = size
         self._connector = connector or _real_connector
-        self._on_usage_change = on_usage_change
         self._free: queue.LifoQueue[Any] = queue.LifoQueue()
         self._all: list[Any] = []
         self._in_use = 0
@@ -253,7 +249,6 @@ class ConnectionPool:
             self._free.put(connection)
         self._adopt_resolved_session()
         self._read_account_names()
-        self._notify_usage()
 
     def _read_account_names(self) -> None:
         """Ask the first connection which organization and account it is in.
@@ -332,12 +327,9 @@ class ConnectionPool:
             self._all.append(connection)
             self._free.put(connection)
             self.size += 1
-        self._notify_usage()
 
     @contextlib.contextmanager
-    def acquire(
-        self, timeout: float | None = None, *, allow_reconnect: bool = True
-    ) -> Iterator[Any]:
+    def acquire(self, *, allow_reconnect: bool = True) -> Iterator[Any]:
         """Borrow a connection for the duration of the block.
 
         Blocks while every connection is busy -- that is the ordinary "stalled
@@ -365,10 +357,9 @@ class ConnectionPool:
         # taking a connection, so nothing can check one out mid-rewrite.
         with self._maintenance:
             pass
-        connection = self._checkout(timeout=timeout, allow_reconnect=allow_reconnect)
+        connection = self._checkout(allow_reconnect=allow_reconnect)
         with self._lock:
             self._in_use += 1
-        self._notify_usage()
         ok = False
         try:
             yield connection
@@ -380,12 +371,9 @@ class ConnectionPool:
                 self._free.put(connection)
             else:
                 self._discard(connection, allow_reconnect=allow_reconnect)
-            self._notify_usage()
 
-    def _checkout(self, *, timeout: float | None, allow_reconnect: bool) -> Any:
-        connection = self._acquire_free(
-            timeout=timeout, allow_reconnect=allow_reconnect
-        )
+    def _checkout(self, *, allow_reconnect: bool) -> Any:
+        connection = self._acquire_free(allow_reconnect=allow_reconnect)
         if not self._is_dead(connection):
             return connection
         if allow_reconnect:
@@ -405,7 +393,7 @@ class ConnectionPool:
                 return candidate
             self._drop(candidate)
 
-    def _acquire_free(self, *, timeout: float | None, allow_reconnect: bool) -> Any:
+    def _acquire_free(self, *, allow_reconnect: bool) -> Any:
         """Dequeue an idle connection -- this is also where a slot a
         background job dropped earlier gets repaired.
 
@@ -425,7 +413,6 @@ class ConnectionPool:
         connection being waited for can be given up (see `_replace`), and
         nothing would then ever arrive on `_free`.
         """
-        deadline = None if timeout is None else monotonic() + timeout
         while True:
             with self._lock:
                 live = self.size
@@ -439,16 +426,9 @@ class ConnectionPool:
                     connection = self._open_one()
                     with self._lock:
                         self.size += 1
-                    self._notify_usage()
                     return connection
-            wait = _WAIT_RECHECK_SECONDS
-            if deadline is not None:
-                wait = max(0.0, min(wait, deadline - monotonic()))
-            try:
-                return self._free.get(timeout=wait)
-            except queue.Empty:
-                if deadline is not None and monotonic() >= deadline:
-                    raise
+            with contextlib.suppress(queue.Empty):
+                return self._free.get(timeout=_WAIT_RECHECK_SECONDS)
 
     @staticmethod
     def _is_dead(connection: Any) -> bool:
@@ -502,7 +482,6 @@ class ConnectionPool:
         except ConnectionError_:
             with self._lock:
                 self.size -= 1
-            self._notify_usage()
             raise
 
     def _drop(self, connection: Any) -> None:
@@ -510,7 +489,6 @@ class ConnectionPool:
         self._detach(connection)
         with self._lock:
             self.size -= 1
-        self._notify_usage()
 
     def _discard(self, connection: Any, *, allow_reconnect: bool) -> None:
         """A connection that just failed mid-use is never handed out again.
@@ -522,9 +500,7 @@ class ConnectionPool:
         if allow_reconnect:
             self._free.put(self._replace(connection))
         else:
-            self._detach(connection)
-            with self._lock:
-                self.size -= 1
+            self._drop(connection)
 
     def run_on_all(self, statement: str, *, timeout: float = 30.0) -> None:
         """Run a session-scoped statement (USE ROLE / USE WAREHOUSE) against
@@ -613,7 +589,3 @@ class ConnectionPool:
             with contextlib.suppress(Exception):
                 connection.close()
         self._all.clear()
-
-    def _notify_usage(self) -> None:
-        if self._on_usage_change is not None:
-            self._on_usage_change(self.in_use, self.size)

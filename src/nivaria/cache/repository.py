@@ -686,29 +686,6 @@ MISSING = Entry(
 )
 
 
-@dataclass(frozen=True)
-class Cached[T]:
-    """Rows plus how old they are -- the only shape the UI reads."""
-
-    rows: list[T]
-    entry: Entry
-
-    @property
-    def state(self) -> CacheState:
-        return self.entry.state
-
-    @property
-    def fetched_at(self) -> float | None:
-        return self.entry.fetched_at
-
-    def age(self, now: float | None = None) -> float | None:
-        return self.entry.age(now)
-
-    @property
-    def is_empty(self) -> bool:
-        return not self.rows
-
-
 def _quote(name: str) -> str:
     escaped = name.replace('"', '""')
     return f'"{escaped}"'
@@ -773,46 +750,34 @@ class Repository:
         with self._store(scope).connect() as connection:
             return [dict(row) for row in self._select(connection, scope)]
 
-    def _cached(self, scope: Scope, build: Callable[[sqlite3.Row], Any]) -> Cached[Any]:
+    def _built(self, scope: Scope, build: Callable[[sqlite3.Row], Any]) -> list[Any]:
         with self._store(scope).connect() as connection:
-            entry = self._entry(connection, scope)
             rows = self._select(connection, scope)
-        return Cached(rows=[build(row) for row in rows], entry=entry)
+        return [build(row) for row in rows]
 
-    def databases(self, scope: Scope) -> Cached[DatabaseRow]:
-        return self._cached(
-            scope,
-            lambda row: DatabaseRow(name=row["name"], comment=row["comment"] or ""),
-        )
+    def databases(self, scope: Scope) -> list[DatabaseRow]:
+        return self._built(scope, lambda row: DatabaseRow(name=row["name"]))
 
-    def warehouses(self, scope: Scope) -> Cached[WarehouseRow]:
-        return self._cached(
+    def warehouses(self, scope: Scope) -> list[WarehouseRow]:
+        return self._built(
             scope,
             lambda row: WarehouseRow(
                 name=row["name"],
-                comment=row["comment"] or "",
                 size=row["size"] or "",
                 is_default=row["is_default"] == "Y",
             ),
         )
 
-    def roles(self, scope: Scope) -> Cached[RoleRow]:
-        return self._cached(
+    def roles(self, scope: Scope) -> list[RoleRow]:
+        return self._built(scope, lambda row: RoleRow(name=row["name"]))
+
+    def schemas(self, scope: Scope) -> list[SchemaRow]:
+        return self._built(
             scope,
-            lambda row: RoleRow(name=row["name"], comment=row["comment"] or ""),
+            lambda row: SchemaRow(database_name=row["database_name"], name=row["name"]),
         )
 
-    def schemas(self, scope: Scope) -> Cached[SchemaRow]:
-        return self._cached(
-            scope,
-            lambda row: SchemaRow(
-                database_name=row["database_name"],
-                name=row["name"],
-                comment=row["comment"] or "",
-            ),
-        )
-
-    def objects(self, scope: Scope) -> Cached[SFObject]:
+    def objects(self, scope: Scope) -> list[SFObject]:
         assert scope.object_type is not None
         object_type = scope.object_type
 
@@ -822,21 +787,16 @@ class Repository:
                 schema_name=row["schema_name"],
                 name=row["name"],
                 type=object_type,
-                comment=row["comment"] or "",
             )
 
-        return self._cached(scope, build)
+        return self._built(scope, build)
 
-    def columns(self, scope: Scope) -> Cached[Column]:
-        return self._cached(
+    def columns(self, scope: Scope) -> list[Column]:
+        return self._built(
             scope,
             lambda row: Column(
-                table_catalog=row["TABLE_CATALOG"],
-                table_schema=row["TABLE_SCHEMA"],
-                table_name=row["TABLE_NAME"],
                 column_name=row["COLUMN_NAME"],
                 ordinal_position=row["ORDINAL_POSITION"] or 0,
-                data_type=row["DATA_TYPE"] or "",
                 is_nullable=(row["IS_NULLABLE"] or "").upper() == "YES",
                 desc_type=row["_desc_type"] or "",
                 default=row["COLUMN_DEFAULT"] or "",
@@ -880,57 +840,50 @@ class Repository:
         and callers (PipeView, FetchService._execute) treat it as "nothing to
         show yet", not an error.
         """
-        for row in self.raw_rows(pipe_activity_scope(database, schema)):
-            if row.get("PIPE_NAME") != pipe:
-                continue
-            catalog = row.get("TABLE_CATALOG_NAME")
-            table_schema = row.get("TABLE_SCHEMA_NAME")
-            table = row.get("TABLE_NAME")
-            if catalog and table_schema and table:
-                return (str(catalog), str(table_schema), str(table))
-        backfill = pipe_activity_history_scope(database, schema, pipe)
-        with self._store(backfill).connect() as connection:
-            row = connection.execute(
-                "SELECT TABLE_CATALOG_NAME, TABLE_SCHEMA_NAME, TABLE_NAME "
-                f"FROM {spec_for(backfill).name} WHERE _scope = ? "
-                "AND TABLE_CATALOG_NAME IS NOT NULL "
-                "AND TABLE_SCHEMA_NAME IS NOT NULL AND TABLE_NAME IS NOT NULL "
-                "ORDER BY julianday(LAST_LOAD_TIME) DESC LIMIT 1",
-                (backfill.key,),
-            ).fetchone()
-        if row is not None:
-            return (
-                str(row["TABLE_CATALOG_NAME"]),
-                str(row["TABLE_SCHEMA_NAME"]),
-                str(row["TABLE_NAME"]),
-            )
+        with self._db.connect() as connection:
+            for scope in (
+                pipe_activity_scope(database, schema),
+                pipe_activity_history_scope(database, schema, pipe),
+            ):
+                # `<> ''` is false for a NULL too.
+                row = connection.execute(
+                    "SELECT TABLE_CATALOG_NAME, TABLE_SCHEMA_NAME, TABLE_NAME "
+                    f"FROM {spec_for(scope).name} WHERE _scope = ? AND PIPE_NAME = ? "
+                    "AND TABLE_CATALOG_NAME <> '' AND TABLE_SCHEMA_NAME <> '' "
+                    "AND TABLE_NAME <> '' "
+                    "ORDER BY julianday(LAST_LOAD_TIME) DESC LIMIT 1",
+                    (scope.key, pipe),
+                ).fetchone()
+                if row is not None:
+                    return (
+                        str(row["TABLE_CATALOG_NAME"]),
+                        str(row["TABLE_SCHEMA_NAME"]),
+                        str(row["TABLE_NAME"]),
+                    )
         detail = self.object_detail(ObjectRef(ObjectType.PIPE, database, schema, pipe))
         definition = (detail or {}).get("definition")
         return copy_target(definition) if definition else None
 
-    def pipe_idle_as_of(self, database: str, schema: str, pipe: str) -> float | None:
-        """When PIPE_ACTIVITY last saw no load for this pipe, or None.
+    def pipe_has_activity(self, database: str, schema: str, pipe: str) -> bool:
+        """Whether PIPE_ACTIVITY holds a load for this pipe.
 
-        PIPE_ACTIVITY keeps each pipe's latest load within the fetch window,
-        so a fetched snapshot without a row for this pipe says that nothing
-        loaded in that window up to `fetched_at`. EMPTY is excluded: a pass
-        can hold that state with no rows while carrying the previous pass's
-        `fetched_at`. A failed or running refresh still keeps the earlier
-        rows, so the absence still holds as of `fetched_at`.
+        It keeps each pipe's latest load within the fetch window, so once it
+        has been fetched, having none says that nothing loaded in that window.
+        A failed or running refresh still keeps the earlier rows, so the
+        answer still holds as of `fetched_at`.
 
         The window is the fetch window as it was set for that pass; raising
         the setting afterwards makes the claim cover less than it says until
         the snapshot is refetched.
         """
         scope = pipe_activity_scope(database, schema)
-        with self._store(scope).connect() as connection:
-            entry = self._entry(connection, scope)
-            rows = self._select(connection, scope)
-        if entry.state is CacheState.EMPTY or entry.fetched_at is None:
-            return None
-        if any(row["PIPE_NAME"] == pipe for row in rows):
-            return None
-        return entry.fetched_at
+        with self._db.connect() as connection:
+            row = connection.execute(
+                f"SELECT 1 FROM {spec_for(scope).name} "
+                "WHERE _scope = ? AND PIPE_NAME = ? LIMIT 1",
+                (scope.key, pipe),
+            ).fetchone()
+        return row is not None
 
     def search_corpus(self, databases: Sequence[str]) -> list[tuple[str, ObjectRef]]:
         """Every searchable object across `databases` as (text, ref) pairs.
@@ -1049,7 +1002,7 @@ class Repository:
         return [
             SchemaRef(database=database, name=row.name)
             for database in databases
-            for row in self.schemas(schemas_scope(database)).rows
+            for row in self.schemas(schemas_scope(database))
         ]
 
     def child_count(self, scope: Scope) -> int:

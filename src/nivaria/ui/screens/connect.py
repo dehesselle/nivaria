@@ -90,14 +90,13 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         *,
         pool_size: int = 3,
         connector: Connector | None = None,
-        prefill: Profile | None = None,
     ) -> None:
         super().__init__()
         self._profile_store = recent or ProfileStore()
         self._recent: list[Profile] = self._profile_store.load()
         self._pool_size = pool_size
         self._connector = connector
-        self._prefill = prefill or (self._recent[0] if self._recent else None)
+        self._prefill = self._recent[0] if self._recent else None
         self._connecting = False
         self._connecting_screen: ConnectingDialog | None = None
 

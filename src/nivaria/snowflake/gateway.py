@@ -173,7 +173,6 @@ class SnowflakeGateway(Protocol):
         object_type: ObjectType,
         database: str,
         *,
-        after: str | None = None,
         limit: int = 1000,
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
@@ -513,14 +512,11 @@ class PoolGateway:
         object_type: ObjectType,
         database: str,
         *,
-        after: str | None = None,
         limit: int = 1000,
         allow_reconnect: bool = True,
     ) -> list[Row]:
         return self._fetch(
-            queries.show_objects_in_database(
-                object_type, database, after=after, limit=limit
-            ),
+            queries.show_objects_in_database(object_type, database, limit=limit),
             allow_reconnect=allow_reconnect,
         )
 
@@ -758,6 +754,5 @@ class PoolGateway:
     ) -> list[Row]:
         return self._fetch(
             queries.task_history(database, schema, task, max_rows),
-            (),
             allow_reconnect=allow_reconnect,
         )

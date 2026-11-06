@@ -269,18 +269,6 @@ def test_in_use_is_restored_even_when_the_block_raises() -> None:
     assert pool.in_use == 0
 
 
-def test_usage_changes_are_reported_for_the_footer_gauge() -> None:
-    seen: list[tuple[int, int]] = []
-    pool, _ = make_pool(
-        size=2, on_usage_change=lambda used, size: seen.append((used, size))
-    )
-    pool.connect_all()
-    with pool.acquire():
-        pass
-    assert (1, 2) in seen
-    assert seen[-1] == (0, 2)
-
-
 def test_a_worker_blocks_while_every_connection_is_busy() -> None:
     """This is the 'stalled worker' state: it needs no special handling beyond
     blocking here, but it must actually block rather than hand out a second

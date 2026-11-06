@@ -400,7 +400,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
                 assert data.scope is not None
                 return [
                     Child(key=schema.name, label=schema.name, expandable=True)
-                    for schema in self.repo.schemas(data.scope).rows
+                    for schema in self.repo.schemas(data.scope)
                 ]
             case NodeType.SCHEMA:
                 assert data.database is not None
@@ -419,7 +419,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
                 assert data.scope is not None
                 return [
                     Child(key=obj.name, label=obj.name)
-                    for obj in self.repo.objects(data.scope).rows
+                    for obj in self.repo.objects(data.scope)
                 ]
 
     def _child_data(self, parent: TreeNode[NodeData], child: Child) -> NodeData:

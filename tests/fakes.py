@@ -392,13 +392,10 @@ class FakeGateway:
         object_type: ObjectType,
         database: str,
         *,
-        after: str | None = None,
         limit: int = 1000,
         allow_reconnect: bool = True,
     ) -> list[Row]:
-        self.calls.append(
-            ("show_objects_in_database", (object_type, database, after, limit))
-        )
+        self.calls.append(("show_objects_in_database", (object_type, database, limit)))
         everything: list[tuple[str, str]] = []
         for (db, schema, row_type), names in self.objects.items():
             if db != database or row_type != object_type:
@@ -406,8 +403,6 @@ class FakeGateway:
             everything.extend((name, schema) for name in names)
         everything.sort()
         if object_type not in self.paging_noop_types:
-            if after is not None:
-                everything = [pair for pair in everything if pair[0] > after]
             everything = everything[:limit]
         return [
             {

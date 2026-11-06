@@ -264,7 +264,7 @@ class ColumnsView(ObjectView):
         with self.keeping_cursor(table):
             table.clear()
             rows = self.columns_panel.rows = {}
-            for column in self.repo.columns(scope).rows:
+            for column in self.repo.columns(scope):
                 tags = tags_by_column.get(column.column_name, {})
                 key = column.column_name
                 # Rank values, not display values. The table is handed a RowKey

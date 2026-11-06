@@ -253,8 +253,7 @@ History or Data table says when they were fetched.
 **Settings** (`, s`) lists every setting by group, each editable in place. **OK** validates, saves and closes; **Apply** saves and stays open;
 **Cancel** or `escape` discards, asking first if anything changed. Clearing a
 field and confirming resets it to its default. A change takes effect without a
-restart, except **fetch page size**, which applies from the next reconnect or
-role switch.
+restart.
 
 | Setting | Default | Effect |
 | --- | --- | --- |

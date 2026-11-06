@@ -746,7 +746,7 @@ activity" or "Older run history", and why.
 `PIPE_ACTIVITY` keeps each pipe's latest load in the fetch window. A fetched
 snapshot without a row for a pipe therefore says the pipe loaded nothing in
 that window, up to the snapshot's `fetched_at` minus `ACCOUNT_USAGE`'s lag
-(`Repository.pipe_idle_as_of`). The pipe's own `PIPE_ACTIVITY_HISTORY` reads
+(`Repository.pipe_has_activity`). The pipe's own `PIPE_ACTIVITY_HISTORY` reads
 the same view over the same window with the same lag, so it could only repeat
 that answer, at about 6.5 s per pipe (see
 [measurements.md](measurements.md#history-latency)). So once the snapshot
@@ -1990,12 +1990,6 @@ The bounding settings (`HISTORY_MAX_ROWS`, `DATA_PREVIEW_ROWS`,
 are adjustable rather than baked in. Their defaults are starting points, not
 measured optima — an account whose shape makes one of them wrong should be
 able to say so without a code change.
-
-`PAGE_SIZE` is the one setting **not** read at the point of use: it is
-snapshotted into `FetchService` at construction, so a change only takes effect
-on the next `restart_fetch` (a reconnect or a role switch). Not deliberate,
-just unfixed — and worth knowing when lowering it to reproduce a paging
-problem.
 
 A value that fails to parse in the dialog (`ValueError`) blocks OK/Apply with
 an inline warning rather than silently discarding it or falling back to the
