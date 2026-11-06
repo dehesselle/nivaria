@@ -14,8 +14,7 @@ Both share the same two tabs and the same rendering: **Grants** (`SHOW GRANTS
 ON SCHEMA`/`SHOW GRANTS ON DATABASE`, metadata-layer, no warehouse needed,
 rendered one row per grantee by `grants.py`, the same as the Table view's) and
 **Tags** (INFORMATION_SCHEMA.TAG_REFERENCES, an ordinary SELECT that needs a
-running warehouse and so degrades to blank without one, the same dual-source
-pattern table_stats/information_schema_tables established -- see docs/DESIGN.md's
+running warehouse and so degrades to blank without one -- see docs/DESIGN.md's
 "second source" section). Tags are fetched only while their tab is shown, like
 the Table view's Grants and Data: every cursor stop on a schema would otherwise
 use the warehouse, and nothing shows the result until the tab opens. The shared

@@ -4,9 +4,9 @@
 
 """Category view for the "Pipes (n)" node: status and load activity.
 
-Tabbed -- Status (one row per pipe: name, `created_on`, execution state
-and `invalid_reason`) opens by default, alongside Activity (last load activity
-per pipe).
+Tabbed -- Status (one row per pipe: name, `created_on`, execution state,
+pending files and `invalid_reason`) opens by default, alongside Activity (last
+load activity per pipe).
 
 Execution State is Snowflake's own `executionState`, read with
 `SYSTEM$PIPE_STATUS` into its own scope (`pipe_status_scope`). Until a pipe's

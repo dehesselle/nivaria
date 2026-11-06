@@ -75,7 +75,8 @@ from nivaria.version import __version__
 
 #: How often the status indicators are recomputed. Fast enough that a burst of
 #: pool activity is visible rather than blinking past between ticks, and cheap
-#: enough to run on the event loop: an int read plus one indexed sqlite lookup.
+#: enough to run on the event loop: indexed sqlite lookups, one ledger row per
+#: watched scope.
 TICK = 0.3
 
 #: The About dialog's text. A real filesystem Path even for an installed
@@ -148,9 +149,7 @@ class MainScreen(Screen):
         yield tree
         yield DetailPane(self.repo, id="detail")
         # The chord key is pinned, so it holds the left corner
-        # whatever the focus chain is doing. Nothing reserves the right
-        # corner any more: this footer gives ctrl+p no special treatment,
-        # so the status area simply sits there.
+        # whatever the focus chain is doing.
         with Footer(pinned=("comma",)):
             yield RoleLabel(id="footer-role")
             yield WarehouseLabel(id="footer-warehouse")
@@ -192,9 +191,9 @@ class MainScreen(Screen):
             if node.data is not None and node.data.scope is not None:
                 return node.data.scope
             node = node.parent
-        # No single canonical database to prefer here any more -- multiple
-        # can be selected. Only affects the brief pre-navigation window
-        # before the cursor lands anywhere.
+        # Several databases can be selected, so none is preferred here. Only
+        # affects the brief pre-navigation window before the cursor lands
+        # anywhere.
         return databases_scope()
 
     def _tick(self) -> None:
@@ -218,8 +217,7 @@ class MainScreen(Screen):
             *self.tree.visible_scopes(),
             *self.detail.scopes(),
         ]
-        # The countdown runs its own spinner off this, so there is no frame
-        # counter to drive from here any more.
+        # The countdown runs its own spinner off this.
         countdown.refreshing = self._priming() or any(
             self._busy(scope) for scope in watched
         )
@@ -431,7 +429,7 @@ class MainScreen(Screen):
             self.fetch.cancel_where(left.__contains__)
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
-        """The tree found something missing or stale."""
+        """The tree or a detail view found something missing or stale."""
         # Asked while the scope's own pass was still running, which would have
         # dropped this as a duplicate. Having failed since, it would run again.
         if event.from_update and self.repo.entry(event.scope).state is CacheState.ERROR:
@@ -504,10 +502,10 @@ class MainScreen(Screen):
     def _remember_databases(self, databases: list[str]) -> None:
         """Fold the just-picked selection into this identity's Profile.
 
-        Deliberately separate from set_databases: that method is also called
-        by the set_repo reset path (an empty list, on a role switch or
-        reconnect), and there is nothing to remember about *that* -- only an
-        actual picker confirmation should write anything.
+        Deliberately separate from set_databases: that method also restores a
+        stored selection (`NivariaApp`), and there is nothing to remember
+        about *that* -- only an actual picker confirmation should write
+        anything.
 
         Not deferred to the next successful connect the way a brand-new
         Profile is (see ConnectScreen._finish): the pool here is already a

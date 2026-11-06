@@ -88,7 +88,7 @@ class FetchJob:
     #: every page of one pass writes under the same generation stamp.
     generation: int = field(compare=False, default=0)
     #: Which page of this pass this job is, counted from 0. Only the
-    #: scheduler's page budget reads it -- see FetchService._execute.
+    #: scheduler's page budget reads it -- see FetchService._store.
     page: int = field(compare=False, default=0)
 
     def next_page(self, cursor: str, generation: int) -> FetchJob:
@@ -236,7 +236,7 @@ def fetch_page(
             if not scope.object_type.pageable:
                 # SHOW PIPES/STAGES ignore LIMIT/FROM, so one call is the
                 # whole schema and there is no second page to ask for --
-                # asking anyway is what used to loop forever. Nothing can
+                # asking anyway would loop forever. Nothing can
                 # detect truncation here either: without a working LIMIT
                 # there is no row count that means 'there was more'. The
                 # row ceiling in PoolGateway is the only bound left.

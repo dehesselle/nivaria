@@ -4,9 +4,8 @@
 
 """Snowflake statement builders.
 
-Every statement nivaria sends is built here and nowhere else, so the paging
-strategy can be swapped in one place if `LIMIT ... FROM` turns out to be
-unavailable for some object type.
+Every statement nivaria sends is built here and nowhere else, so what goes to
+Snowflake can be read in one place.
 
 Two different mechanisms are used for injecting values, deliberately:
 
@@ -327,18 +326,16 @@ def pipe_activity(window_seconds: int) -> str:
     list (which only ever wants each pipe's most recent load) and
     `Repository.pipe_target_table`'s resolution, neither of which needs the
     full history. Bounding this to one row per pipe, in SQL, is the whole
-    point: without it, a busy schema with hundreds of pipes and frequent
-    ingestion returns unboundedly many historical rows for a query that only
-    gets collapsed back down to one row per pipe in Python anyway (see
-    `pipe_list_view.py`) -- the first version of this query did exactly that,
-    and hung for minutes against a live account with ~400 pipes. A single
-    pipe's full history (for its own detail view) is `pipe_activity_history`
-    below instead -- lazy, per pipe, not part of this query.
+    point: collapsing in Python instead means materialising every load of
+    every pipe first, which hung for minutes against a live account with ~400
+    pipes. A single pipe's full history (for its own detail view) is
+    `pipe_activity_history` below instead -- lazy, per pipe, not part of this
+    query.
 
     The window is the whole "pipe history fetch window" setting for a full
     pass, or the time since the last pass plus the lag margin for a window
     pass (`repository.plan_window`): the cost follows the window, not the
-    rows, so the 5-minute refresh asks for only a few hours. Like
+    rows, so a refresh asks for only a few hours. Like
     `table_stats`, this needs a running warehouse;
     unlike it, ACCOUNT_USAGE.COPY_HISTORY is a fixed name rather than one
     built from the database, so both filter values bind as ordinary `%s`
@@ -496,11 +493,9 @@ def task_activity(window_seconds: int) -> str:
     SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY, filtered to one schema's tasks and
     reduced to one row per task with QUALIFY -- the same shape `pipe_activity`
     uses, and for the same reason: a schema full of frequently-running tasks
-    could return unboundedly many historical rows for a query that only ever
-    gets collapsed back down to one row per task in Python anyway (see
-    `task_list_view.py`). A single task's full history (for its own detail
-    view) is `task_activity_history` below instead -- lazy, per task, not
-    part of this query.
+    could otherwise return unboundedly many historical rows. A single task's
+    full history (for its own detail view) is `task_activity_history` below
+    instead -- lazy, per task, not part of this query.
 
     The window is `pipe_activity`'s, with the task history fetch window.
     It filters by COMPLETED_TIME, not SCHEDULED_TIME: ACCOUNT_USAGE lists a
@@ -531,8 +526,8 @@ def task_activity_history(window_seconds: int, max_rows: int) -> str:
     """One task's newest `max_rows` ACCOUNT_USAGE runs, completed `window_seconds` ago or later.
 
     The backfill half of a single task's detail view -- `task_activity` above
-    deliberately only keeps the latest row per task, so a task's own "Run
-    history" tab needs this instead, scoped to just that one task and fetched
+    deliberately only keeps the latest row per task, so a task's own History
+    tab needs this instead, scoped to just that one task and fetched
     lazily only once that task's view is opened (`TaskView`), never eagerly
     for a whole schema. Like `pipe_activity_history`, this needs no
     target-table resolution: ACCOUNT_USAGE.TASK_HISTORY already carries NAME
@@ -593,15 +588,11 @@ def task_history(database: str, schema: str, task: str, max_rows: int) -> str:
     where PIPE_NAME filters the function's *output* rather than being a named
     argument itself.
 
-    RESULT_LIMIT used to be pinned at the function's own maximum (10000) on
-    the grounds that a real task history never comes near it. That is the
-    wrong shape of argument twice over: the function documents no ordering,
-    so *which* rows RESULT_LIMIT keeps is undefined, and "never comes near
-    it" is exactly the kind of assumption this project has since been caught
-    out by elsewhere. The outer ORDER BY ... LIMIT is what actually bounds
-    the result now, deterministically and to the newest runs; RESULT_LIMIT is
-    still set alongside it, clamped to the function's maximum, so the bound
-    is pushed into the function too rather than only applied to its output.
+    The outer ORDER BY ... LIMIT is what bounds the result, deterministically
+    and to the newest runs: the function documents no ordering, so *which*
+    rows RESULT_LIMIT alone keeps is undefined. RESULT_LIMIT is still set
+    alongside it, clamped to the function's maximum, so the bound is pushed
+    into the function too rather than only applied to its output.
     """
     target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.TASK_HISTORY"
     result_limit = max(1, min(int(max_rows), TASK_HISTORY_RESULT_LIMIT_MAX))

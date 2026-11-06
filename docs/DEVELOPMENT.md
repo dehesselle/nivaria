@@ -177,7 +177,7 @@ A new scope touches ten places:
 2. a `*_scope()` constructor;
 3. a case in `Scope.key`;
 4. a `TableSpec`;
-5. a case in `Repository.spec_for`;
+5. a case in `repository.spec_for`;
 6. a table in `schema.sql` and a `SCHEMA_VERSION` bump;
 7. a builder in `snowflake/queries.py`;
 8. a method on the `SnowflakeGateway` protocol;

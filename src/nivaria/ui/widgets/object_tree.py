@@ -74,10 +74,8 @@ class NodeType(StrEnum):
     #: database, flowing through the same _desired/_apply machinery as every
     #: other level -- see set_databases.
     ROOT = "root"
-    #: Was SCHEMAS: merged with the old top-level "Schemas (n)" node, since
-    #: the database itself is now the top-level node -- it shows the schema
-    #: count directly and expands straight into schemas, one less level of
-    #: nesting than a separate "Schemas" child would need.
+    #: Shows the schema count directly and expands straight into schemas, one
+    #: less level of nesting than a separate "Schemas" child would need.
     DATABASE = "database"
     SCHEMA = "schema"
     CATEGORY = "category"
@@ -101,9 +99,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
     """A lazy tree over the cached metadata of every selected database."""
 
     #: Guard rails for `Resizable` -- just enough that neither this pane nor
-    #: its DetailPane sibling can be dragged into uselessness. The drag
-    #: itself lives in tcoda now, which is where snakecam's identical copy of
-    #: it went too.
+    #: its DetailPane sibling can be dragged into uselessness.
     RESIZE_MIN = 15
     RESIZE_MIN_SIBLING = 20
 
@@ -145,13 +141,11 @@ class ObjectTree(Resizable, Tree[NodeData]):
     def set_databases(self, databases: list[str]) -> None:
         """Point the tree at this set of databases.
 
-        Unlike the old single-database set_database, this does not
-        unconditionally wipe the tree: root's children now flow through the
-        same _desired/_apply diff every other level already uses (see
-        docs/DESIGN.md "The cursor must not move"), so picking the same set again
-        is a no-op, adding a database appends a node without disturbing the
-        rest, and removing one moves the cursor clear of it first -- all for
-        free, the same machinery already built for schema/object children.
+        Root's children flow through the same _desired/_apply diff as every
+        other level (see docs/DESIGN.md "The cursor must not move"), so picking
+        the same set again is a no-op, adding a database appends a node without
+        disturbing the rest, and removing one moves the cursor clear of it
+        first.
         """
         self.databases = list(databases)
         # The caller clears the detail pane alongside this, so whatever the
@@ -347,10 +341,8 @@ class ObjectTree(Resizable, Tree[NodeData]):
 
         The TTL is read at the point of use rather than snapshotted at
         construction, so a change in the settings dialog reaches the tree
-        without a restart -- and the decision itself is `models.is_stale`,
-        shared with the detail pane and the background sweep, so a scope with
-        a longer natural cadence is aged the same way wherever it is asked
-        about.
+        without a restart. The decision itself is `models.is_stale`, the same
+        one the detail views make.
         """
         if is_stale(self.repo.entry(scope).age(), config.get(CACHE_TTL)):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
@@ -519,9 +511,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
         if data.type is NodeType.DATABASE:
             # A database node is always directly visible under the hidden
             # root, unlike a collapsed schema's categories -- so its schema
-            # list is requested right away rather than waiting for an
-            # expand, the same eagerness the old set_database gave its one
-            # hand-built node.
+            # list is requested right away rather than waiting for an expand.
             assert data.scope is not None
             self._ensure(data.scope, interactive=True)
 

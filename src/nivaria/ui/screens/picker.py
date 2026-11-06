@@ -4,9 +4,9 @@
 
 """A find-as-you-type picker over a fixed list of candidates.
 
-Used for the database chooser now and the global object search later -- the
-corpus differs, the interaction does not. Matching runs against an in-memory
-list so a keystroke never waits on sqlite, let alone on Snowflake.
+Used for the warehouse and role choosers -- the corpus differs, the interaction
+does not. Matching runs against an in-memory list so a keystroke never waits on
+sqlite, let alone on Snowflake.
 """
 
 from __future__ import annotations

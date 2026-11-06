@@ -45,9 +45,9 @@ class ObjectType(StrEnum):
         Not a guess and not a documented property: verified statement by
         statement against two unrelated live accounts. `SHOW PIPES` and `SHOW
         STAGES` accept both clauses and silently ignore them, returning every
-        row in the schema or database regardless -- which made the keyset
-        continuation in `FetchService._execute` non-terminating, since every
-        "next page" came back identical to the last. Declared here rather than
+        row in the schema or database regardless -- which would make the keyset
+        continuation non-terminating, since every "next page" comes back
+        identical to the last. Declared here rather than
         discovered at runtime, so the statement builder can stop asking for
         something that does not work instead of the scheduler having to
         recover from it. See docs/DESIGN.md, "Bounding a result".
@@ -71,8 +71,8 @@ class ScopeType(StrEnum):
     #: the scheduler can deduplicate and cancel it like any other work.
     DATABASE_PRIME = "prime"
     #: A schema's tables' LAST_DDL/LAST_ALTERED, sourced by a real SELECT
-    #: against INFORMATION_SCHEMA.TABLES rather than SHOW -- the first
-    #: deliberate exception to SHOW-only (see docs/DESIGN.md). Scoped to
+    #: against INFORMATION_SCHEMA.TABLES rather than SHOW -- a deliberate
+    #: exception to SHOW-only (see docs/DESIGN.md). Scoped to
     #: (database, schema) like OBJECTS, but backed by its own mirror table.
     TABLE_STATS = "table_stats"
     #: A schema's views' LAST_DDL/LAST_ALTERED, the same INFORMATION_SCHEMA.
@@ -90,10 +90,9 @@ class ScopeType(StrEnum):
     MATERIALIZED_VIEW_STATS = "materialized_view_stats"
     #: A schema's pipes' *latest* load each (bounded by the "pipe history
     #: fetch window" setting), sourced by a real SELECT against
-    #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- the second
-    #: instance of the dual-source pattern TABLE_STATS established (see
-    #: docs/DESIGN.md). Scoped to (database, schema) like OBJECTS, but backed by
-    #: its own mirror table. A log scope: after its first full pass, each
+    #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- a second source,
+    #: like TABLE_STATS (see docs/DESIGN.md). Scoped to (database, schema) like
+    #: OBJECTS, but backed by its own mirror table. A log scope: after its first full pass, each
     #: refresh asks only for what is new (`repository.plan_window`), which is
     #: what makes the ordinary cache age affordable for a statement whose full
     #: form takes seconds. Reduced to one row per pipe in SQL (see
@@ -120,9 +119,9 @@ class ScopeType(StrEnum):
     PIPE_STATUS = "pipe_status"
     #: Every task's *latest* run in a schema (bounded by the "task history
     #: fetch window" setting), sourced by a real SELECT against
-    #: SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY rather than SHOW -- the same
-    #: dual-source pattern PIPE_ACTIVITY established (see docs/DESIGN.md), just
-    #: against a different ACCOUNT_USAGE view. Scoped to (database, schema)
+    #: SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY rather than SHOW -- a second source
+    #: like PIPE_ACTIVITY (see docs/DESIGN.md), just against a different
+    #: ACCOUNT_USAGE view. Scoped to (database, schema)
     #: like PIPE_ACTIVITY, but backed by its own mirror table.
     #: Reduced to one row per task in SQL (see queries.task_activity) -- a
     #: single task's own full run history is TASK_ACTIVITY_HISTORY below. A
@@ -153,9 +152,9 @@ class ScopeType(StrEnum):
     GRANTS = "grants"
     #: Tags applied to one schema or one database (schema is None), sourced
     #: by a real SELECT against INFORMATION_SCHEMA.TAG_REFERENCES rather than
-    #: SHOW -- the fourth instance of the dual-source pattern TABLE_STATS
-    #: established (see docs/DESIGN.md). Needs a running warehouse; degrades
-    #: blank without one, same as every SELECT-backed scope.
+    #: SHOW -- a second source, like TABLE_STATS (see docs/DESIGN.md). Needs a
+    #: running warehouse; degrades blank without one, same as every SELECT-backed
+    #: scope.
     TAG_REFERENCES = "tag_references"
     #: One table's (or view's) columns' tags, sourced by a real SELECT
     #: against INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS -- a different
@@ -199,7 +198,7 @@ class Scope:
     #: which kind of object an object-level GRANTS scope names (its statement
     #: says `SHOW GRANTS ON TABLE`, not just `ON`). Every other scope type
     #: leaves it unset. Routing keys off the scope *type*, never off this
-    #: field being set -- see `MainScreen.on_scope_needed`.
+    #: field being set -- see `filling_prime`.
     object_type: ObjectType | None = None
     #: The single object a scope narrows to, whatever it is called for that
     #: scope type: a table for COLUMNS, a pipe for PIPE_HISTORY, a task for
@@ -309,7 +308,7 @@ def filling_prime(scope: Scope) -> Scope | None:
 
     A prime writes other scopes' rows, never its own, so whether `scope` is
     being fetched depends on that prime too. Only a DATABASE_PRIME stands in
-    for a request the UI makes (`MainScreen.on_scope_needed`).
+    for a request the UI makes (`main._requestable`).
     """
     if scope.type is not ScopeType.OBJECTS:
         return None

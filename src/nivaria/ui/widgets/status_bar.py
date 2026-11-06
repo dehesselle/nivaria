@@ -6,12 +6,7 @@
 
 Plain `Static`s with reactives, mounted into `tcoda.widgets.Footer`'s status
 area and left alone from then on -- so the screen sets attributes on them
-directly. The `StatusFooter` that used to mirror every one of these reactives
-and re-establish them with `data_bind` is gone: it only existed because the
-stock footer's `recompose()` destroyed these widgets on every focus move.
-
-The countdown moved to `tcoda.widgets.Countdown`, which snakecam had grown its
-own copy of too.
+directly. The countdown is `tcoda.widgets.Countdown`.
 """
 
 from __future__ import annotations

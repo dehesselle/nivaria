@@ -11,7 +11,7 @@ panel below for whatever the highlighted row wants to say about itself --
 currently its error, if any) and SQL (the pipe's raw COPY INTO definition,
 unformatted).
 
-Status (pipe/status/invalid_reason) lives in `pipe_list_view.py` instead of
+Status lives in `pipe_list_view.py` instead of
 here -- a single pipe's view can only ever show one row of it, which can
 never answer the question a status tab is for ("which of my pipes are
 broken?"). The category view already lists every pipe in the schema, so it

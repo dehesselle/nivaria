@@ -261,8 +261,8 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         """Wait for statements in flight before exiting; quit again to stop
         waiting.
 
-        A fetch worker cannot be interrupted mid-query (see docs/DESIGN.md), and
-        one that outlived the app used to hop back into it after shutdown.
+        A fetch worker cannot be interrupted mid-query (see docs/DESIGN.md), so
+        closing every connection cleanly means waiting for it.
         """
         fetch = self.fetch
         if self._quitting or fetch is None or not fetch.running_count:

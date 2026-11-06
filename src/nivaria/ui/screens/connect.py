@@ -21,8 +21,8 @@ appearing.
 
 OAuth is the one exception to the confirmation above: its access/refresh
 token is cached and reused for every connection the pool opens (see
-`snowflake/credential_cache.py`), so growing the pool no longer means N-1 more
-browser prompts -- there is nothing left for the user to weigh in on, and
+`snowflake/credential_cache.py`), so growing the pool does not mean N-1 more
+browser prompts -- there is nothing for the user to weigh in on, and
 `_offer_growth` skips straight to growing it.
 """
 
@@ -52,8 +52,7 @@ from nivaria.snowflake.pool import (
 )
 from nivaria.ui.screens.connecting import ConnectingDialog
 
-# OAuth listed first: it is the dialog's default, ahead of the two
-# longer-standing methods.
+# OAuth listed first: it is the dialog's default.
 _AUTHENTICATOR_LABELS = {
     OAUTH: "OAuth",
     EXTERNAL_BROWSER: "Browser SSO",
@@ -332,8 +331,8 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
         self, params: ConnectParams, pool: ConnectionPool, additional: int
     ) -> None:
         # OAuth's cached access/refresh token is reused for every connection
-        # the pool opens (see snowflake/credential_cache.py), so growing it no
-        # longer means N-1 more browser prompts -- nothing left to ask about.
+        # the pool opens (see snowflake/credential_cache.py), so growing it does
+        # not mean N-1 more browser prompts -- nothing to ask about.
         if params.authenticator != OAUTH:
             confirmed = await self.app.push_screen_wait(
                 ConfirmDialog(

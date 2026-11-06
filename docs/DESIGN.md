@@ -808,7 +808,7 @@ construction ignores a settings change until restart.
 
 `object_type` on a `Scope` means "this is a `SHOW` listing of one object
 type" -- or, on an object-level `GRANTS` scope, which kind of object it names
--- and nothing keys off it being set: `MainScreen.on_scope_needed` upgrades a
+-- and nothing keys off it being set: `main._requestable` upgrades a
 scope to a whole-database `SHOW`-prime when its *type* is `OBJECTS`, not when
 it happens to carry both a database and an object type. A structural check
 would silently redirect any new SELECT-backed scope that sets `object_type`
@@ -915,21 +915,20 @@ pinned re-issuing the same query. The default pool is three workers, so three
 such scopes wedge the whole app. That shape is why the guards below exist
 rather than a one-line fix.
 
-Two paths reach the paged path for an unpageable type, and the second is the
-one that matters:
+Whatever requests a listing as itself, rather than through
+`main._requestable`'s `OBJECTS` → `DATABASE_PRIME` upgrade, is on the paged path,
+and pipes and stages sit on it like any other type:
 
-- `_fan_out`, after a whole-database prime comes back over the chunk
-  threshold, queues one per-schema `OBJECTS` job. It is object-type agnostic,
-  so pipes and stages sit on it identically.
-- **The staleness sweep** (`MainScreen._sweep`) requests
-  `tree.visible_scopes()` *directly*, so it never passes through
-  `on_scope_needed`'s `OBJECTS` → `DATABASE_PRIME` upgrade. An expanded Pipes
-  or Stages node in a schema with more objects than `PAGE_SIZE` is enough on
-  its own. Anything that bypasses that upgrade is on the paged path, and the
-  sweep is not the only caller that could.
+- `_fan_out`, after a whole-database prime comes back over the chunk threshold,
+  queues one per-schema `OBJECTS` job.
+- `F5` requests the listing of the node under the cursor (see "The staleness
+  sweep").
+- A job that fails with "does not exist" requests the listing one level up (see
+  "Scopes: the unit of everything").
+- A warehouse switch retries a failed listing (`MainScreen._retry_failed`).
 
-Lowering `PAGE_SIZE` below a schema's pipe count reproduces the loop, which is
-also how the guards are verified.
+`jobs.fetch_page` answers an unpageable type with one call and no cursor, which
+is what keeps all of these from looping.
 
 ### Bounding a result
 
@@ -939,7 +938,7 @@ can move it.
 
 1. **Declare what cannot be paged** (`ObjectType.pageable`, above). Fixes what
    is known. Cannot cover a statement nobody has tested yet.
-2. **Guard the continuation chain** (`FetchService._execute`, see "The fetch
+2. **Guard the continuation chain** (`FetchService._store`, see "The fetch
    scheduler"). Catches an unpageable statement the builder did not know
    about, such as a type Snowflake adds later.
 3. **A row ceiling in the gateway** (`ROW_CEILING`, `PoolGateway._collect`).
@@ -1851,9 +1850,9 @@ also opens its Grants/Tags view, not just the tree navigation alone.
 
 The right corner carries four indicators: Role, Warehouse, Countdown and Pool
 gauge (what each shows is in the
-[manual](MANUAL.md#status-footer)). Textual's command-palette binding is
-suppressed so the corner is available; the footer is otherwise Textual's, so
-key bindings keep working without being re-implemented.
+[manual](MANUAL.md#status-footer)). The footer is `tcoda`'s, which holds them in
+its status area and leaves them alone from then on, so key bindings keep working
+without being re-implemented here.
 
 Role and Warehouse are read straight off the pool's connect params each tick.
 Leaving either field blank in the connect dialog does not mean "none" is shown

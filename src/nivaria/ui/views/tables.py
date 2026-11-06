@@ -4,34 +4,26 @@
 
 """Shared building blocks for the detail views.
 
-Three shapes every view here used to write out for itself, and that had each
-already drifted:
-
 * **`HoverTooltipTable`** -- a `DataTable` that shows a cell's full-precision
-  value on hover, once duplicated verbatim in five list views. Each copy
-  carried a `{column index: field}` map, so reordering that view's `_COLUMNS`
-  silently pointed its tooltips at the wrong column. This one maps *column
-  headers* to fields and resolves the index from the live table, so there is
-  no ordering to keep in step.
+  value on hover. It maps *column headers* to fields and resolves the index
+  from the live table, so a view can reorder its `_COLUMNS` without aiming its
+  tooltips at the wrong column.
 * **`PanelledTable`** -- a table plus the panel below it that describes
   whichever row is highlighted, hidden when that row has nothing to say.
   Used for `PipeView`/`TaskView`'s load/run errors, a column's tags
   (`ColumnsView`, `table_view.py`) and a grantee's raw grants
-  (`grants.py`). A widget rather than the view mixin it used to be: the
-  Table view holds two of them (columns and grants), and a mixin had one
-  panel per view and answered every table's highlight.
+  (`grants.py`). A widget rather than a view mixin: the Table view holds two
+  of them (columns and grants), and a mixin would have one panel per view and
+  answer every table's highlight.
 * **`HistoryView`** -- a history table in a `PanelledTable`, plus the
-  "capped/empty/errored" note above it.
-  `PipeView` and `TaskView` had ~40 identical lines each; only the message
-  a row wants to show actually differs, which is the one method a
+  "capped/empty/errored" note above it. Only the message a row wants to show
+  differs between `PipeView` and `TaskView`, which is the one method a
   subclass supplies.
 
 The widget ids are shared too, and deliberately: exactly one detail view is
 mounted at a time (see `DetailPane`), so `#detail-history` means "whichever
-history table is on screen". The per-view ids these replaced had already
-cost something real: `app.tcss` styled the pipe view's own history table,
-detail panel and SQL pane, and the task view -- a later copy of all
-three, under its own ids -- silently picked up none of it.
+history table is on screen", and an `app.tcss` rule written for one view's
+history table, detail panel or SQL pane applies to every other view's too.
 """
 
 from __future__ import annotations
@@ -232,8 +224,8 @@ class HoverTooltipTable(DataTable):
 
     def add_column(self, label, *, key: str | None = None, **kwargs: Any):
         # Key defaults to the header text. A tooltip names its column by key,
-        # and a key survives the label growing a sort indicator -- which the
-        # header text this used to match on would not.
+        # and a key survives the label growing a sort indicator, which the
+        # header text would not.
         if key is None and isinstance(label, str):
             key = label
         return super().add_column(label, key=key, **kwargs)

@@ -94,7 +94,7 @@ class _ScopedView(Widget):
         """Repopulate `table` inside this block without losing the user's row.
 
         `DataTable.clear()` puts the cursor back on the first row, so every
-        cache update landing on screen used to throw away whatever row the
+        cache update landing on screen would throw away whatever row the
         user was reading -- a column's tags, a load's error. Only a repaint
         answering a cache update keeps the row: that is the same object read
         again. Shown afresh (mounted, or pointed at another object), the
