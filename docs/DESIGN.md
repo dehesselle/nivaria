@@ -5,7 +5,8 @@ before it touches anything.
 
 It deliberately avoids file layout and code: read the modules for those. How to
 use nivaria is in [MANUAL.md](MANUAL.md), how it behaves while running in
-[OPERATIONS.md](OPERATIONS.md). What live Snowflake accounts were observed to do
+[OPERATIONS.md](OPERATIONS.md). What each screen sends to Snowflake is listed in
+[data-retrieval.md](data-retrieval.md). What live Snowflake accounts were observed to do
 is recorded in [snowflake-behavior.md](snowflake-behavior.md), and the timings
 the decisions below rest on in [measurements.md](measurements.md). The names
 used for parts of the screen (Object tree, Detail pane, Status footer, ...) are
@@ -113,6 +114,10 @@ that explains it in full.
     protocol.** That keeps the cache, scheduler, matcher and formatting
     testable as plain functions, and lets every test run offline against a
     fake gateway without importing the Snowflake driver.
+17. **A selection paints at once and asks Snowflake only after the cursor has
+    rested**, so moving through a list runs no query for the rows it passes.
+    The sweep follows the same rule, because it asks the same question. See
+    "Asking once the cursor has rested".
 
 ---
 
@@ -187,8 +192,10 @@ schema list's own next pass instead would leave the node standing until the TTL
 sweep, which every navigation postpones: a drop made elsewhere is invisible to
 nivaria until a statement trips over it, so tripping over it is the trigger.
 
-"Does not exist" is recognised by the driver's error number (2003), not its
-message text, which varies by object kind; it is reported as a warning rather
+"Does not exist" is recognised by the driver's error numbers, 2003 and 2043
+(which one depends on the statement, see
+[snowflake-behavior.md](snowflake-behavior.md#missing-objects)), not its message
+text, which varies by object kind; it is reported as a warning rather
 than an error, and identical notices are folded, since one visit to a dropped
 schema fails its Grants and Tags together. It climbs one level per failure: a
 table's columns name only the table, so a dropped *schema* found that way first
@@ -510,27 +517,13 @@ the same exception `information_schema_columns` established).
 
 #### The second-source scopes
 
-| Scope | Source | Feeds | Needs |
-| --- | --- | --- | --- |
-| `TABLE_STATS` | `INFORMATION_SCHEMA.TABLES`, `TABLE_TYPE = 'BASE TABLE'` | Tables (n): Last DDL, Last Altered | warehouse |
-| `VIEW_STATS` | the same statement, `TABLE_TYPE = 'VIEW'` | Views (n): Last DDL, Last Altered | warehouse |
-| `MATERIALIZED_VIEW_STATS` | `SHOW MATERIALIZED VIEWS` | Views (n): Rows, Size | — |
-| `PIPE_ACTIVITY` | `ACCOUNT_USAGE.COPY_HISTORY`, latest row per pipe | Pipes (n) activity columns; target-table resolution | warehouse, `IMPORTED PRIVILEGES` |
-| `PIPE_ACTIVITY_HISTORY` | the same view, one pipe, unreduced | Pipe view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
-| `PIPE_HISTORY` | `INFORMATION_SCHEMA.COPY_HISTORY` | Pipe view History (recent half) | warehouse, a resolved target table |
-| `PIPE_STATUS` | `SYSTEM$PIPE_STATUS`, one call per pipe, batched | Pipes (n) Execution State, Pending Files | a fetched pipe list |
-| `TASK_ACTIVITY` | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | Tasks (n): Last Scheduled, Last Run State | warehouse, `IMPORTED PRIVILEGES` |
-| `TASK_ACTIVITY_HISTORY` | the same view, one task, unreduced | Task view History (older half) | warehouse, `IMPORTED PRIVILEGES` |
-| `TASK_HISTORY` | `INFORMATION_SCHEMA.TASK_HISTORY` | Task view History (recent half) | warehouse |
-| `GRANTS` | `SHOW GRANTS ON SCHEMA`/`ON DATABASE`/`ON TABLE`/`ON VIEW` | Schema/Database/Table/View view Grants | — |
-| `TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES` | Schema/Database view Tags | warehouse |
-| `COLUMN_TAG_REFERENCES` | `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` | Columns view Tags column + detail panel | warehouse |
-| `DATA_PREVIEW` | `SELECT * FROM <table or view> LIMIT n` | Table/View view Data | warehouse |
+Each scope's source, what it feeds and what it needs are in
+[data-retrieval.md](data-retrieval.md#screens). This section is why.
 
 The four `ACCOUNT_USAGE` scopes are log scopes, refreshed by window passes
 (see "Window passes").
 
-Two of these are second sources without being `SELECT`s:
+Two of them are second sources without being `SELECT`s:
 `MATERIALIZED_VIEW_STATS` and `GRANTS` are additional `SHOW` commands, so
 they need no warehouse and degrade the way any `SHOW` scope does. `SHOW
 MATERIALIZED VIEWS` is genuinely a different command from `SHOW VIEWS`, with
@@ -619,7 +612,7 @@ time the list opens, against the round-trips-dominate principle below.
 A single pipe's or task's own history needs more than the latest row, so it
 does not share the schema-wide scope: `PIPE_ACTIVITY_HISTORY` and
 `TASK_ACTIVITY_HISTORY` query the same views filtered to one object,
-**fetched lazily, only once that object's detail view is open** — a schema
+**fetched lazily, only once the cursor has rested on that object** — a schema
 full of pipes never pays for history nobody has looked at.
 
 They get their own mirror tables rather than reusing the schema-wide ones
@@ -1263,7 +1256,8 @@ schema's tables cannot cause a whole-tree rebuild.
 The footer countdown makes one promise: **nothing on screen goes stale before
 it reaches zero.** "On screen" means the watched set: every scope the tree
 has materialised, collapsed or scrolled away included, plus the open detail
-view's. Every scope ages on the same cache age.
+view's once the cursor has rested on it (see "Asking once the cursor has
+rested"). Every scope ages on the same cache age.
 
 The countdown is therefore computed, not run as a timer. On every tick,
 `Repository.next_due` works out from the ledger how long until the first
@@ -1275,10 +1269,21 @@ whichever scope is due next: it jumps up after a sweep, and down when a view
 shows a scope that is close to its TTL. Navigation and `F5` affect it only
 through the ledger.
 
-`F5` is the explicit refresh, outside the sweep. It requests the scope of the
-tree node under the cursor, and every scope the detail pane reads, whatever
-their age. A log scope's refresh is a window pass either way, so `F5` costs no
-more there than the sweep would. A fixed timer restarted at `CACHE_TTL` cannot keep the
+`F5` is the explicit refresh, outside the sweep: **it acts now on everything
+the screen shows, and what that costs is not a reason to do less.** It requests
+every scope the detail pane reads, whatever their age, and the listing the tree
+node under the cursor appears in. A listing goes out per schema rather than as
+a prime, for two reasons. Only that schema was asked for, and a prime succeeds
+on a dropped schema and leaves its node standing, where the per-schema `SHOW`
+fails and carries the refresh up (see "Scopes: the unit of everything"). An
+object's listing is included because its view reads its SQL from there, and
+because a pipe's own statements succeed after it was dropped: they only name it
+as a filter value. The one thing `F5` stops short of is a full pass of a log
+scope. That costs up to half a minute instead of about two seconds, and could
+only add a row published later than the lag margin, which is what
+`MainScreen.full_refresh` is for.
+
+A fixed timer restarted at `CACHE_TTL` cannot keep the
 promise: a refresh lands a moment after the sweep that asked for it, so the
 next zero comes just before that data goes stale, skips it, and leaves it on
 screen for nearly two TTLs.
@@ -1439,6 +1444,44 @@ Detail pane: selection-dependent content belongs to the view that shows it.
 knows whether an update concerns it, and how its data joins the staleness
 sweep.
 
+### Asking once the cursor has rested
+
+The tree cursor moving through a list must not run a query for every row it
+passes. A task's first history statement takes seconds and holds a pool worker,
+so ten of them would leave the one on screen waiting behind the others.
+
+So a selection first paints what is cached, at once, and **only after the cursor
+has rested for `CURSOR_SETTLE_MS` does anything ask whether the view needs
+fetching.** `DetailPane` owns the wait: each selection marks the view unsettled
+and restarts a timer, `_ScopedView.ensure` does nothing while unsettled, and
+when the timer fires `ensure` runs for every scope in `scopes()`. That list
+already holds the conditions a paint asks under, and `ensure` the staleness
+decision, so neither is written twice.
+
+Deciding at paint time and holding the requests until the wait ended was
+rejected. It needs a list of held requests to keep and drop, and its answers are
+as old as the moment the cursor passed.
+
+The rule has to cover the sweep as well, because that asks the same question
+independently. A scope never fetched is due at once (`Entry.due`), so the footer
+tick would otherwise send a query every 0.3 s for whichever row the cursor is on.
+`DetailPane.watched_scopes` therefore returns nothing until the view has settled.
+
+Expanding a node, adding a database and `F5` do not wait: each is a request made
+on purpose. Nor does anything wait once the view has settled, such as opening a
+tab or a repaint after a fetch lands.
+
+The wait only spares what a fast move would ask for, so
+`MainScreen._show_detail` also drops queued work that only the previous view
+was waiting on (`FetchService.cancel_where`), which covers resting briefly on
+each row in turn. Listings are kept, because the tree reads them too. A statement
+already running cannot be stopped, so up to a pool's worth can still be finishing
+when the cursor lands.
+
+The timer runs in the pane's message pump, so the view asks from its own
+(`call_later`): Textual stops a message from bubbling past its sender, and a
+`ScopeNeeded` sent from the pane's pump would never leave the pane.
+
 ### Four families, two registries
 
 | Node under the cursor | View family | Found by |
@@ -1489,15 +1532,15 @@ actually returns rather than a style choice:
 
 A tab whose scope costs one round trip **per object**, and which is not the
 tab a view opens on, is fetched only while it is shown. Today that is the
-Table and View views' Grants and Data: the tree cursor passes over tables
-and views far more often than anyone opens either tab, and each pass would
-otherwise cost a `SHOW GRANTS` and a `SELECT` on top of the two queries an
-object already makes. The `SELECT` would also wake a warehouse, and for a
-view run the view's whole query (see "Bounding a result"). The scope is
+Table and View views' Grants and Data, and the Schema and Database views'
+Tags: the tree cursor rests on these nodes far more often than anyone opens
+such a tab, and each stop would otherwise cost another statement for a result
+nothing shows until the tab opens. For a view, Data would also run the view's
+whole query (see "Bounding a result"). The scope is
 listed in `scopes()` only while its tab is up -- the same conditional
 `PipeView` applies to its history -- so the sweep and update routing ignore
-it otherwise. Switching objects while on Grants or Data keeps the tab, and
-so fetches each one's grants or rows, which is what is on screen.
+it otherwise. Switching objects while on such a tab keeps the tab, and
+so fetches each one's rows, which is what is on screen.
 
 The Pipes (n) list's Status tab follows the same conditional although it is
 the tab the list opens on: its execution state costs Snowflake time per pipe

@@ -16,7 +16,8 @@ Every statement is built in `gateway/queries.py`, and every one is read-only:
 ROLE` / `USE WAREHOUSE` when you switch. Once per connect, `SELECT
 CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()` reads the names Snowsight
 links need; it uses no warehouse. The Log panel (`F1`) shows each statement as
-it is sent.
+it is sent, and [data-retrieval.md](data-retrieval.md) lists what each screen
+sends.
 
 Every session reports itself as `nivaria` in
 `SNOWFLAKE.ACCOUNT_USAGE.SESSIONS.CLIENT_ENVIRONMENT:APPLICATION`; join on
@@ -43,16 +44,17 @@ These need a running warehouse and stay blank without one:
 
 Pipe and task activity, and the older half of each History, read
 `SNOWFLAKE.ACCOUNT_USAGE` and also need `IMPORTED PRIVILEGES` on the
-`SNOWFLAKE` database. The scope-by-scope list is in
-[DESIGN.md](DESIGN.md#the-second-source-scopes).
+`SNOWFLAKE` database. The statement-by-statement list is in
+[data-retrieval.md](data-retrieval.md#screens).
 
 The Grants tabs show only what the active role may see (what it owns, holds
 `MANAGE GRANTS` on, or reaches through `ACCOUNTADMIN`/`SECURITYADMIN`), and
 only direct grants. A short Grants tab under a lesser role is correct.
 
-Grants and Data cost one query per object, so they are fetched only while
-their tab is shown. The Data tab wakes the warehouse; for a view, it runs the
-view's query.
+Grants, Data and a schema's or database's Tags cost one query per object, so
+they are fetched only while their tab is shown. The Data tab uses the warehouse;
+for a view, it runs the view's query. Resting the cursor on a table or view also
+uses the warehouse, for its column tags.
 
 ## Background load
 
@@ -64,10 +66,16 @@ come as each part runs out, not all at once. Nothing else is fetched in the
 background except the initial requests after connecting, and the object lists
 of a selected database that have never been fetched, so that search can find
 them: one `SHOW` per object type for that database, so five, sent once. A cache
-age of `0` stops background refreshing; `F5` still refreshes the node under the
-cursor.
+age of `0` stops background refreshing; `F5` still refreshes what the screen
+shows.
 A cache age shorter than one fetch makes that part due again as soon as its
 refresh lands, so it is refetched back to back, one fetch at a time.
+
+Moving the tree cursor through a list sends nothing for the rows it passes. What
+is cached shows at once, and what a node needs is only checked and fetched after
+the cursor has rested on it for the **cursor settle delay**. Moving on also drops
+what was queued for the node you left. A statement already running finishes, so
+up to the pool's size can still be running when you land.
 
 Pipe and task activity read `ACCOUNT_USAGE`, whose cost follows the time
 window asked for rather than the rows returned: 8-31 s for 90 days of copy
@@ -199,6 +207,9 @@ under `~/.cache/snowflake/`.
   Windows Credential Manager cannot hold an OAuth token.
 - **Connecting hangs with browser SSO**: an abandoned or closed browser tab
   is never noticed. Quit and start again.
-- **Old data**: press `F5` on the node, or lower **cache age**.
+- **Old data**: press `F5`, or lower **cache age**. `F5` refreshes what the
+  screen shows at once, whatever its age. For pipe and task activity it asks only
+  for the time since the previous refresh, and `ACCOUNT_USAGE`'s own lag still
+  applies.
 - **A refresh fails with a row-ceiling or page-limit error**: the result was
   larger than the limit allows; raise the setting if the size is expected.

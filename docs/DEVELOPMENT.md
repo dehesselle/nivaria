@@ -181,5 +181,5 @@ A new scope touches ten places:
 9. the same on `PoolGateway`;
 10. a case in `jobs.fetch_page`.
 
-A `SELECT`-backed scope also needs a row in DESIGN.md's
-[second-source table](DESIGN.md#the-second-source-scopes).
+Every new scope also needs its rows in
+[data-retrieval.md](data-retrieval.md#screens).

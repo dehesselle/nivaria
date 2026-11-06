@@ -97,7 +97,7 @@ across sessions.
 | `,` | Start a chord (see "Chords") |
 | `F1` | Show or hide the Log panel |
 | `/` | Open search |
-| `F5` | Refresh whatever the cursor is on, and what the detail pane shows for it |
+| `F5` | Refresh what the screen shows now, whatever its age: what the detail pane shows, and the list the cursor's node is in |
 | `w` | Open whatever the cursor is on in Snowsight |
 | `Ctrl+Q` | Quit; press again to quit without waiting for running statements |
 
@@ -213,6 +213,8 @@ A stage has no view of its own; the stage list shows everything about it.
   to 2 hours behind. When one of the two sources cannot be read, for instance
   because the target table was dropped or your role may not see it, the note
   says which part of the history is missing and why.
+- **Tags** (Database and Schema view) lists the tags applied to it. They are
+  read only while this tab is open.
 - **Activity** (Pipe list) shows each pipe's latest load. It comes from
   `ACCOUNT_USAGE`, which Snowflake says can be up to 2 hours behind, and a
   line above the table says so. The Task list's last-run columns come from
@@ -257,6 +259,7 @@ role switch.
 | Setting | Default | Effect |
 | --- | --- | --- |
 | cache age | 300 | Seconds cached metadata stays fresh before what is on screen is refreshed in the background. `0` disables background refreshing; `F5` still works. |
+| cursor settle delay (milliseconds) | 250 | How long the tree cursor has to rest on a node before what it shows is checked and fetched if needed. What is cached shows at once either way. `0` means no wait. |
 | connection pool size | 3 | Connections to keep open (1–5). Every connection may cost an MFA prompt. |
 | Snowsight URL | empty | Per account: the Snowsight address `w` opens, up to the account name. Empty uses the public address; a PrivateLink account needs it set. |
 | fetch page size | 1000 | Rows one fetch job asks for. Lowering it mainly makes fetching slower. |

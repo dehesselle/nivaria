@@ -82,6 +82,19 @@ Context functions need neither a warehouse nor a privilege: on the sandbox on
 CURRENT_ACCOUNT_NAME()` succeeded as `PUBLIC` with `CURRENT_WAREHOUSE()`
 returning `NULL`.
 
+## Missing objects
+
+What a statement naming something that does not exist fails with depends on the
+statement, not on the object. On the sandbox on 2026-11-06, as `SYSADMIN`:
+
+| errno | Message | Statements |
+| --- | --- | --- |
+| 2003 | `<Kind> '<name>' does not exist or not authorized.` | `SHOW PIPES`, `SHOW TASKS` and `SHOW MATERIALIZED VIEWS IN SCHEMA`; `SHOW GRANTS ON SCHEMA`, `ON DATABASE` and `ON TABLE`; `SHOW COLUMNS IN TABLE`; `SELECT` |
+| 2043 | `Object does not exist, or operation cannot be performed.` | `SHOW TABLES`, `SHOW VIEWS` and `SHOW STAGES IN SCHEMA`; `SHOW SCHEMAS IN DATABASE`; `SHOW TABLES IN DATABASE` |
+
+The SQL state does not separate them either: a missing schema or database is
+`02000` under both numbers, a missing table `42S02`.
+
 ## Keyset paging
 
 `LIMIT n FROM 'name'` was verified correct — same rows, same order as an

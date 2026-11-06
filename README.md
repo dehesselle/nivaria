@@ -39,6 +39,7 @@ commands.
 - [docs/OPERATIONS.md](https://github.com/dehesselle/nivaria/blob/master/docs/OPERATIONS.md) — Snowflake load, warehouse and privilege needs, limits, files on disk, troubleshooting.
 - [docs/DESIGN.md](https://github.com/dehesselle/nivaria/blob/master/docs/DESIGN.md) — architecture, core principles and the reasons behind them.
 - [docs/DEVELOPMENT.md](https://github.com/dehesselle/nivaria/blob/master/docs/DEVELOPMENT.md) — setup, tests, linting, conventions and live-account tools.
+- [docs/data-retrieval.md](https://github.com/dehesselle/nivaria/blob/master/docs/data-retrieval.md) — what each screen and trigger sends to Snowflake.
 - [docs/snowflake-behavior.md](https://github.com/dehesselle/nivaria/blob/master/docs/snowflake-behavior.md) — what live Snowflake accounts were observed to do.
 - [docs/measurements.md](https://github.com/dehesselle/nivaria/blob/master/docs/measurements.md) — timings and data volumes behind the design.
 
