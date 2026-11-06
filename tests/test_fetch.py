@@ -64,6 +64,21 @@ def make_service(gateway, repo, **kwargs) -> FetchService:
     return service
 
 
+def _refetch(service, repo, scope) -> None:
+    """One more pass of `scope`, waited for."""
+    before = repo.entry(scope).generation
+    service.request(scope, Priority.INTERACTIVE)
+    # COMPLETE alone is not enough: the pass commits before the worker leaves
+    # `_running`, and a request landing in between is dropped as a duplicate.
+    assert wait_until(
+        lambda: (
+            repo.entry(scope).generation > before
+            and repo.entry(scope).state is CacheState.COMPLETE
+            and not service.is_busy(scope)
+        )
+    )
+
+
 # ------------------------------------------------------- page-fetch dispatch
 
 
@@ -1414,8 +1429,7 @@ def test_a_failing_table_stats_fetch_keeps_previously_cached_stats(repo) -> None
         gateway, repo, on_error=lambda s, message, _missing: errors.append(message)
     )
     try:
-        service.request(scope)
-        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+        _refetch(service, repo, scope)
 
         gateway.raise_on_table_stats = True
         service.request(scope, Priority.INTERACTIVE)
@@ -1490,8 +1504,7 @@ def test_a_failing_pipe_activity_fetch_keeps_previously_cached_activity(repo) ->
         gateway, repo, on_error=lambda s, message, _missing: errors.append(message)
     )
     try:
-        service.request(scope)
-        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+        _refetch(service, repo, scope)
 
         gateway.raise_on_pipe_activity = True
         service.request(scope, Priority.INTERACTIVE)
@@ -1738,8 +1751,7 @@ def test_a_failing_task_activity_fetch_keeps_previously_cached_activity(repo) ->
         gateway, repo, on_error=lambda s, message, _missing: errors.append(message)
     )
     try:
-        service.request(scope)
-        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+        _refetch(service, repo, scope)
 
         gateway.raise_on_task_activity = True
         service.request(scope, Priority.INTERACTIVE)
@@ -2161,18 +2173,6 @@ def test_a_data_preview_inside_its_row_limit_is_the_whole_table() -> None:
 
 
 # ------------------------------------------------------------ window passes
-
-
-def _refetch(service, repo, scope) -> None:
-    """One more pass of `scope`, waited for."""
-    before = repo.entry(scope).generation
-    service.request(scope, Priority.INTERACTIVE)
-    assert wait_until(
-        lambda: (
-            repo.entry(scope).generation > before
-            and repo.entry(scope).state is CacheState.COMPLETE
-        )
-    )
 
 
 def _windows(gateway, name: str) -> list[int]:
