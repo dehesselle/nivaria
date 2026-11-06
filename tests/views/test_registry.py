@@ -7,13 +7,15 @@
 from __future__ import annotations
 
 import pytest
-from textual.widgets import Static
+from textual.widgets import DataTable, Static
 
 from nivaria.models import (
     ObjectRef,
     ObjectType,
+    SchemaRef,
     Scope,
     ScopeType,
+    objects_scope,
 )
 from nivaria.ui.views.base import registered_types, view_for
 from nivaria.ui.views.pipe_view import PipeView
@@ -25,8 +27,99 @@ from tests.views.harness import (
     Harness,
     put_columns,
     put_pipe,
+    put_stage,
     put_table,
+    put_task,
+    put_view,
 )
+
+# ---------------------------------------------------------------- mounting
+
+
+def _show_object(put, object_type):
+    def show(repo, pane):
+        pane.show(put(repo, "THING"))
+        return objects_scope(object_type, "MYDB", "PUBLIC")
+
+    return show
+
+
+def _show_category(put, object_type):
+    def show(repo, pane):
+        put(repo, "THING")
+        scope = objects_scope(object_type, "MYDB", "PUBLIC")
+        pane.show_category(scope)
+        return scope
+
+    return show
+
+
+def _show_schema(repo, pane):
+    return pane.show_schema(SchemaRef(database="MYDB", name="PUBLIC")).grants_scope()
+
+
+def _show_database(repo, pane):
+    return pane.show_database("MYDB").grants_scope()
+
+
+@pytest.mark.parametrize(
+    "show",
+    [
+        _show_object(put_table, ObjectType.TABLE),
+        _show_object(put_view, ObjectType.VIEW),
+        _show_object(put_pipe, ObjectType.PIPE),
+        _show_object(put_task, ObjectType.TASK),
+        _show_category(put_table, ObjectType.TABLE),
+        _show_category(put_view, ObjectType.VIEW),
+        _show_category(put_pipe, ObjectType.PIPE),
+        _show_category(put_task, ObjectType.TASK),
+        _show_category(put_stage, ObjectType.STAGE),
+        _show_schema,
+        _show_database,
+    ],
+    ids=[
+        "table",
+        "view",
+        "pipe",
+        "task",
+        "tables",
+        "views",
+        "pipes",
+        "tasks",
+        "stages",
+        "schema",
+        "database",
+    ],
+)
+async def test_a_cache_update_can_reach_a_view_before_its_widgets_exist(
+    repo, show
+) -> None:
+    """A view is the pane's current one from `mount()`, and composes later. An
+    update landing in between used to repaint widgets that were not there yet,
+    which took the whole app down."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        scope = show(repo, pane)
+        assert not pane._view.is_mounted
+        pane.cache_updated(scope)
+        await pilot.pause()
+        assert pane._view.is_mounted
+
+
+async def test_an_update_skipped_before_mounting_is_on_screen_after_it(repo) -> None:
+    """Nothing is lost: the first paint reads whatever that update announced."""
+    put_table(repo, "ORDERS")
+    scope = objects_scope(ObjectType.TABLE, "MYDB", "PUBLIC")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show_category(scope)
+        pane.cache_updated(scope)
+        await pilot.pause()
+        await pilot.pause()
+        assert pane.query_one(DataTable).row_count == 1
+
 
 # ---------------------------------------------------------------- registry
 

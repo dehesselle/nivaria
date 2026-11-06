@@ -69,8 +69,12 @@ class _ScopedView(Widget):
     settled: bool = True
 
     def cache_updated(self, scope: Scope) -> None:
-        """Repaint if the scope that changed is one this view is showing."""
-        if scope in self.scopes():
+        """Repaint if the scope that changed is one this view is showing.
+
+        Not before it has mounted: its widgets do not exist yet, and the paint
+        `on_mount` makes reads what this update announced anyway.
+        """
+        if self.is_mounted and scope in self.scopes():
             self._announcing = scope
             try:
                 self.update_content()
