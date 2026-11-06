@@ -54,6 +54,14 @@ class NoWarehouseError(Exception):
     errno = 606
 
 
+class LoginTimeoutError(Exception):
+    """Stands in for the driver's error for a browser login nobody completed:
+    errno 251016, whose message names the account host and suggests checking
+    the redirect URI."""
+
+    errno = 251016
+
+
 class FakeCursor:
     def __init__(self, owner: FakeConnection) -> None:
         self._owner = owner

@@ -20,6 +20,7 @@ from nivaria.models import (
     tag_references_scope,
     warehouses_scope,
 )
+from nivaria.snowflake.pool import LOGIN_TIMED_OUT
 from nivaria.ui.app import NivariaApp
 from nivaria.ui.screens.closing import ClosingDialog
 from nivaria.ui.screens.connect import ConnectScreen
@@ -81,6 +82,26 @@ async def test_one_dropped_object_failing_several_scopes_toasts_once() -> None:
         app._report_fetch_failure(tag_references_scope("MYDB", "GONE"), _GONE, True)
         await pilot.pause()
         assert len(list(app._notifications)) == 1
+
+
+async def test_a_prompt_nobody_answered_toasts_once_and_says_what_to_do() -> None:
+    """One unanswered prompt fails every scope waiting on it. The user needs to
+    hear about the login once, not about each scope."""
+    app = NivariaApp(connector=FakeConnector())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._report_fetch_failure(databases_scope(), LOGIN_TIMED_OUT, False)
+        app._report_fetch_failure(
+            grants_scope("MYDB", "PUBLIC"), LOGIN_TIMED_OUT, False
+        )
+        await pilot.pause()
+        toasts = [(toast.severity, toast.message) for toast in app._notifications]
+    assert toasts == [
+        (
+            "warning",
+            "Login timed out: the prompt was not answered. Press F5 to be asked again.",
+        ),
+    ]
 
 
 async def test_the_app_opens_the_connect_screen_first() -> None:

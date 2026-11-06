@@ -1091,7 +1091,10 @@ reasons are here.
   together and each worker would otherwise open its own window. After a login
   that worked, the token cache spares the others a prompt. After one that
   failed, the workers already waiting on it share its failure rather than each
-  opening a window that nobody just answered. The next request tries again.
+  opening a window that nobody just answered. The next request tries again. An
+  unanswered prompt (errno 251016) is reported as `LOGIN_TIMED_OUT` rather than in
+  the driver's words, which suggest checking a redirect URI that is fine; the
+  driver's text goes to the log.
 - **"Does not exist" is the exception to replacing a connection**: the one that
   reported it is healthy, so `PoolGateway._fetch_once` hands it back to the
   pool and only then raises, and `_fetch` does not retry it. Otherwise every

@@ -17,6 +17,7 @@ disruption this design exists to avoid.
 from __future__ import annotations
 
 import contextlib
+import logging
 import queue
 import threading
 from collections.abc import Callable, Iterator
@@ -26,6 +27,8 @@ from typing import Any, Protocol
 
 from nivaria.errors import NivariaError
 from nivaria.snowflake import queries, sql_log
+
+_log = logging.getLogger(__name__)
 
 EXTERNAL_BROWSER = "externalbrowser"
 USERNAME_PASSWORD_MFA = "username_password_mfa"
@@ -48,6 +51,12 @@ AUTHENTICATORS = (OAUTH, EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA)
 #: timeout exists anywhere in that code path) and stays unbounded -- an
 #: accepted gap, also called out there.
 CONNECT_TIMEOUT_SECONDS = 20
+
+#: What a login nobody completed in time reports. The driver's own text, for
+#: errno 251016, names the account host and suggests checking the redirect URI,
+#: which is fine. Spelled out because this module never imports the driver.
+_LOGIN_TIMEOUT_ERRNO = 251016
+LOGIN_TIMED_OUT = "Login timed out: the prompt was not answered."
 
 #: How often a worker waiting for a connection looks again at whether one can
 #: still come. A given-up connection puts nothing on the queue to wake it.
@@ -461,8 +470,13 @@ class ConnectionPool:
                 connection = self._connector(**self.params.to_connect_kwargs())
             # The driver raises many unrelated types, as in connect_all.
             except Exception as error:
+                _log.warning("a replacement login failed: %s", error)
                 self._login_failures += 1
-                self._login_error = str(error)
+                self._login_error = (
+                    LOGIN_TIMED_OUT
+                    if getattr(error, "errno", None) == _LOGIN_TIMEOUT_ERRNO
+                    else str(error)
+                )
                 raise ConnectionError_(self._login_error) from error
         with self._lock:
             self._all.append(connection)

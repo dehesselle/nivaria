@@ -15,6 +15,7 @@ from nivaria.snowflake import queries
 from nivaria.snowflake.pool import (
     CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
+    LOGIN_TIMED_OUT,
     OAUTH,
     USERNAME_PASSWORD_MFA,
     AccountNames,
@@ -22,7 +23,7 @@ from nivaria.snowflake.pool import (
     ConnectionPool,
     ConnectParams,
 )
-from tests.fakes import FakeConnector, make_pool
+from tests.fakes import FakeConnector, LoginTimeoutError, make_pool
 
 
 def test_the_password_never_appears_in_a_repr() -> None:
@@ -600,6 +601,82 @@ def test_a_login_asked_for_after_one_failed_prompts_again() -> None:
     connector.fail_after = None
     with pool.acquire() as connection:
         assert not connection.is_closed()
+
+
+_DRIVER_TIMEOUT = (
+    "251016 (08001): Failed to connect to DB: acme.snowflakecomputing.com:443, "
+    "Unable to receive the OAuth message within a given timeout. Please check "
+    "the redirect URI and try again."
+)
+
+
+def _pool_with_a_failing_login(error: Exception) -> ConnectionPool:
+    inner = FakeConnector()
+    logins: list[int] = []
+
+    def connector(**kwargs: Any) -> Any:
+        logins.append(1)
+        if len(logins) > 1:
+            raise error
+        return inner(**kwargs)
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    return pool
+
+
+def test_a_prompt_nobody_answered_fails_in_plain_words(caplog) -> None:
+    """The driver's text points at a redirect URI that is fine. It goes to the
+    log for anyone who needs it."""
+    pool = _pool_with_a_failing_login(LoginTimeoutError(_DRIVER_TIMEOUT))
+    with (
+        caplog.at_level(logging.WARNING),
+        pytest.raises(ConnectionError_) as excinfo,
+        pool.acquire(),
+    ):
+        raise ValueError("session expired")
+    assert str(excinfo.value) == LOGIN_TIMED_OUT
+    assert "redirect URI" in caplog.text
+
+
+def test_those_waiting_on_an_unanswered_prompt_get_the_same_plain_words() -> None:
+    inner = FakeConnector()
+    answer = threading.Event()
+    refuse = threading.Event()
+    logins: list[int] = []
+
+    def connector(**kwargs: Any) -> Any:
+        if not refuse.is_set():
+            return inner(**kwargs)
+        logins.append(1)
+        assert answer.wait(timeout=5)
+        raise LoginTimeoutError(_DRIVER_TIMEOUT)
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 2, connector=connector)
+    pool.connect_all()
+    for connection in pool._all:
+        connection.closed = True
+    refuse.set()
+    runs = [_run_in_thread(lambda: _acquire_once(pool)) for _ in range(2)]
+    deadline = time.monotonic() + 2
+    while not logins and time.monotonic() < deadline:
+        time.sleep(0.005)
+    time.sleep(0.1)
+    answer.set()
+    for thread, _ in runs:
+        thread.join(timeout=5)
+    assert [str(outcome[0]) for _, outcome in runs] == [LOGIN_TIMED_OUT] * 2
+
+
+def test_any_other_failed_login_keeps_what_the_driver_said() -> None:
+    """A network that is down or an account that is locked is worth reading, and
+    "the prompt was not answered" would be wrong."""
+    pool = _pool_with_a_failing_login(RuntimeError("could not reach the host"))
+    with (
+        pytest.raises(ConnectionError_, match="could not reach the host"),
+        pool.acquire(),
+    ):
+        raise ValueError("session expired")
 
 
 def test_a_pool_must_have_at_least_one_connection() -> None:

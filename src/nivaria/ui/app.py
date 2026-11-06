@@ -20,7 +20,7 @@ from nivaria.profiles import Profile, ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.settings import PAGE_SIZE, POOL_SIZE, config
 from nivaria.snowflake.gateway import PoolGateway
-from nivaria.snowflake.pool import ConnectionPool, Connector
+from nivaria.snowflake.pool import LOGIN_TIMED_OUT, ConnectionPool, Connector
 from nivaria.ui.messages import CacheUpdated
 from nivaria.ui.screens.closing import ClosingDialog
 from nivaria.ui.screens.connect import ConnectScreen
@@ -48,7 +48,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         # the same file.
         self.profiles = ProfileStore()
         #: When each "no longer exists" notice was last shown, by text.
-        self._missing_notices: dict[str, float] = {}
+        self._notices: dict[str, float] = {}
         #: Set while quit waits for running statements; a second quit then
         #: exits without waiting.
         self._quitting = False
@@ -226,6 +226,11 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             # every cache age, which the History note reports. A toast would
             # come back each time, promising a refresh that changes nothing.
             return
+        if message == LOGIN_TIMED_OUT:
+            # One unanswered prompt fails every scope waiting on it, and what
+            # needs saying is about the login, not about any of them.
+            self._notify_once(f"{message} Press F5 to be asked again.", 8.0)
+            return
         if not missing:
             self.notify(
                 f"Could not load {scope}: {message}", severity="error", timeout=8
@@ -240,11 +245,15 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         # while the first toast is still up.
         lines = [line for line in message.splitlines() if line.strip()]
         text = f"{lines[-1] if lines else message} Refreshing."
+        self._notify_once(text, _MISSING_TIMEOUT)
+
+    def _notify_once(self, text: str, timeout: float) -> None:
+        """A warning, unless the same text is still up from a moment ago."""
         now = monotonic()
-        if now - self._missing_notices.get(text, float("-inf")) < _MISSING_TIMEOUT:
+        if now - self._notices.get(text, float("-inf")) < timeout:
             return
-        self._missing_notices[text] = now
-        self.notify(text, severity="warning", timeout=_MISSING_TIMEOUT)
+        self._notices[text] = now
+        self.notify(text, severity="warning", timeout=timeout)
 
     async def action_quit(self) -> None:
         """Wait for statements in flight before exiting; quit again to stop
