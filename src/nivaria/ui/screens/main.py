@@ -25,6 +25,7 @@ from textual.screen import Screen
 
 from nivaria.cache.repository import Repository
 from nivaria.models import (
+    CacheState,
     ObjectRef,
     SchemaRef,
     Scope,
@@ -431,6 +432,10 @@ class MainScreen(Screen):
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         """The tree found something missing or stale."""
+        # Asked while the scope's own pass was still running, which would have
+        # dropped this as a duplicate. Having failed since, it would run again.
+        if event.from_update and self.repo.entry(event.scope).state is CacheState.ERROR:
+            return
         priority = Priority.INTERACTIVE if event.interactive else Priority.VISIBLE
         self._request(_requestable(event.scope), priority)
 

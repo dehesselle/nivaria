@@ -142,7 +142,13 @@ class _ScopedView(Widget):
         if self._announcing is not None and entry.state is CacheState.ERROR:
             return False
         if is_stale(entry.age(), ttl):
-            self.post_message(ScopeNeeded(scope, interactive=interactive))
+            self.post_message(
+                ScopeNeeded(
+                    scope,
+                    interactive=interactive,
+                    from_update=self._announcing is not None,
+                )
+            )
             return True
         return False
 

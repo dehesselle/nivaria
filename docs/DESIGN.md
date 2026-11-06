@@ -1324,7 +1324,9 @@ reads as stale. Re-requesting it there would make a failing statement (no
 warehouse, say) retry itself, and two failing scopes on one view retry each
 other for as long as the view stayed on screen. Reading `Entry.due` there
 instead would not do: it would also hold back navigating back, which retries at
-once.
+once. A repaint can also ask for a scope still in flight, which has failed by the
+time `MainScreen.on_scope_needed` handles the request, so that looks again
+(`ScopeNeeded.from_update`).
 
 ---
 

@@ -35,7 +35,7 @@ from nivaria.models import (
 from nivaria.profiles import Profile, ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import Priority
-from nivaria.settings import CURSOR_SETTLE_MS, SNOWSIGHT_URL, config
+from nivaria.settings import CACHE_TTL, CURSOR_SETTLE_MS, SNOWSIGHT_URL, config
 from nivaria.snowflake.pool import AccountNames, ConnectionPool, ConnectParams
 from nivaria.ui.messages import CategorySelected, ObjectSelected, ScopeNeeded
 from nivaria.ui.screens.main import CacheUpdated, MainScreen
@@ -250,7 +250,10 @@ async def test_tables_are_searchable_without_expanding_a_schema(tmp_path) -> Non
 async def test_a_task_with_no_warehouse_sends_its_failing_statements_once(repo) -> None:
     """The whole path, through a real FetchService: each failure repaints the
     view, and on a live account that kept both statements running, at about
-    one login a second, until the cursor moved away."""
+    one login a second, until the cursor moved away. Cache age 0 turns the sweep
+    off: it can legitimately get in first on a tick, and the view's own first
+    request then retries."""
+    config.set(CACHE_TTL, 0)
     ref = put_task(repo, "NIGHTLY")
     gateway = FakeGateway()
     gateway.raise_on_task_history = True
@@ -450,6 +453,36 @@ async def test_only_an_objects_scope_is_upgraded_to_a_prime(repo) -> None:
         await settle(pilot)
     assert misshapen.key in fetch.scopes
     assert "tables@MYDB" not in fetch.scopes
+
+
+async def test_a_repaints_request_is_dropped_if_the_scope_has_failed_since(
+    repo,
+) -> None:
+    """The repaint asked while the scope's pass was running. Handled after that
+    pass failed, nothing would stop the request from running the statement again."""
+    scope = task_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        repo.fail_pass(scope, repo.begin_pass(scope), "No active warehouse selected")
+        app.screen.on_scope_needed(
+            ScopeNeeded(scope, interactive=True, from_update=True)
+        )
+        await settle(pilot)
+    assert scope.key not in fetch.scopes
+
+
+async def test_coming_back_to_a_failed_scope_still_requests_it(repo) -> None:
+    scope = task_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        repo.fail_pass(scope, repo.begin_pass(scope), "No active warehouse selected")
+        app.screen.on_scope_needed(ScopeNeeded(scope, interactive=True))
+        await settle(pilot)
+    assert scope.key in fetch.scopes
 
 
 async def test_an_interactive_need_outranks_a_visible_one(repo) -> None:

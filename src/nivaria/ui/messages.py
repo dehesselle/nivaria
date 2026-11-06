@@ -31,11 +31,18 @@ class ScopeNeeded(Message):
 
     Posted rather than calling the fetch service, so widgets stay ignorant of
     scheduling and a test can assert on intent instead of on side effects.
+
+    `from_update` marks one asked from a repaint answering a cache update, which
+    never asks for a scope that failed. It may have failed by the time this
+    message is handled, so `MainScreen.on_scope_needed` looks again.
     """
 
-    def __init__(self, scope: Scope, *, interactive: bool) -> None:
+    def __init__(
+        self, scope: Scope, *, interactive: bool, from_update: bool = False
+    ) -> None:
         self.scope = scope
         self.interactive = interactive
+        self.from_update = from_update
         super().__init__()
 
 
