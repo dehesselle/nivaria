@@ -41,6 +41,7 @@ from nivaria.models import (
 from nivaria.service.jobs import (
     SHUTDOWN,
     FetchJob,
+    Page,
     Priority,
     fetch_database,
     fetch_page,
@@ -274,15 +275,20 @@ class FetchService:
                 pipe_names=pipe_names,
                 window_seconds=window.seconds if window is not None else None,
             )
+            self._store(job, page, generation, finish)
         # A worker thread boundary: the driver, the network and sqlite all
         # raise unrelated exception types, and any escape here would kill the
         # thread and silently strand every later job.
         except Exception as error:  # noqa: BLE001
             self._fail(job, error, generation)
-            return
+
+    def _store(
+        self, job: FetchJob, page: Page, generation: int, finish: dict[str, Any]
+    ) -> None:
+        """Write a fetched page to the cache and queue whatever comes next."""
         if self._stopped:
             return
-
+        scope = job.scope
         cursor = page.cursor
         if not self._repo.write_page(scope, generation, page.rows, cursor):
             # A newer pass claimed this scope while the page was in flight.
@@ -344,23 +350,32 @@ class FetchService:
         cheaper than visiting each schema: ~1s for 2145 tables across 54
         schemas, versus 54 round trips at ~187ms each.
         """
+        allow_reconnect = job.priority is not Priority.BACKGROUND
+        started_at = time.time()
+        try:
+            rows, usable = fetch_database(
+                self._gateway, job.scope, allow_reconnect=allow_reconnect
+            )
+            self._store_prime(job, rows, usable, started_at)
+        # See _execute: a worker thread boundary.
+        except Exception as error:  # noqa: BLE001
+            self._fail(job, error)
+
+    def _store_prime(
+        self,
+        job: FetchJob,
+        rows: list[dict[str, Any]],
+        usable: bool,
+        started_at: float,
+    ) -> None:
+        """Write a prime's rows to every schema's scope, or fan out instead."""
+        if self._stopped:
+            return
         scope = job.scope
         assert scope.object_type is not None
         assert scope.database is not None
         object_type: ObjectType = scope.object_type
         database: str = scope.database
-        allow_reconnect = job.priority is not Priority.BACKGROUND
-        started_at = time.time()
-        try:
-            rows, usable = fetch_database(
-                self._gateway, scope, allow_reconnect=allow_reconnect
-            )
-        # See _execute: a worker thread boundary.
-        except Exception as error:  # noqa: BLE001
-            self._fail(job, error)
-            return
-        if self._stopped:
-            return
 
         if not usable:
             # Truncated at Snowflake's SHOW cap and not safely pageable, so
@@ -413,7 +428,12 @@ class FetchService:
         message = str(error) or error.__class__.__name__
         missing = is_missing_object(error)
         if generation:
-            self._repo.fail_pass(scope, generation, message)
+            # What made the pass fail, a full disk say, can stop this write
+            # too. The user still has to hear about it, and the worker to live.
+            try:
+                self._repo.fail_pass(scope, generation, message)
+            except Exception:  # noqa: BLE001 -- see _execute
+                _log.exception("could not record the failure of %s", scope)
         if missing:
             for container in containing_scopes(scope):
                 self.request(container, job.priority)

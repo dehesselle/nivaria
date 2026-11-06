@@ -1257,6 +1257,11 @@ worker writes into sqlite and then posts a message naming the scope it changed.
   Neither is belt-and-braces. The chain re-issues a statement and trusts the
   result to shrink, which is exactly the assumption Snowflake has been caught
   breaking — see "Bounding a result".
+- **Contained**: whatever a job raises, from the statement or from writing its
+  result to sqlite, is reported as that job's failure. An escape would end the
+  worker thread with nothing on screen, leaving one worker less for the rest of
+  the session. Recording the failure can fail too on a full disk, so that is
+  contained separately and the error is still reported.
 
 Results reach the UI as a message naming **one scope**, which the main screen
 **routes** to the widget showing it — never broadcasts. An update to one

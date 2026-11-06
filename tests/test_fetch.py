@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 import time
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from nivaria.models import (
     pipe_activity_history_scope,
     pipe_activity_scope,
     pipe_status_scope,
+    prime_scope,
     schemas_scope,
     tag_references_scope,
     task_activity_history_scope,
@@ -726,6 +728,86 @@ def test_a_dropped_schema_found_one_level_further_down_is_still_cleared(
     try:
         service.request(columns_scope("MYDB", "GONE", "ORDERS"))
         assert wait_until(lambda: cached_schema_names(repo, "MYDB") == ["AAA"])
+    finally:
+        service.stop()
+
+
+def _broken(*_args, **_kwargs):
+    raise sqlite3.OperationalError("database or disk is full")
+
+
+@pytest.mark.parametrize("method", ["write_page", "finish_pass"])
+def test_a_cache_write_that_fails_is_reported_and_keeps_the_worker(
+    repo, monkeypatch, method
+) -> None:
+    """A worker that died here left nothing on screen and one less worker for
+    the rest of the session; with all of them gone, nothing loads at all."""
+    gateway = FakeGateway(databases=["ACME"], schemas={"MYDB": ["PUBLIC"]})
+    errors: list[str] = []
+    service = make_service(
+        gateway, repo, on_error=lambda _s, message, _m: errors.append(message)
+    )
+    scope = databases_scope()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(repo, method, _broken)
+            service.request(scope)
+            assert wait_until(lambda: bool(errors))
+            assert wait_until(lambda: not service.is_busy(scope))
+        assert errors == ["database or disk is full"]
+        assert repo.entry(scope).state is CacheState.ERROR
+
+        service.request(schemas_scope("MYDB"))
+        assert wait_until(
+            lambda: repo.entry(schemas_scope("MYDB")).state is CacheState.COMPLETE
+        )
+    finally:
+        service.stop()
+
+
+def test_a_prime_whose_cache_write_fails_keeps_the_worker(repo, monkeypatch) -> None:
+    gateway = FakeGateway(
+        schemas={"MYDB": ["PUBLIC"]},
+        objects={("MYDB", "PUBLIC", ObjectType.TABLE): ["ORDERS"]},
+    )
+    errors: list[str] = []
+    service = make_service(
+        gateway, repo, on_error=lambda _s, message, _m: errors.append(message)
+    )
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(repo, "replace_grouped", _broken)
+            service.request(prime_scope(ObjectType.TABLE, "MYDB"))
+            assert wait_until(lambda: bool(errors))
+        service.request(schemas_scope("MYDB"))
+        assert wait_until(
+            lambda: repo.entry(schemas_scope("MYDB")).state is CacheState.COMPLETE
+        )
+    finally:
+        service.stop()
+
+
+def test_a_worker_survives_being_unable_to_record_a_failure(repo, monkeypatch) -> None:
+    """A full disk fails the write and then the note that the write failed. The
+    error still has to reach the user, and the worker still has to live."""
+    gateway = FakeGateway(databases=["ACME"], schemas={"MYDB": ["PUBLIC"]})
+    errors: list[str] = []
+    service = make_service(
+        gateway, repo, on_error=lambda _s, message, _m: errors.append(message)
+    )
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(repo, "write_page", _broken)
+            patch.setattr(repo, "fail_pass", _broken)
+            service.request(databases_scope())
+            assert wait_until(lambda: bool(errors))
+            assert wait_until(lambda: not service.is_busy(databases_scope()))
+        assert errors == ["database or disk is full"]
+
+        service.request(schemas_scope("MYDB"))
+        assert wait_until(
+            lambda: repo.entry(schemas_scope("MYDB")).state is CacheState.COMPLETE
+        )
     finally:
         service.stop()
 

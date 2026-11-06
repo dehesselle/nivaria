@@ -147,7 +147,8 @@ exists.
 
 - **A failed refresh keeps the old rows** and reports the error. Nothing is
   removed until a refresh succeeds. Until then, a note above a list, a
-  History or a Data table says when the rows shown were fetched.
+  History or a Data table says when the rows shown were fetched. The same goes
+  for a refresh that could not be written to the cache, on a full disk say.
 - **Something dropped in Snowflake** disappears the next time nivaria trips
   over it: the failed fetch triggers a refresh of the list above it, which
   removes the node. "Does not exist" is shown as a warning.
