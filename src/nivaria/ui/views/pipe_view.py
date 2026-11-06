@@ -39,10 +39,9 @@ in no named field: `Repository.pipe_target_table` reads it off whatever
 `pipe_activity_scope` or this pipe's own backfill has cached, or else off a
 fully qualified target in the pipe's definition. A pipe with none of them has
 no target to give it. That is
-a normal, lasting state, not a transient failure: this view does not
-`ensure()` -- or even list in `scopes()` -- the history scope until a target
-is actually resolvable, so such a pipe does not repeatedly fail a fetch it
-can never succeed at. The snapshot is then its only source, refreshed on the
+a normal, lasting state, not a transient failure: this view does not list the
+history scope in `scopes()` until a target is actually resolvable, so such a
+pipe does not repeatedly fail a fetch it can never succeed at. The snapshot is then its only source, refreshed on the
 cache age like everything else, and its first load gives it a target. Until
 then, only ACCOUNT_USAGE speaks for it, so the History tab carries the lag
 banner (`tables.lag_note`).
@@ -76,11 +75,7 @@ from nivaria.models import (
     pipe_activity_scope,
     pipe_history_scope,
 )
-from nivaria.settings import (
-    CACHE_TTL,
-    PIPE_HISTORY_SHOW_DAYS,
-    config,
-)
+from nivaria.settings import PIPE_HISTORY_SHOW_DAYS, config
 from nivaria.snowflake.queries import (
     COPY_HISTORY_PUBLISHED_LAG,
     PIPE_HISTORY_RETENTION_DAYS,
@@ -172,9 +167,9 @@ class PipeView(HistoryView, ObjectView):
     def scopes(self) -> list[Scope]:
         # history_scope is only meaningfully "on screen" once a target table
         # is resolvable -- see the module docstring. Omitting it otherwise
-        # keeps both the interactive ensure() below and the background sweep
-        # (MainScreen._sweep, which watches self.detail.scopes()) from ever
-        # requesting a fetch that cannot succeed. activity_history_scope is
+        # keeps both `ensure_all` and the background sweep (MainScreen._sweep,
+        # which watches self.detail.scopes()) from ever requesting a fetch
+        # that cannot succeed. activity_history_scope is
         # gated the same way, on needs_backfill. The listing is here so the
         # SQL tab repaints when it lands.
         scopes = [self.listing_scope(), self.activity_scope()]
@@ -189,23 +184,16 @@ class PipeView(HistoryView, ObjectView):
         self._update_definition()
 
     def _update_history(self) -> None:
-        ttl = config.get(CACHE_TTL)
         # Not read into the merge -- it only ever holds this pipe's latest
         # row, which activity_history_scope's full backfill already covers --
         # but it resolves the target, decides whether the backfill is needed
         # at all, and is the answer for the fetch window when it is not.
         activity_scope = self.activity_scope()
-        self.ensure(activity_scope, ttl)
         activity_history_scope = (
             self.activity_history_scope() if self.needs_backfill() else None
         )
-        if activity_history_scope is not None:
-            self.ensure(activity_history_scope, ttl)
-
         target = self.target_table()
         history_scope = self.history_scope() if target is not None else None
-        if history_scope is not None:
-            self.ensure(history_scope, ttl)
 
         # Merged by (FILE_NAME, PIPE_RECEIVED_TIME) -- see the module
         # docstring for why that key, and why this needs no "which scope

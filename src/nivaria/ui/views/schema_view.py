@@ -47,7 +47,6 @@ from textual.widgets import DataTable, Static
 
 from nivaria.cache.repository import Repository
 from nivaria.models import SchemaRef, Scope, grants_scope, tag_references_scope
-from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.views.base import _ScopedView
 from nivaria.ui.views.grants import compose_grants, paint_grants
 from nivaria.ui.views.tables import (
@@ -77,28 +76,20 @@ class _GrantsTagsView(_ScopedView):
                 tags.zebra_stripes = True
                 yield tags
 
-    def on_mount(self) -> None:
-        self.update_content()
-
     @abstractmethod
     def grants_scope(self) -> Scope: ...
 
     @abstractmethod
     def tags_scope(self) -> Scope: ...
 
-    def _tags_shown(self) -> bool:
-        return self.is_mounted and self.query_one(TabbedContent).active == "tab-tags"
-
     def scopes(self) -> list[Scope]:
         scopes = [self.grants_scope()]
-        if self._tags_shown():
+        if self._tab_shown("tab-tags"):
             scopes.append(self.tags_scope())
         return scopes
 
     def update_content(self) -> None:
         grants = self.grants_scope()
-        self.ensure(grants, config.get(CACHE_TTL))
-
         paint_grants(self, self.grants_panel, self.repo.raw_rows(grants))
         sync_scope_note(
             self.query_one(f"#{GRANTS_NOTE}", Static),
@@ -106,12 +97,11 @@ class _GrantsTagsView(_ScopedView):
             empty=f"No grants on this {self.NOUN} that your role can see.",
             looking="Looking for grants...",
         )
-        if self._tags_shown():
+        if self._tab_shown("tab-tags"):
             self._update_tags()
 
     def _update_tags(self) -> None:
         tags = self.tags_scope()
-        self.ensure(tags, config.get(CACHE_TTL))
         sync_scope_note(
             self.query_one(f"#{TAGS_NOTE}", Static),
             self.repo.entry(tags),
@@ -133,6 +123,7 @@ class _GrantsTagsView(_ScopedView):
         self, event: TabbedContent.TabActivated
     ) -> None:
         if event.pane.id == "tab-tags":
+            self.ensure(self.tags_scope())
             self._update_tags()
 
 
@@ -148,7 +139,7 @@ class SchemaView(_GrantsTagsView):
         """Re-point an already mounted view at another schema."""
         self.ref = ref
         if self.is_mounted:
-            self.update_content()
+            self.repaint()
 
     def grants_scope(self) -> Scope:
         return grants_scope(self.ref.database, self.ref.name)
@@ -169,7 +160,7 @@ class DatabaseView(_GrantsTagsView):
         """Re-point an already mounted view at another database."""
         self.database = database
         if self.is_mounted:
-            self.update_content()
+            self.repaint()
 
     def grants_scope(self) -> Scope:
         return grants_scope(self.database, None)

@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import ClassVar
 
+from tcoda.widgets import TabbedContent
 from textual.coordinate import Coordinate
 from textual.widget import Widget
 from textual.widgets import DataTable
@@ -41,6 +42,7 @@ from nivaria.models import (
     is_stale,
     objects_scope,
 )
+from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import ScopeNeeded
 
 _registry: dict[ObjectType, type[ObjectView]] = {}
@@ -68,6 +70,9 @@ class _ScopedView(Widget):
     #: anything. `DetailPane` manages it; a view outside one is always settled.
     settled: bool = True
 
+    def on_mount(self) -> None:
+        self.repaint()
+
     def cache_updated(self, scope: Scope) -> None:
         """Repaint if the scope that changed is one this view is showing.
 
@@ -77,9 +82,14 @@ class _ScopedView(Widget):
         if self.is_mounted and scope in self.scopes():
             self._announcing = scope
             try:
-                self.update_content()
+                self.repaint()
             finally:
                 self._announcing = None
+
+    def repaint(self) -> None:
+        """Ask for whatever is missing or stale, and paint what is cached."""
+        self.ensure_all()
+        self.update_content()
 
     def scopes(self) -> list[Scope]:
         """Cache scopes this view reads, for freshness and the countdown."""
@@ -87,7 +97,11 @@ class _ScopedView(Widget):
 
     @abstractmethod
     def update_content(self) -> None:
-        """Repaint from the cache. Called on mount and on every change."""
+        """Paint from the cache, asking for nothing: see `repaint`."""
+
+    def _tab_shown(self, tab: str) -> bool:
+        """Whether `tab` is up, for a scope fetched only while its tab is."""
+        return self.is_mounted and self.query_one(TabbedContent).active == tab
 
     @contextmanager
     def keeping_cursor(self, table: DataTable) -> Iterator[None]:
@@ -121,8 +135,8 @@ class _ScopedView(Widget):
 
     # ------------------------------------------------------------ freshness
 
-    def ensure(self, scope: Scope, ttl: float, *, interactive: bool = True) -> bool:
-        """Ask for `scope` if it is missing or stale. Returns whether it asked.
+    def ensure(self, scope: Scope) -> None:
+        """Ask for `scope` if it is missing or stale.
 
         Never for the scope whose own update is being painted, nor, from any
         repaint answering a cache update, for one that failed. A failed scope
@@ -137,29 +151,27 @@ class _ScopedView(Widget):
         rather than when the cursor passed.
         """
         if not self.settled or scope == self._announcing:
-            return False
+            return
         entry = self.repo.entry(scope)
         if self._announcing is not None and entry.state is CacheState.ERROR:
-            return False
-        if is_stale(entry.age(), ttl):
+            return
+        if is_stale(entry.age(), config.get(CACHE_TTL)):
             self.post_message(
                 ScopeNeeded(
                     scope,
-                    interactive=interactive,
+                    interactive=True,
                     from_update=self._announcing is not None,
                 )
             )
-            return True
-        return False
 
-    def ensure_all(self, ttl: float) -> None:
+    def ensure_all(self) -> None:
         """Ask for whatever this view reads that is missing or stale.
 
-        `scopes()` already holds the conditions a paint asks under (tab shown,
-        target table resolved), so no second list of them can drift.
+        `scopes()` holds the conditions a view asks under (tab shown, target
+        table resolved), so no second list of them can drift.
         """
         for scope in self.scopes():
-            self.ensure(scope, ttl)
+            self.ensure(scope)
 
 
 class ObjectView(_ScopedView):
@@ -171,9 +183,6 @@ class ObjectView(_ScopedView):
         super().__init__()
         self.repo = repo
         self.ref = ref
-
-    def on_mount(self) -> None:
-        self.update_content()
 
     def listing_scope(self) -> Scope:
         """The list holding this object's SHOW row, for a view that reads it."""
@@ -188,7 +197,7 @@ class ObjectView(_ScopedView):
         """
         self.ref = ref
         if self.is_mounted:
-            self.update_content()
+            self.repaint()
 
 
 class CategoryView(_ScopedView):
@@ -203,15 +212,12 @@ class CategoryView(_ScopedView):
         self.repo = repo
         self.scope = scope
 
-    def on_mount(self) -> None:
-        self.update_content()
-
     def show(self, scope: Scope) -> None:
         """Re-point an already mounted view at another category of the same
         type -- e.g. moving to another schema's Tables node."""
         self.scope = scope
         if self.is_mounted:
-            self.update_content()
+            self.repaint()
 
 
 def register_view[T: type[ObjectView]](cls: T) -> T:

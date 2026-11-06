@@ -713,9 +713,8 @@ A pipe with no target from either source is a normal, lasting state, not a
 transient failure to retry. Queuing `PIPE_HISTORY` anyway would make
 `fetch_page` raise and the fetch layer report an error on every attempt,
 forever. So the gate lives above the fetch layer: `PipeView.scopes()` only
-lists `pipe_history_scope` once a target actually resolves, and
-`update_content` only `ensure()`s it under the same condition — so neither the
-interactive path nor the background sweep (which watches `scopes()` too) ever
+lists `pipe_history_scope` once a target actually resolves, so neither the
+view's own asking nor the background sweep, which both read `scopes()`, ever
 queues it. `fetch_page` still raises if `PIPE_HISTORY` is requested with no
 target: a safety net for a caller that skips the gate, not the expected path.
 
@@ -1488,9 +1487,9 @@ So a selection first paints what is cached, at once, and **only after the cursor
 has rested for `CURSOR_SETTLE_MS` does anything ask whether the view needs
 fetching.** `DetailPane` owns the wait: each selection marks the view unsettled
 and restarts a timer, `_ScopedView.ensure` does nothing while unsettled, and
-when the timer fires `ensure` runs for every scope in `scopes()`. That list
-already holds the conditions a paint asks under, and `ensure` the staleness
-decision, so neither is written twice.
+when the timer fires `ensure` runs for every scope in `scopes()`. Every repaint
+asks the same way (`_ScopedView.repaint`). That list holds the conditions a view
+asks under, and `ensure` the staleness decision, so neither is written twice.
 
 Deciding at paint time and holding the requests until the wait ended was
 rejected. It needs a list of held requests to keep and drop, and its answers are

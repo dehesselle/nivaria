@@ -28,7 +28,6 @@ from textual.widgets import DataTable, Static
 from nivaria.cache.repository import Repository
 from nivaria.format import format_bytes, format_date, format_timestamp_minutes
 from nivaria.models import ObjectRef, ObjectType, Scope, table_stats_scope
-from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
@@ -90,15 +89,12 @@ class TableListView(CategoryView):
         return self._rows.get(key)
 
     def update_content(self) -> None:
-        ttl = config.get(CACHE_TTL)
-        self.ensure(self.scope, ttl)
         sync_list_note(
             self.query_one(f"#{LIST_NOTE}", Static),
             self.repo.entry(self.scope),
             "tables",
         )
         stats_scope = self.stats_scope()
-        self.ensure(stats_scope, ttl)
         sync_source_note(
             self.query_one(f"#{SOURCE_NOTE}", Static),
             [source_line(self.repo.entry(stats_scope), "Last DDL, Last Altered")],

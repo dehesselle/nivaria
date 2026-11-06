@@ -53,7 +53,7 @@ from nivaria.models import (
     task_activity_history_scope,
     task_history_scope,
 )
-from nivaria.settings import CACHE_TTL, TASK_HISTORY_SHOW_DAYS, config
+from nivaria.settings import TASK_HISTORY_SHOW_DAYS, config
 from nivaria.snowflake.queries import TASK_HISTORY_RETENTION_DAYS
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.tables import (
@@ -114,11 +114,8 @@ class TaskView(HistoryView, ObjectView):
         self._update_definition()
 
     def _update_history(self) -> None:
-        ttl = config.get(CACHE_TTL)
         activity_history_scope = self.activity_history_scope()
-        self.ensure(activity_history_scope, ttl)
         history_scope = self.history_scope()
-        self.ensure(history_scope, ttl)
 
         # Merged by (SCHEDULED_TIME, ATTEMPT_NUMBER) -- see the module
         # docstring for why that key and not QUERY_ID.

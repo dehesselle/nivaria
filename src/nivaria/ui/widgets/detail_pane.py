@@ -25,7 +25,7 @@ from textual.widgets import Static
 
 from nivaria.cache.repository import Repository
 from nivaria.models import ObjectRef, SchemaRef, Scope
-from nivaria.settings import CACHE_TTL, CURSOR_SETTLE_MS, config
+from nivaria.settings import CURSOR_SETTLE_MS, config
 from nivaria.ui.views.base import (
     CategoryView,
     ObjectView,
@@ -235,7 +235,7 @@ class DetailPane(Vertical):
             return
         view.settled = True
         if view.is_mounted:
-            view.call_later(view.ensure_all, config.get(CACHE_TTL))
+            view.call_later(view.ensure_all)
 
     def _show_placeholder(self, message: str) -> None:
         self._view = None

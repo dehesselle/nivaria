@@ -41,7 +41,6 @@ from nivaria.models import (
     data_preview_scope,
     object_grants_scope,
 )
-from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.grants import compose_grants, paint_grants
 from nivaria.ui.views.tables import (
@@ -155,9 +154,6 @@ class ColumnsView(ObjectView):
     def data_scope(self) -> Scope:
         return data_preview_scope(self.ref.database, self.ref.schema, self.ref.name)
 
-    def _tab_shown(self, tab: str) -> bool:
-        return self.is_mounted and self.query_one(TabbedContent).active == tab
-
     def scopes(self) -> list[Scope]:
         # Grants and Data only while their tab is up -- see the module
         # docstring. Listing one otherwise would have the staleness sweep
@@ -229,9 +225,7 @@ class ColumnsView(ObjectView):
 
     def _update_columns(self) -> None:
         scope = self.columns_scope()
-        self.ensure(scope, config.get(CACHE_TTL))
         tags_scope = self.column_tags_scope()
-        self.ensure(tags_scope, config.get(CACHE_TTL))
 
         # Built before the rows -- both the Tags cell and the value the
         # Tags column sorts by come out of this one scan. Grouped by tag
@@ -313,7 +307,6 @@ class ColumnsView(ObjectView):
 
     def _update_grants(self) -> None:
         scope = self.grants_scope()
-        self.ensure(scope, config.get(CACHE_TTL))
         paint_grants(self, self.grants_panel, self.repo.raw_rows(scope))
         sync_scope_note(
             self.query_one(f"#{GRANTS_NOTE}", Static),
@@ -327,7 +320,6 @@ class ColumnsView(ObjectView):
 
     def _update_data(self) -> None:
         scope = self.data_scope()
-        self.ensure(scope, config.get(CACHE_TTL))
         rows = [json.loads(r["_values"]) for r in self.repo.raw_rows(scope)]
         table = self.query_one(f"#{DATA_TABLE}", TextualDataTable)
         with self.keeping_cursor(table):
@@ -374,8 +366,10 @@ class ColumnsView(ObjectView):
         self, event: TabbedContent.TabActivated
     ) -> None:
         if event.pane.id == "tab-grants":
+            self.ensure(self.grants_scope())
             self._update_grants()
         elif event.pane.id == "tab-data":
+            self.ensure(self.data_scope())
             self._update_data()
 
 

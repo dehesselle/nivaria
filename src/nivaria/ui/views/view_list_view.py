@@ -50,7 +50,6 @@ from nivaria.models import (
     materialized_view_stats_scope,
     view_stats_scope,
 )
-from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
@@ -126,17 +125,13 @@ class ViewListView(CategoryView):
         return self._rows.get(key)
 
     def update_content(self) -> None:
-        ttl = config.get(CACHE_TTL)
-        self.ensure(self.scope, ttl)
         sync_list_note(
             self.query_one(f"#{LIST_NOTE}", Static),
             self.repo.entry(self.scope),
             "views",
         )
         stats_scope = self.stats_scope()
-        self.ensure(stats_scope, ttl)
         materialized_scope = self.materialized_stats_scope()
-        self.ensure(materialized_scope, ttl)
         sync_source_note(
             self.query_one(f"#{SOURCE_NOTE}", Static),
             [

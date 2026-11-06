@@ -54,7 +54,6 @@ from nivaria.models import (
     pipe_activity_scope,
     pipe_status_scope,
 )
-from nivaria.settings import CACHE_TTL, config
 from nivaria.snowflake.queries import COPY_HISTORY_PUBLISHED_LAG
 from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
@@ -156,7 +155,7 @@ class PipeListView(CategoryView):
         return pipe_status_scope(self.scope.database, self.scope.schema)
 
     def _status_wanted(self) -> bool:
-        """Whether the status scope is on screen, for `scopes` and `ensure`.
+        """Whether the status scope is on screen, for `scopes`.
 
         Only while its tab is shown, like the Table view's Grants and Data:
         a pass costs Snowflake time per pipe. And only once the pipe list
@@ -165,8 +164,7 @@ class PipeListView(CategoryView):
         empty and read as fresh.
         """
         return (
-            self.is_mounted
-            and self.query_one(TabbedContent).active == "tab-status"
+            self._tab_shown("tab-status")
             and self.repo.entry(self.scope).fetched_at is not None
         )
 
@@ -180,13 +178,8 @@ class PipeListView(CategoryView):
         return self._rows.get(key)
 
     def update_content(self) -> None:
-        ttl = config.get(CACHE_TTL)
-        self.ensure(self.scope, ttl)
         activity_scope = self.activity_scope()
-        self.ensure(activity_scope, ttl)
         status_scope = self.status_scope()
-        if self._status_wanted():
-            self.ensure(status_scope, ttl)
         # Both tabs read self.scope alone, so one Entry drives both notes --
         # activity_scope stays excluded, same as the merge below.
         entry = self.repo.entry(self.scope)
@@ -271,7 +264,7 @@ class PipeListView(CategoryView):
         self, event: TabbedContent.TabActivated
     ) -> None:
         if event.pane.id == "tab-status":
-            self.update_content()
+            self.repaint()
 
 
 def _pipe_status(status: str | None) -> dict[str, Any]:

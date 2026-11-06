@@ -29,7 +29,6 @@ from textual.widgets import DataTable, Static
 from nivaria.cache.repository import Repository
 from nivaria.format import format_date
 from nivaria.models import ObjectRef, ObjectType, Scope
-from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
@@ -82,8 +81,6 @@ class StageListView(CategoryView):
         return self._rows.get(key)
 
     def update_content(self) -> None:
-        ttl = config.get(CACHE_TTL)
-        self.ensure(self.scope, ttl)
         sync_list_note(
             self.query_one(f"#{LIST_NOTE}", Static),
             self.repo.entry(self.scope),

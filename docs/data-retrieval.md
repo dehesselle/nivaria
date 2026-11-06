@@ -70,7 +70,7 @@ Other columns:
 | Pipe selected | `INFORMATION_SCHEMA.COPY_HISTORY` | `PIPE_HISTORY` | one object | WH | ~0.2 s | ~0.2 s | target table resolved | History tab, recent half |
 | Task selected | `ACCOUNT_USAGE.TASK_HISTORY`, one task | `TASK_ACTIVITY_HISTORY` | one object | WH, IP | 4-10 s | ? | always | History tab, older half |
 | Task selected | `INFORMATION_SCHEMA.TASK_HISTORY` | `TASK_HISTORY` | one object | WH | ~0.2 s | ~0.2 s | always | History tab, recent half |
-| Table, view, pipe or task selected | `SHOW <type> IN DATABASE` | `DATABASE_PRIME` | database | none | ~1 s | ~1 s | the object's listing is stale when the cursor settles | its SQL tab, the Data tab's row count |
+| Table, view, pipe or task selected | `SHOW <type> IN DATABASE` | `DATABASE_PRIME` | database | none | ~1 s | ~1 s | the object's listing is stale when the view asks | its SQL tab, the Data tab's row count |
 | Stage selected, Search, Settings, any SQL tab | nothing | none | | | | | reads the cache only | |
 
 Durations, from [measurements.md](measurements.md):
