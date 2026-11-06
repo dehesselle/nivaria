@@ -197,6 +197,10 @@ class ConnectionPool:
         #: it before every checkout; `run_on_all` holds it while it drains and
         #: rewrites every connection in the pool.
         self._maintenance = threading.Lock()
+        #: Held while a replacement connection logs in. See `_open_one`.
+        self._login_lock = threading.Lock()
+        self._login_failures = 0
+        self._login_error = ""
         #: Read once by `connect_all`; None until then, or if Snowflake would
         #: not say.
         self.account_names: AccountNames | None = None
@@ -442,11 +446,24 @@ class ConnectionPool:
                     break
 
     def _open_one(self) -> Any:
-        try:
-            connection = self._connector(**self.params.to_connect_kwargs())
-        # The driver raises many unrelated types, as in connect_all.
-        except Exception as error:
-            raise ConnectionError_(str(error)) from error
+        """Open a replacement, one at a time like `connect_all`.
+
+        Sessions die together, so several workers get here at once. After a
+        login that worked, the token cache spares the rest a prompt. After one
+        that failed, those already waiting on it share its failure rather than
+        each opening a window that nobody just answered.
+        """
+        failures = self._login_failures
+        with self._login_lock:
+            if self._login_failures != failures:
+                raise ConnectionError_(self._login_error)
+            try:
+                connection = self._connector(**self.params.to_connect_kwargs())
+            # The driver raises many unrelated types, as in connect_all.
+            except Exception as error:
+                self._login_failures += 1
+                self._login_error = str(error)
+                raise ConnectionError_(self._login_error) from error
         with self._lock:
             self._all.append(connection)
         return connection

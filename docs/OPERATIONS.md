@@ -112,7 +112,8 @@ queued work for the old one.
 - The Pool gauge shows `(in use / total)`. A job that needs a connection while
   all are busy waits.
 - A connection found dead is replaced on the spot when you are the one
-  waiting. Background work never opens a connection, so it cannot raise an MFA
+  waiting, one login at a time, so several dead connections do not open several
+  browser windows at once. Background work never opens a connection, so it cannot raise an MFA
   prompt while you are away: it drops the dead connection instead, and the
   gauge's total shrinks until your next action reopens it.
 

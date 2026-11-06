@@ -522,6 +522,86 @@ def test_an_interactive_worker_waiting_on_a_given_up_connection_logs_in_itself()
     assert len(logins) == 3
 
 
+def test_replacement_logins_run_one_at_a_time() -> None:
+    """Every session dies together when a laptop sleeps, and each login can be
+    a browser window or a push notification. A successful first one caches the
+    token, so the ones after it do not prompt."""
+    inner = FakeConnector()
+    lock = threading.Lock()
+    running = [0]
+    most = [0]
+
+    def connector(**kwargs: Any) -> Any:
+        with lock:
+            running[0] += 1
+            most[0] = max(most[0], running[0])
+        time.sleep(0.05)
+        with lock:
+            running[0] -= 1
+        return inner(**kwargs)
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 3, connector=connector)
+    pool.connect_all()
+    for connection in pool._all:
+        connection.closed = True
+    most[0] = 0
+    runs = [_run_in_thread(lambda: _acquire_once(pool)) for _ in range(3)]
+    for thread, _ in runs:
+        thread.join(timeout=5)
+    assert most[0] == 1
+    assert all(not outcome[0].is_closed() for _, outcome in runs)
+
+
+def test_a_failed_login_fails_those_waiting_on_it_without_a_prompt_each() -> None:
+    """Three windows in a row, each waiting out its timeout, for what one
+    unanswered prompt has just shown nobody is there to answer."""
+    inner = FakeConnector()
+    answer = threading.Event()
+    refuse = threading.Event()
+    logins: list[int] = []
+
+    def connector(**kwargs: Any) -> Any:
+        if not refuse.is_set():
+            return inner(**kwargs)
+        logins.append(1)
+        assert answer.wait(timeout=5)
+        raise RuntimeError("login timed out")
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 3, connector=connector)
+    pool.connect_all()
+    for connection in pool._all:
+        connection.closed = True
+    refuse.set()
+
+    runs = [_run_in_thread(lambda: _acquire_once(pool)) for _ in range(3)]
+    deadline = time.monotonic() + 2
+    while not logins and time.monotonic() < deadline:
+        time.sleep(0.005)
+    time.sleep(0.1)
+    answer.set()
+    for thread, _ in runs:
+        thread.join(timeout=5)
+
+    assert len(logins) == 1
+    for _, outcome in runs:
+        assert isinstance(outcome[0], ConnectionError_)
+        assert "login timed out" in str(outcome[0])
+    assert pool.size == 0
+
+
+def test_a_login_asked_for_after_one_failed_prompts_again() -> None:
+    """Sharing a failure is only for those already waiting on that login. The
+    next action is a new request, and may well be answered this time."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    _refuse_logins(connector)
+    with pytest.raises(ConnectionError_), pool.acquire():
+        raise ValueError("session expired")
+    connector.fail_after = None
+    with pool.acquire() as connection:
+        assert not connection.is_closed()
+
+
 def test_a_pool_must_have_at_least_one_connection() -> None:
     with pytest.raises(ValueError):
         ConnectionPool(ConnectParams(account="a", user="u"), 0)
