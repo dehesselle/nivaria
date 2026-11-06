@@ -314,15 +314,17 @@ def test_a_cancelled_query_keeps_its_healthy_connection() -> None:
 # -------------------------------------------------------------- sql logging
 
 
-def test_every_statement_is_logged_at_debug_under_the_sql_source(
+def test_every_statement_is_logged_at_debug_under_the_sql_logger(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     gateway, connection, _ = make_gateway()
     connection.columns = ["name"]
     connection.rows = [("ACME",)]
-    with caplog.at_level(logging.DEBUG, logger="sql"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
         gateway.show_databases()
-    records = [record for record in caplog.records if record.name == "sql"]
+    records = [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ]
     assert len(records) == 1
     assert "SHOW DATABASES" in records[0].message
 
@@ -334,19 +336,23 @@ def test_the_statement_is_logged_even_though_execute_then_fails(
     seeing the last statement even when it never returns successfully."""
     gateway, connection, _ = make_gateway()
     connection.fail_times = 1
-    with caplog.at_level(logging.DEBUG, logger="sql"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
         gateway.show_databases()
-    records = [record for record in caplog.records if record.name == "sql"]
+    records = [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ]
     # One line per real attempt against Snowflake, including the failed one.
     assert len(records) == 2
 
 
-def test_nothing_is_logged_when_the_sql_source_is_not_at_debug(
+def test_nothing_is_logged_when_the_sql_logger_is_not_at_debug(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     gateway, _, _ = make_gateway()
     gateway.show_databases()
-    assert [record for record in caplog.records if record.name == "sql"] == []
+    assert [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ] == []
 
 
 def test_show_warehouses_sends_the_unpaged_statement() -> None:

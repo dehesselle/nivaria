@@ -25,7 +25,7 @@ class RaisingCursor:
     discarding a formatted record afterwards."""
 
     def _preprocess_pyformat_query(self, *args: Any, **kwargs: Any) -> str:
-        raise AssertionError("must not be called when the sql source is not at debug")
+        raise AssertionError("must not be called when the sql logger is not at debug")
 
 
 class ResolvingCursor:
@@ -52,12 +52,14 @@ class BrokenPreprocessCursor:
         pass
 
 
-def test_the_resolved_statement_is_logged_under_the_sql_source(
+def test_the_resolved_statement_is_logged_under_the_sql_logger(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with caplog.at_level(logging.DEBUG, logger="sql"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
         sql_log.log_statement(ResolvingCursor(), "SELECT * FROM T WHERE ID = %s", (42,))
-    records = [record for record in caplog.records if record.name == "sql"]
+    records = [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ]
     assert len(records) == 1
     assert records[0].message == "SELECT * FROM T WHERE ID = 42"
 
@@ -75,11 +77,13 @@ def test_the_statement_is_logged_before_execute_is_called(
             raise RuntimeError("connection dropped mid-query")
 
     cursor = FailingCursor()
-    with caplog.at_level(logging.DEBUG, logger="sql"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
         sql_log.log_statement(cursor, "SHOW DATABASES")
         with pytest.raises(RuntimeError):
             cursor.execute("SHOW DATABASES")
-    records = [record for record in caplog.records if record.name == "sql"]
+    records = [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ]
     assert len(records) == 1
 
 
@@ -88,17 +92,21 @@ def test_nothing_is_logged_and_resolution_is_skipped_below_debug(
 ) -> None:
     cursor = RaisingCursor()
     sql_log.log_statement(cursor, "SHOW DATABASES")  # must not raise
-    assert [record for record in caplog.records if record.name == "sql"] == []
+    assert [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ] == []
 
 
 def test_a_broken_resolution_falls_back_to_the_raw_statement(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     cursor = BrokenPreprocessCursor()
-    with caplog.at_level(logging.DEBUG, logger="sql"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
         sql_log.log_statement(cursor, "SELECT %s", (1,))
         cursor.execute("SELECT %s", (1,))  # must still run fine
-    records = [record for record in caplog.records if record.name == "sql"]
+    records = [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ]
     assert len(records) == 1
     assert records[0].message == "SELECT %s"
 
@@ -112,7 +120,9 @@ def test_a_long_statement_is_logged_in_full_not_truncated(
     must not inherit that cutoff."""
     long_statement = "SELECT " + ", ".join(f"COL_{i}" for i in range(30)) + " FROM T"
     assert len(long_statement) > 80
-    with caplog.at_level(logging.DEBUG, logger="sql"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
         sql_log.log_statement(ResolvingCursor(), long_statement)
-    [record] = [record for record in caplog.records if record.name == "sql"]
+    [record] = [
+        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+    ]
     assert record.message == long_statement

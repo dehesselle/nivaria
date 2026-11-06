@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-_log = logging.getLogger("sql")
+_log = logging.getLogger(__name__)
 
 
 def log_statement(
