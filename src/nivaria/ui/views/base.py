@@ -102,6 +102,10 @@ class _ScopedView(Widget):
     def update_content(self) -> None:
         """Paint from the cache, asking for nothing: see `repaint`."""
 
+    @abstractmethod
+    def show(self, target: Any) -> None:
+        """Re-point an already mounted view at another node of its kind."""
+
     def _tab_shown(self, tab: str) -> bool:
         """Whether `tab` is up, for a scope fetched only while its tab is."""
         return self.is_mounted and self.query_one(TabbedContent).active == tab

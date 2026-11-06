@@ -26,13 +26,7 @@ from textual.widgets import Static
 from nivaria.cache.repository import Repository
 from nivaria.models import ObjectRef, SchemaRef, Scope
 from nivaria.settings import CURSOR_SETTLE_MS, config
-from nivaria.ui.views.base import (
-    CategoryView,
-    ObjectView,
-    _ScopedView,
-    category_view_for,
-    view_for,
-)
+from nivaria.ui.views.base import _ScopedView, category_view_for, view_for
 from nivaria.ui.views.schema_view import DatabaseView, SchemaView
 
 
@@ -42,135 +36,79 @@ class DetailPane(Vertical):
     def __init__(self, repo: Repository, **kwargs) -> None:
         super().__init__(**kwargs)
         self.repo = repo
-        self._view: ObjectView | CategoryView | SchemaView | DatabaseView | None = None
-        self._ref: ObjectRef | None = None
-        self._scope: Scope | None = None
-        self._schema: SchemaRef | None = None
-        self._database: str | None = None
+        self._view: _ScopedView | None = None
+        #: What the pane was last pointed at: an object, a category's scope, a
+        #: schema or a database.
+        self._shown: ObjectRef | Scope | SchemaRef | str | None = None
         self._settle_timer: Timer | None = None
 
     @property
-    def view(self) -> ObjectView | CategoryView | SchemaView | DatabaseView | None:
+    def view(self) -> _ScopedView | None:
         return self._view
 
     @property
     def ref(self) -> ObjectRef | None:
-        return self._ref
+        return self._shown if isinstance(self._shown, ObjectRef) else None
 
     @property
     def scope(self) -> Scope | None:
-        return self._scope
+        return self._shown if isinstance(self._shown, Scope) else None
 
-    def show(self, ref: ObjectRef) -> ObjectView | None:
-        """Point the pane at an object. Returns the view now showing it.
-
-        Pointing it at what it already shows changes nothing: re-showing
-        would repaint the view and reset its sort and cursor, though the user
-        never moved. `clear()` forgets what was shown, so an emptied pane is
-        never mistaken for this case.
-        """
-        if ref == self._ref and isinstance(self._view, ObjectView):
-            return self._view
-        self._ref = ref
-        self._scope = None
-        self._schema = None
-        self._database = None
+    def show(self, ref: ObjectRef) -> _ScopedView | None:
+        """Point the pane at an object. Returns the view now showing it."""
         view_class = view_for(ref.type)
         if view_class is None:
+            self._shown = ref
             self._show_placeholder(f"No detail view for {ref.type.value} yet.")
             return None
+        return self._point_at(ref, view_class)
 
-        current = self._view
-        if current is not None and type(current) is view_class:
-            self._wait_for_cursor(current)
-            current.show(ref)
-            return current
-
-        self.remove_children()
-        view = view_class(self.repo, ref)
-        self._view = view
-        self._wait_for_cursor(view)
-        self.mount(view)
-        return view
-
-    def show_category(self, scope: Scope) -> CategoryView | None:
-        """Point the pane at a category node ("Tables (n)", ...).
-
-        Same swap rule as `show`: same type re-points the mounted view, a
-        different type (or one with no registered view) replaces it. Like
-        `show`, pointing it at what it already shows changes nothing.
-        """
-        if scope == self._scope and isinstance(self._view, CategoryView):
-            return self._view
-        self._ref = None
-        self._scope = scope
-        self._schema = None
-        self._database = None
+    def show_category(self, scope: Scope) -> _ScopedView | None:
+        """Point the pane at a category node ("Tables (n)", ...)."""
         object_type = scope.object_type
         view_class = category_view_for(object_type) if object_type is not None else None
         if view_class is None:
+            self._shown = scope
             label = object_type.plural if object_type is not None else "this"
             self._show_placeholder(f"No list view for {label} yet.")
             return None
+        return self._point_at(scope, view_class)
 
-        current = self._view
-        if current is not None and type(current) is view_class:
-            self._wait_for_cursor(current)
-            current.show(scope)
-            return current
-
-        self.remove_children()
-        view = view_class(self.repo, scope)
-        self._view = view
-        self._wait_for_cursor(view)
-        self.mount(view)
-        return view
-
-    def show_schema(self, ref: SchemaRef) -> SchemaView:
+    def show_schema(self, ref: SchemaRef) -> _ScopedView:
         """Point the pane at a schema's Grants/Tags view.
 
         No registry lookup, unlike `show`/`show_category`: there is exactly
-        one view for a schema node, not one of several types sharing a
-        lookup, so this constructs SchemaView directly. Like `show`,
-        pointing it at what it already shows changes nothing.
+        one view for a schema node, not one of several types sharing a lookup.
         """
-        if ref == self._schema and type(self._view) is SchemaView:
-            return self._view
-        self._ref = None
-        self._scope = None
-        self._database = None
-        self._schema = ref
+        return self._point_at(ref, SchemaView)
 
-        current = self._view
-        if type(current) is SchemaView:
-            self._wait_for_cursor(current)
-            current.show(ref)
-            return current
-
-        self.remove_children()
-        view = SchemaView(self.repo, ref)
-        self._view = view
-        self._wait_for_cursor(view)
-        self.mount(view)
-        return view
-
-    def show_database(self, database: str) -> DatabaseView:
+    def show_database(self, database: str) -> _ScopedView:
         """Point the pane at a database's Grants/Tags view. See `show_schema`."""
-        if database == self._database and type(self._view) is DatabaseView:
+        return self._point_at(database, DatabaseView)
+
+    def _point_at(
+        self, target: ObjectRef | Scope | SchemaRef | str, view_class: type[_ScopedView]
+    ) -> _ScopedView:
+        """The swap rule: the same type re-points the mounted view, a different
+        one replaces it.
+
+        Pointing it at what it already shows changes nothing: re-showing would
+        repaint the view and reset its sort and cursor, though the user never
+        moved. `clear()` forgets what was shown, so an emptied pane is never
+        mistaken for this case.
+        """
+        if target == self._shown and self._view is not None:
             return self._view
-        self._ref = None
-        self._scope = None
-        self._schema = None
-        self._database = database
+        self._shown = target
 
         current = self._view
-        if type(current) is DatabaseView:
+        if type(current) is view_class:
             self._wait_for_cursor(current)
-            current.show(database)
+            current.show(target)
             return current
 
         self.remove_children()
-        view = DatabaseView(self.repo, database)
+        view = view_class(self.repo, target)
         self._view = view
         self._wait_for_cursor(view)
         self.mount(view)
@@ -178,10 +116,7 @@ class DetailPane(Vertical):
 
     def clear(self) -> None:
         self._view = None
-        self._ref = None
-        self._scope = None
-        self._schema = None
-        self._database = None
+        self._shown = None
         self.remove_children()
 
     def set_repo(self, repo: Repository) -> None:
