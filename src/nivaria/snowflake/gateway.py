@@ -22,7 +22,7 @@ from typing import Any, Protocol
 from nivaria.models import ObjectType
 from nivaria.settings import ROW_CEILING, config
 from nivaria.snowflake import queries, sql_log
-from nivaria.snowflake.pool import ConnectionPool
+from nivaria.snowflake.pool import ConnectionError_, ConnectionPool
 
 Row = dict[str, Any]
 
@@ -371,6 +371,11 @@ class PoolGateway:
         except ResultTooLargeError:
             # A failure the retry above must not repeat: it is a property of
             # the statement, not of the connection.
+            raise
+        except ConnectionError_:
+            # Nor this one, which is a login that failed or nothing to run on.
+            # Repeating it could open a second browser prompt, seconds after
+            # the first went unanswered.
             raise
         except Exception as error:  # see pool.acquire, same boundary
             if _keeps_connection(error):

@@ -387,6 +387,141 @@ def test_interactive_priority_still_reconnects_transparently() -> None:
     assert pool.size == 1
 
 
+def _refuse_logins(connector: FakeConnector) -> None:
+    connector.fail_after = len(connector.calls)
+
+
+def _run_in_thread(call) -> tuple[threading.Thread, list[Any]]:
+    """Run `call` where a pool that waits forever cannot hang the test run."""
+    outcome: list[Any] = []
+
+    def run() -> None:
+        try:
+            outcome.append(call())
+        except Exception as error:  # noqa: BLE001 -- the test reads it
+            outcome.append(error)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, outcome
+
+
+def _acquire_once(pool: ConnectionPool, **kwargs: Any) -> Any:
+    with pool.acquire(**kwargs) as connection:
+        return connection
+
+
+def test_a_failed_login_gives_up_the_slot_of_a_connection_that_failed_in_use() -> None:
+    """`size` counts what exists. Left alone it reads as full, and the next
+    checkout waits on a connection nobody will ever hand back."""
+    pool, connector = make_pool(size=2)
+    pool.connect_all()
+    _refuse_logins(connector)
+    with pytest.raises(ConnectionError_), pool.acquire():
+        raise ValueError("session expired")
+    assert pool.size == 1
+    assert len(pool._all) == 1
+    assert pool.in_use == 0
+
+
+def test_a_failed_login_gives_up_the_slot_of_a_connection_found_closed() -> None:
+    pool, connector = make_pool(size=2)
+    pool.connect_all()
+    for connection in pool._all:
+        connection.closed = True
+    _refuse_logins(connector)
+    with pytest.raises(ConnectionError_), pool.acquire():
+        pass
+    assert pool.size == 1
+    assert len(pool._all) == 1
+
+
+def test_a_failed_login_during_a_session_change_gives_up_the_slot() -> None:
+    pool, connector = make_pool(size=2)
+    pool.connect_all()
+    for connection in pool._all:
+        connection.closed = True
+    _refuse_logins(connector)
+    with pytest.raises(ConnectionError_):
+        pool.run_on_all('USE WAREHOUSE "WH"')
+    assert pool.size == 1
+    assert len(pool._all) == 1
+
+
+def test_a_checkout_after_a_failed_login_tries_again_instead_of_waiting() -> None:
+    """The login that failed may work now: the network is back, or the user
+    answers this prompt."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    _refuse_logins(connector)
+    with pytest.raises(ConnectionError_), pool.acquire():
+        raise ValueError("session expired")
+
+    thread, outcome = _run_in_thread(lambda: _acquire_once(pool))
+    thread.join(timeout=5)
+    assert isinstance(outcome[0], ConnectionError_)
+
+    connector.fail_after = None
+    thread, outcome = _run_in_thread(lambda: _acquire_once(pool))
+    thread.join(timeout=5)
+    assert not outcome[0].is_closed()
+    assert pool.size == 1
+
+
+def test_a_worker_waiting_on_the_last_connection_is_told_when_it_is_gone() -> None:
+    """A background job may wait while something is merely busy, but not on a
+    connection that was just given up: it would wait forever."""
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    started = threading.Event()
+
+    def wait() -> Any:
+        started.set()
+        return _acquire_once(pool, allow_reconnect=False)
+
+    with pytest.raises(ConnectionError_), pool.acquire():
+        thread, outcome = _run_in_thread(wait)
+        assert started.wait(timeout=2)
+        time.sleep(0.05)
+        assert not outcome
+        _refuse_logins(connector)
+        raise ValueError("session expired")
+    thread.join(timeout=5)
+    assert isinstance(outcome[0], ConnectionError_)
+
+
+def test_an_interactive_worker_waiting_on_a_given_up_connection_logs_in_itself() -> (
+    None
+):
+    inner = FakeConnector()
+    logins: list[int] = []
+
+    def connector(**kwargs: Any) -> Any:
+        logins.append(1)
+        if len(logins) == 2:
+            raise RuntimeError("login timed out")
+        return inner(**kwargs)
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    started = threading.Event()
+
+    def wait() -> Any:
+        started.set()
+        return _acquire_once(pool)
+
+    with pytest.raises(ConnectionError_), pool.acquire():
+        thread, outcome = _run_in_thread(wait)
+        assert started.wait(timeout=2)
+        time.sleep(0.05)
+        assert not outcome
+        raise ValueError("session expired")
+    thread.join(timeout=5)
+    assert not outcome[0].is_closed()
+    assert pool.size == 1
+    assert len(logins) == 3
+
+
 def test_a_pool_must_have_at_least_one_connection() -> None:
     with pytest.raises(ValueError):
         ConnectionPool(ConnectParams(account="a", user="u"), 0)

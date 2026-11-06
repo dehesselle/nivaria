@@ -1078,7 +1078,16 @@ reasons are here.
   the same rule: replaced transparently for an interactive/visible caller,
   retried once against the fresh connection; dropped and shrunk, with no
   retry, for a background one.
-- **"Does not exist" is the exception to that rule**: the connection that
+- **A replacement login that fails gives the slot up.** `size` counts what
+  exists, so it shrinks with the connection. Left as it was, the pool would read
+  as full and every later checkout would wait for a connection nobody will hand
+  back, even once logins work again. The statement fails with the login's error
+  and is not retried, since a retry could be a second browser prompt seconds
+  after the first went unanswered. The next interactive or visible checkout
+  finds the pool short and tries the login. A worker already waiting looks again
+  every half second, because a given-up connection puts nothing on the queue to
+  wake it.
+- **"Does not exist" is the exception to replacing a connection**: the one that
   reported it is healthy, so `PoolGateway._fetch_once` hands it back to the
   pool and only then raises, and `_fetch` does not retry it. Otherwise every
   visit to an object dropped elsewhere would close two working connections

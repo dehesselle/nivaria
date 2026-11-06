@@ -153,6 +153,10 @@ exists.
   removes the node. "Does not exist" is shown as a warning.
 - **A failed fetch is retried** one cache age after it failed, when you
   navigate back to it, or right after you pick a warehouse — not in a loop.
+- **A login that fails** while replacing a dead connection, because a prompt
+  went unanswered or the network is down, fails that fetch with the login's error
+  and the gauge's total shrinks. Your next action that needs a connection tries
+  the login again, so nothing needs restarting.
 - **Reconnect** with `, a c` (Account › Connect). It replaces the whole pool
   and reopens the cache for the new identity.
 - The cache is never required: if it cannot be opened, nivaria runs with

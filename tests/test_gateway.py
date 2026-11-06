@@ -5,11 +5,15 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import pytest
 
-from nivaria.models import ObjectType
+from nivaria.cache.db import Database
+from nivaria.cache.repository import Repository
+from nivaria.models import CacheState, ObjectType, databases_scope, schemas_scope
+from nivaria.service.fetch import FetchService
 from nivaria.snowflake.gateway import PoolGateway
 from nivaria.snowflake.pool import ConnectionError_, ConnectionPool, ConnectParams
 from tests.fakes import (
@@ -702,6 +706,83 @@ def test_background_priority_retries_but_never_reconnects_unattended() -> None:
     # One real attempt, then the retry's own acquire fails fast -- no second
     # query attempt against a reconnected session.
     assert connection.attempts == 1
+
+
+class _Logins:
+    """A connector whose logins can be made to fail, like a prompt nobody
+    answers or a network that is down."""
+
+    def __init__(self) -> None:
+        self.refuse = False
+        self.attempts = 0
+
+    def __call__(self, **_: Any) -> RecordingConnection:
+        self.attempts += 1
+        if self.refuse:
+            raise RuntimeError("login timed out")
+        return RecordingConnection()
+
+
+def test_a_failed_login_is_not_tried_again_for_the_same_statement() -> None:
+    """A second attempt right after the first would be a second browser prompt
+    for one statement, seconds after the first one went unanswered."""
+    logins = _Logins()
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 2, connector=logins)
+    pool.connect_all()
+    for connection in pool._all:
+        connection.fail_times = 10**6
+    logins.refuse = True
+    logins.attempts = 0
+    gateway = PoolGateway(pool)
+    with pytest.raises(ConnectionError_, match="login timed out"):
+        gateway.show_databases()
+    assert logins.attempts == 1
+
+
+def test_failed_logins_leave_no_worker_stuck_and_recovery_needs_no_restart(
+    tmp_path,
+) -> None:
+    """Every session dead and no login possible, after a laptop wakes without a
+    network, say. Each worker used to end up waiting on a connection that no
+    longer existed, and stayed there after logins worked again."""
+    logins = _Logins()
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 3, connector=logins)
+    pool.connect_all()
+    for connection in pool._all:
+        connection.fail_times = 10**6
+    logins.refuse = True
+    database = Database(tmp_path / "cache.db")
+    assert database.prepare()
+    repo = Repository(database)
+    errors: list[str] = []
+    service = FetchService(
+        PoolGateway(pool),
+        repo,
+        workers=3,
+        on_error=lambda _scope, message, _missing: errors.append(message),
+    )
+    service.start()
+
+    def settled(scope: Any) -> bool:
+        deadline = time.monotonic() + 5
+        while service.is_busy(scope) and time.monotonic() < deadline:
+            time.sleep(0.005)
+        return not service.is_busy(scope)
+
+    try:
+        for index in range(5):
+            scope = schemas_scope(f"DB{index}")
+            service.request(scope)
+            assert settled(scope)
+        assert len(errors) == 5
+        assert service.running_count == 0
+
+        logins.refuse = False
+        service.request(databases_scope())
+        assert settled(databases_scope())
+    finally:
+        service.stop()
+    assert repo.entry(databases_scope()).state is CacheState.COMPLETE
 
 
 def test_a_result_past_the_row_ceiling_is_abandoned() -> None:

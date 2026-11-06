@@ -21,6 +21,7 @@ import queue
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
+from time import monotonic
 from typing import Any, Protocol
 
 from nivaria.errors import NivariaError
@@ -47,6 +48,10 @@ AUTHENTICATORS = (OAUTH, EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA)
 #: timeout exists anywhere in that code path) and stays unbounded -- an
 #: accepted gap, also called out there.
 CONNECT_TIMEOUT_SECONDS = 20
+
+#: How often a worker waiting for a connection looks again at whether one can
+#: still come. A given-up connection puts nothing on the queue to wake it.
+_WAIT_RECHECK_SECONDS = 0.5
 
 
 class ConnectionError_(NivariaError):
@@ -360,8 +365,7 @@ class ConnectionPool:
         if not self._is_dead(connection):
             return connection
         if allow_reconnect:
-            self._detach(connection)
-            return self._open_one()
+            return self._replace(connection)
         # Background priority: skip past dead connections rather than
         # reconnect unattended, but never wait for one that is merely busy
         # elsewhere -- only what is already idle right now is a candidate.
@@ -392,25 +396,35 @@ class ConnectionPool:
         nothing is idle to dequeue in that case, it opens the missing
         connection itself right now, rather than waiting on a slot that may
         never be handed back.
+
+        Asked again while waiting, because the answer can change: the
+        connection being waited for can be given up (see `_replace`), and
+        nothing would then ever arrive on `_free`.
         """
-        with self._lock:
-            live = self.size
-        if not allow_reconnect:
-            if live == 0:
-                raise ConnectionError_("connection pool is empty")
-            return self._free.get(timeout=timeout)
-        with self._lock:
-            short = self.size < self._target_size
-        if not short:
-            return self._free.get(timeout=timeout)
-        try:
-            return self._free.get_nowait()
-        except queue.Empty:
-            connection = self._open_one()
+        deadline = None if timeout is None else monotonic() + timeout
+        while True:
             with self._lock:
-                self.size += 1
-            self._notify_usage()
-            return connection
+                live = self.size
+                short = live < self._target_size
+            if not allow_reconnect and live == 0:
+                raise ConnectionError_("connection pool is empty")
+            if allow_reconnect and short:
+                try:
+                    return self._free.get_nowait()
+                except queue.Empty:
+                    connection = self._open_one()
+                    with self._lock:
+                        self.size += 1
+                    self._notify_usage()
+                    return connection
+            wait = _WAIT_RECHECK_SECONDS
+            if deadline is not None:
+                wait = max(0.0, min(wait, deadline - monotonic()))
+            try:
+                return self._free.get(timeout=wait)
+            except queue.Empty:
+                if deadline is not None and monotonic() >= deadline:
+                    raise
 
     @staticmethod
     def _is_dead(connection: Any) -> bool:
@@ -428,10 +442,31 @@ class ConnectionPool:
                     break
 
     def _open_one(self) -> Any:
-        connection = self._connector(**self.params.to_connect_kwargs())
+        try:
+            connection = self._connector(**self.params.to_connect_kwargs())
+        # The driver raises many unrelated types, as in connect_all.
+        except Exception as error:
+            raise ConnectionError_(str(error)) from error
         with self._lock:
             self._all.append(connection)
         return connection
+
+    def _replace(self, connection: Any) -> Any:
+        """A new connection for a bad one, or the slot given up if that fails.
+
+        `size` counts what exists. Left as it was after a failed login, the
+        pool would read as full, and every later checkout would wait for a
+        connection nobody will ever hand back, even once logins work again.
+        Short, the next interactive or visible checkout tries the login.
+        """
+        self._detach(connection)
+        try:
+            return self._open_one()
+        except ConnectionError_:
+            with self._lock:
+                self.size -= 1
+            self._notify_usage()
+            raise
 
     def _drop(self, connection: Any) -> None:
         """Detach a bad connection and shrink `size` to match -- no replacement."""
@@ -447,10 +482,10 @@ class ConnectionPool:
         the next caller) when reconnecting is allowed, otherwise dropped and
         the pool shrinks -- repaired later by an interactive/visible caller.
         """
-        self._detach(connection)
         if allow_reconnect:
-            self._free.put(self._open_one())
+            self._free.put(self._replace(connection))
         else:
+            self._detach(connection)
             with self._lock:
                 self.size -= 1
 
@@ -488,8 +523,7 @@ class ConnectionPool:
                             "timed out waiting for a connection to go idle"
                         ) from error
                     if self._is_dead(connection):
-                        self._detach(connection)
-                        connection = self._open_one()
+                        connection = self._replace(connection)
                     held.append(connection)
                 for connection in held:
                     cursor = connection.cursor()
