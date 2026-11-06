@@ -12,10 +12,6 @@ import pytest
 
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
-from nivaria.gateway.queries import (
-    COPY_HISTORY_PUBLISHED_LAG,
-    TASK_HISTORY_PUBLISHED_LAG,
-)
 from nivaria.models import (
     CacheState,
     ObjectType,
@@ -38,6 +34,10 @@ from nivaria.settings import (
     PIPE_HISTORY_FETCH_DAYS,
     TASK_HISTORY_FETCH_DAYS,
     config,
+)
+from nivaria.snowflake.queries import (
+    COPY_HISTORY_PUBLISHED_LAG,
+    TASK_HISTORY_PUBLISHED_LAG,
 )
 from tests.fakes import FakeGateway
 
@@ -439,7 +439,7 @@ def test_one_missing_pipe_costs_only_its_own_status() -> None:
 def test_a_batch_in_which_no_pipe_answers_fails_as_missing() -> None:
     """Every pipe gone at once means the schema is: the error has to reach
     the fetch layer, whose "does not exist" handling refreshes the listing."""
-    from nivaria.gateway.gateway import is_missing_object
+    from nivaria.snowflake.gateway import is_missing_object
 
     gateway = FakeGateway()
     gateway.missing_pipes = {"P_A", "P_B"}

@@ -19,10 +19,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Protocol
 
-from nivaria.gateway import queries, sql_log
-from nivaria.gateway.pool import ConnectionPool
 from nivaria.models import ObjectType
 from nivaria.settings import ROW_CEILING, config
+from nivaria.snowflake import queries, sql_log
+from nivaria.snowflake.pool import ConnectionPool
 
 Row = dict[str, Any]
 

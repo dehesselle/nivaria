@@ -28,12 +28,6 @@ from decimal import Decimal
 from enum import IntEnum
 from typing import Any
 
-from nivaria.gateway.gateway import SnowflakeGateway, is_missing_object
-from nivaria.gateway.queries import (
-    COPY_HISTORY_PUBLISHED_LAG,
-    MAX_PAGE_SIZE,
-    TASK_HISTORY_PUBLISHED_LAG,
-)
 from nivaria.models import Scope, ScopeType
 from nivaria.settings import (
     DATA_PREVIEW_ROWS,
@@ -44,6 +38,12 @@ from nivaria.settings import (
     PRIME_CHUNK_THRESHOLD,
     TASK_HISTORY_FETCH_DAYS,
     config,
+)
+from nivaria.snowflake.gateway import SnowflakeGateway, is_missing_object
+from nivaria.snowflake.queries import (
+    COPY_HISTORY_PUBLISHED_LAG,
+    MAX_PAGE_SIZE,
+    TASK_HISTORY_PUBLISHED_LAG,
 )
 
 _log = logging.getLogger(__name__)

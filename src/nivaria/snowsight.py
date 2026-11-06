@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from nivaria.gateway.pool import AccountNames
 from nivaria.models import ObjectRef, ObjectType
+from nivaria.snowflake.pool import AccountNames
 
 #: The route segment Snowsight uses for each object type. Spelled out rather
 #: than derived from the enum value: the two only happen to agree, and a new

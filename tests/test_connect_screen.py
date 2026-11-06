@@ -13,13 +13,13 @@ from textual.app import App
 from textual.widgets import Button, Input, Select, Static
 
 import nivaria.ui.app as app_module
-from nivaria.gateway.pool import (
+from nivaria.profiles import Profile, ProfileStore
+from nivaria.snowflake.pool import (
     CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
     OAUTH,
     USERNAME_PASSWORD_MFA,
 )
-from nivaria.profiles import Profile, ProfileStore
 from nivaria.ui.screens.connect import ConnectScreen, RecentList
 from nivaria.ui.screens.connecting import ConnectingDialog
 from tests.fakes import FakeConnector

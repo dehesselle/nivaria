@@ -49,7 +49,7 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Label, Static
 
-from nivaria.gateway.pool import CONNECT_TIMEOUT_SECONDS
+from nivaria.snowflake.pool import CONNECT_TIMEOUT_SECONDS
 
 
 def _hint(remaining: int) -> str:

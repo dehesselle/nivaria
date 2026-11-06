@@ -68,10 +68,6 @@ from textual.app import ComposeResult
 from textual.widgets import DataTable, Static, TextArea
 
 from nivaria.format import format_bytes, format_timestamp_minutes, parse_timestamp
-from nivaria.gateway.queries import (
-    COPY_HISTORY_PUBLISHED_LAG,
-    PIPE_HISTORY_RETENTION_DAYS,
-)
 from nivaria.models import (
     CacheState,
     ObjectType,
@@ -84,6 +80,10 @@ from nivaria.settings import (
     CACHE_TTL,
     PIPE_HISTORY_SHOW_DAYS,
     config,
+)
+from nivaria.snowflake.queries import (
+    COPY_HISTORY_PUBLISHED_LAG,
+    PIPE_HISTORY_RETENTION_DAYS,
 )
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.tables import (

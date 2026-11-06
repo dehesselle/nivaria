@@ -13,7 +13,7 @@ requires-python = ">=3.12"
 dependencies = [
     "platformdirs>=4.11.0",
     # Held below 5: the 5.x rewrite drops the keyring extra that
-    # gateway/credential_cache.py imports, silently ignores
+    # snowflake/credential_cache.py imports, silently ignores
     # cursor.execute(timeout=), and caches tokens in Windows Credential
     # Manager with no fallback for OAuth tokens over its size limit.
     "snowflake-connector-python[secure-local-storage]>=4.7.3,<5",

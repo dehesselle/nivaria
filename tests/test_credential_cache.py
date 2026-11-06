@@ -22,7 +22,7 @@ if sys.platform == "win32":
     import keyring
     import keyring.errors
 
-    from nivaria.gateway.credential_cache import DpapiFileKeyring, install
+    from nivaria.snowflake.credential_cache import DpapiFileKeyring, install
 
 
 def test_a_stored_secret_round_trips(tmp_path) -> None:

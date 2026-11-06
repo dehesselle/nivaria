@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from nivaria.gateway.gateway import PoolGateway
-from nivaria.gateway.pool import ConnectionError_, ConnectionPool, ConnectParams
 from nivaria.models import ObjectType
+from nivaria.snowflake.gateway import PoolGateway
+from nivaria.snowflake.pool import ConnectionError_, ConnectionPool, ConnectParams
 from tests.fakes import CancelledError, MissingFromListingError, MissingObjectError
 
 
@@ -320,10 +320,12 @@ def test_every_statement_is_logged_at_debug_under_the_sql_logger(
     gateway, connection, _ = make_gateway()
     connection.columns = ["name"]
     connection.rows = [("ACME",)]
-    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.snowflake.sql_log"):
         gateway.show_databases()
     records = [
-        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+        record
+        for record in caplog.records
+        if record.name == "nivaria.snowflake.sql_log"
     ]
     assert len(records) == 1
     assert "SHOW DATABASES" in records[0].message
@@ -336,10 +338,12 @@ def test_the_statement_is_logged_even_though_execute_then_fails(
     seeing the last statement even when it never returns successfully."""
     gateway, connection, _ = make_gateway()
     connection.fail_times = 1
-    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.snowflake.sql_log"):
         gateway.show_databases()
     records = [
-        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+        record
+        for record in caplog.records
+        if record.name == "nivaria.snowflake.sql_log"
     ]
     # One line per real attempt against Snowflake, including the failed one.
     assert len(records) == 2
@@ -351,7 +355,9 @@ def test_nothing_is_logged_when_the_sql_logger_is_not_at_debug(
     gateway, _, _ = make_gateway()
     gateway.show_databases()
     assert [
-        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+        record
+        for record in caplog.records
+        if record.name == "nivaria.snowflake.sql_log"
     ] == []
 
 
@@ -664,8 +670,8 @@ def test_a_result_past_the_row_ceiling_is_abandoned() -> None:
     often enough that the per-statement limits are an expectation rather than
     a guarantee, and materialising an unbounded result pins a pool connection
     for as long as it takes."""
-    from nivaria.gateway.gateway import ResultTooLargeError
     from nivaria.settings import ROW_CEILING, config
+    from nivaria.snowflake.gateway import ResultTooLargeError
 
     config.set(ROW_CEILING, 100)
     gateway, connection, _ = make_gateway()
@@ -690,8 +696,8 @@ def test_an_over_ceiling_result_is_not_retried() -> None:
     """_fetch retries any failure once, which is right for a session the
     server dropped and wrong here: the statement will return just as much the
     second time, so the retry only pays for the damage twice."""
-    from nivaria.gateway.gateway import ResultTooLargeError
     from nivaria.settings import ROW_CEILING, config
+    from nivaria.snowflake.gateway import ResultTooLargeError
 
     config.set(ROW_CEILING, 10)
     gateway, connection, _ = make_gateway()

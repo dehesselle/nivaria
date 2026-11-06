@@ -24,7 +24,6 @@ from textual.binding import Binding
 from textual.screen import Screen
 
 from nivaria.cache.repository import Repository
-from nivaria.gateway.pool import ConnectionPool
 from nivaria.models import (
     ObjectRef,
     SchemaRef,
@@ -43,6 +42,7 @@ from nivaria.profiles import ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import Priority, log_policy
 from nivaria.settings import CACHE_TTL, SNOWSIGHT_URL, config
+from nivaria.snowflake.pool import ConnectionPool
 from nivaria.snowsight import base_url, database_url, object_url, schema_url
 from nivaria.ui.messages import (
     CacheUpdated,

@@ -10,7 +10,7 @@ in [snowflake-behavior.md](snowflake-behavior.md).
 
 ## What nivaria sends
 
-Every statement is built in `gateway/queries.py`, and every one is read-only:
+Every statement is built in `snowflake/queries.py`, and every one is read-only:
 `SHOW` commands, `SELECT`s from `INFORMATION_SCHEMA` and
 `SNOWFLAKE.ACCOUNT_USAGE`, the Data tab's `SELECT * ... LIMIT n`, and `USE
 ROLE` / `USE WAREHOUSE` when you switch. Once per connect, `SELECT

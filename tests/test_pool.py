@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from nivaria.gateway import queries
-from nivaria.gateway.pool import (
+from nivaria.snowflake import queries
+from nivaria.snowflake.pool import (
     CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
     OAUTH,
@@ -459,10 +459,12 @@ def test_run_on_all_logs_the_statement_at_debug_under_the_sql_logger(
 ) -> None:
     pool, _ = make_pool(size=2)
     pool.connect_all()
-    with caplog.at_level(logging.DEBUG, logger="nivaria.gateway.sql_log"):
+    with caplog.at_level(logging.DEBUG, logger="nivaria.snowflake.sql_log"):
         pool.set_role("SYSADMIN")
     records = [
-        record for record in caplog.records if record.name == "nivaria.gateway.sql_log"
+        record
+        for record in caplog.records
+        if record.name == "nivaria.snowflake.sql_log"
     ]
     assert len(records) == 2  # one per pooled connection
     assert all('USE ROLE "SYSADMIN"' in record.message for record in records)

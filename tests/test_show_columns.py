@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from nivaria.gateway.queries import map_show_columns, show_columns
+from nivaria.snowflake.queries import map_show_columns, show_columns
 
 #: SHOW COLUMNS' data_type JSON next to what DESC TABLE printed for the same
 #: column, captured from a live account -- one column per declared type.

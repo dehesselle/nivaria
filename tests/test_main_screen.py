@@ -17,7 +17,6 @@ from textual.widgets import Input
 import nivaria.ui.app as app_module
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
-from nivaria.gateway.pool import AccountNames, ConnectionPool, ConnectParams
 from nivaria.models import (
     ObjectRef,
     ObjectType,
@@ -37,6 +36,7 @@ from nivaria.profiles import Profile, ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import Priority
 from nivaria.settings import CURSOR_SETTLE_MS, SNOWSIGHT_URL, config
+from nivaria.snowflake.pool import AccountNames, ConnectionPool, ConnectParams
 from nivaria.ui.messages import CategorySelected, ObjectSelected, ScopeNeeded
 from nivaria.ui.screens.main import CacheUpdated, MainScreen
 from nivaria.ui.screens.multipicker import MultiPickerDialog

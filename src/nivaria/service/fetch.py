@@ -30,7 +30,6 @@ from collections.abc import Callable
 from typing import Any
 
 from nivaria.cache.repository import Prune, Repository, plan_window
-from nivaria.gateway.gateway import SnowflakeGateway, is_missing_object
 from nivaria.models import (
     ObjectType,
     Scope,
@@ -48,6 +47,7 @@ from nivaria.service.jobs import (
     log_policy,
 )
 from nivaria.settings import MAX_PAGES_PER_PASS, config
+from nivaria.snowflake.gateway import SnowflakeGateway, is_missing_object
 
 _log = logging.getLogger(__name__)
 

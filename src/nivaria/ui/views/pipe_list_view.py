@@ -46,7 +46,6 @@ from nivaria.format import (
     format_date,
     format_timestamp_minutes,
 )
-from nivaria.gateway.queries import COPY_HISTORY_PUBLISHED_LAG
 from nivaria.models import (
     CacheState,
     ObjectRef,
@@ -56,6 +55,7 @@ from nivaria.models import (
     pipe_status_scope,
 )
 from nivaria.settings import CACHE_TTL, config
+from nivaria.snowflake.queries import COPY_HISTORY_PUBLISHED_LAG
 from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (

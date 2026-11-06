@@ -39,10 +39,10 @@ of them:
 - **Cache** (`cache/`): one sqlite file per (account, role), mirroring
   Snowflake's `SHOW` results, plus the freshness ledger that makes refreshes
   surgical. See "The cache".
-- **Gateway** (`gateway/`): the only code that talks to Snowflake. It builds
+- **Snowflake** (`snowflake/`): the only code that talks to Snowflake. It builds
   every statement (`queries.py`), owns the connection pool and logs each
-  statement before it is sent. It is a protocol, so tests substitute a fake.
-  See "Fetching" and "The connection pool".
+  statement before it is sent. Its `SnowflakeGateway` is a protocol, so tests
+  substitute a fake. See "Fetching" and "The connection pool".
 - **Fetch service** (`service/`): background workers, one per pool
   connection, that run one page per job, write into the cache and post a
   message naming the scope they changed. See "The fetch scheduler".
@@ -1036,7 +1036,7 @@ reasons are here.
 - Confirmed growth, like the first connection, is opened **eagerly**, with the
   same progress lines whether it is the lone up-front connection or growth
   confirmed afterwards, always counted against the pool's eventual target
-  size. The countdown starts at `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`),
+  size. The countdown starts at `CONNECT_TIMEOUT_SECONDS` (`snowflake/pool.py`),
   the same value passed to the driver as
   `login_timeout`/`external_browser_timeout` — so a denied or abandoned OAuth
   or password+MFA approval resolves in a short, visible wait instead of the
@@ -1171,7 +1171,7 @@ browser every time the access token expires.
 > data") that neither `keyring` nor the driver's `KeyringTokenCache` catches
 > -- both only trap `keyring.errors.KeyringError` -- so it surfaces to the
 > connect dialog as a failed connection. `credential_cache.install()`
-> (`gateway/credential_cache.py`), called from `pool._real_connector` before
+> (`snowflake/credential_cache.py`), called from `pool._real_connector` before
 > the driver ever touches its cache, swaps in a DPAPI-encrypted flat file as
 > the active `keyring` backend on Windows only: DPAPI ties the ciphertext to
 > the current Windows user profile the same way Credential Manager does, so
@@ -1908,7 +1908,7 @@ nothing for it: the widget installs its own key binding and its own screen
 layer, owns a rolling in-memory buffer that exists whether or not the panel is
 mounted, and offers level and source filters of its own.
 
-What nivaria contributes is the content. **`gateway/sql_log.py` logs every
+What nivaria contributes is the content. **`snowflake/sql_log.py` logs every
 statement before it is sent**, not after, and that ordering is the point:
 `cursor.query` — the driver's public "what did I run" attribute — is only
 populated once `execute()` has already returned, which answers nothing about
@@ -2053,7 +2053,7 @@ Detail pane's own `fr` absorbs whatever is left.
   the session's `TIMEZONE` rather than the machine's. Its other cells keep
   their meaning (see
   [snowflake-behavior.md](snowflake-behavior.md#result-types)).
-- `CONNECT_TIMEOUT_SECONDS` (`gateway/pool.py`) bounds a denied or abandoned
+- `CONNECT_TIMEOUT_SECONDS` (`snowflake/pool.py`) bounds a denied or abandoned
   approval for OAuth and password+MFA, but not for browser SSO
   (`externalbrowser`): the installed driver waits on a socket with no timeout
   that nothing can reach (see

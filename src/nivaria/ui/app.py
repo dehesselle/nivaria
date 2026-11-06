@@ -15,12 +15,12 @@ from textual.app import App
 from nivaria import paths
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
-from nivaria.gateway.gateway import PoolGateway
-from nivaria.gateway.pool import ConnectionPool, Connector
 from nivaria.models import ScopeType
 from nivaria.profiles import Profile, ProfileStore
 from nivaria.service.fetch import FetchService
 from nivaria.settings import PAGE_SIZE, POOL_SIZE, config
+from nivaria.snowflake.gateway import PoolGateway
+from nivaria.snowflake.pool import ConnectionPool, Connector
 from nivaria.ui.messages import CacheUpdated
 from nivaria.ui.screens.closing import ClosingDialog
 from nivaria.ui.screens.connect import ConnectScreen

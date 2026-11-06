@@ -24,7 +24,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from nivaria.errors import NivariaError
-from nivaria.gateway import queries, sql_log
+from nivaria.snowflake import queries, sql_log
 
 EXTERNAL_BROWSER = "externalbrowser"
 USERNAME_PASSWORD_MFA = "username_password_mfa"
@@ -139,9 +139,10 @@ class Connector(Protocol):
 
 
 def _real_connector(**kwargs: Any) -> Any:
+    # The driver, not this package: imports are absolute.
     import snowflake.connector
 
-    from nivaria.gateway import credential_cache
+    from nivaria.snowflake import credential_cache
 
     # Must happen before connect() ever touches the driver's token cache --
     # see credential_cache.py for why Windows' default backend cannot hold an

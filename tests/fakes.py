@@ -16,9 +16,9 @@ import threading
 from collections.abc import Sequence
 from typing import Any
 
-from nivaria.gateway import queries
-from nivaria.gateway.pool import ConnectionPool, ConnectParams
 from nivaria.models import ObjectType
+from nivaria.snowflake import queries
+from nivaria.snowflake.pool import ConnectionPool, ConnectParams
 
 Row = dict[str, Any]
 

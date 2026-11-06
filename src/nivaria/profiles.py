@@ -43,8 +43,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
-from nivaria.gateway.pool import EXTERNAL_BROWSER, ConnectParams
 from nivaria.paths import read_json, recent_file, write_json_atomic
+from nivaria.snowflake.pool import EXTERNAL_BROWSER, ConnectParams
 
 MAX_ENTRIES = 10
 

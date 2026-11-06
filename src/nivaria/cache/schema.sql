@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS show_tasks (
 );
 CREATE INDEX IF NOT EXISTS show_tasks_scope ON show_tasks(_scope);
 
--- Columns of one table. See gateway/queries.py for which statement fills this;
+-- Columns of one table. See snowflake/queries.py for what fills this;
 -- the column names follow INFORMATION_SCHEMA.COLUMNS, upper case as Snowflake
 -- returns them, and SHOW COLUMNS output is mapped onto the same shape.
 -- _desc_type is the exception: the full type as DESC TABLE prints it, which
@@ -587,7 +587,7 @@ CREATE INDEX IF NOT EXISTS information_schema_tag_references_all_columns_scope
     ON information_schema_tag_references_all_columns(_scope);
 
 -- Warehouses and roles. Unlike the object mirrors above these are small,
--- flat, unpaged lists (see gateway/queries.py), so there is nothing to key
+-- flat, unpaged lists (see snowflake/queries.py), so there is nothing to key
 -- beyond the name -- but they are ordinary SHOW mirrors with the same
 -- bookkeeping columns, which is why they live here rather than in a third
 -- schema script of their own.

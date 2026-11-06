@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import json
 
-from nivaria.gateway.pool import USERNAME_PASSWORD_MFA, ConnectParams
 from nivaria.profiles import Profile, ProfileStore
+from nivaria.snowflake.pool import USERNAME_PASSWORD_MFA, ConnectParams
 
 
 def store(tmp_path) -> ProfileStore:

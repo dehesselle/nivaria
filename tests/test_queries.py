@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from nivaria.gateway import queries
-from nivaria.gateway.queries import quote_identifier, quote_literal
 from nivaria.models import ObjectType
+from nivaria.snowflake import queries
+from nivaria.snowflake.queries import quote_identifier, quote_literal
 
 
 def test_identifiers_are_double_quoted_to_preserve_case() -> None:
@@ -101,7 +101,7 @@ def test_page_limits_are_clamped_to_what_snowflake_accepts(limit, expected) -> N
 
 def test_show_warehouses_and_roles_are_unpaged() -> None:
     """Unlike the object lists, these are small flat lists with no LIMIT/FROM
-    clause -- see the docstrings in gateway/queries.py."""
+    clause -- see the docstrings in snowflake/queries.py."""
     assert queries.show_warehouses() == "SHOW WAREHOUSES"
     assert queries.show_roles() == "SHOW ROLES"
 

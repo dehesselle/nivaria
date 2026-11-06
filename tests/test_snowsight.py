@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from nivaria.gateway.pool import AccountNames
 from nivaria.models import ObjectRef, ObjectType
+from nivaria.snowflake.pool import AccountNames
 from nivaria.snowsight import base_url, database_url, object_url, schema_url
 
 NAMES = AccountNames("MYORG", "MYACCT")

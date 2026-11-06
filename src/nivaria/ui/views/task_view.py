@@ -47,7 +47,6 @@ from textual.app import ComposeResult
 from textual.widgets import DataTable, TextArea
 
 from nivaria.format import format_timestamp_minutes, parse_timestamp
-from nivaria.gateway.queries import TASK_HISTORY_RETENTION_DAYS
 from nivaria.models import (
     ObjectType,
     Scope,
@@ -55,6 +54,7 @@ from nivaria.models import (
     task_history_scope,
 )
 from nivaria.settings import CACHE_TTL, TASK_HISTORY_SHOW_DAYS, config
+from nivaria.snowflake.queries import TASK_HISTORY_RETENTION_DAYS
 from nivaria.ui.views.base import ObjectView, register_view
 from nivaria.ui.views.tables import (
     HISTORY_TABLE,

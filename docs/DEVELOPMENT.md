@@ -22,7 +22,7 @@ checkout `../tcoda`; `../snakecam` and `../vc` use it too.
 
 `snowflake-connector-python` is held below 5 on purpose. The 5.x line is a
 rewrite on Snowflake's Rust core, so lifting the cap is a migration, not a
-bump: it drops the `keyring` extra that `gateway/credential_cache.py` imports
+bump: it drops the `keyring` extra that `snowflake/credential_cache.py` imports
 and keeps its own token cache, which on Windows has no fallback for an OAuth
 token too large for Credential Manager. It also ignores the `timeout` argument
 of `cursor.execute()` that bounds a data preview, and renames or retires
@@ -33,6 +33,9 @@ several connect kwargs in `ConnectParams.to_connect_kwargs`.
 ```sh
 .venv/Scripts/python -m nivaria
 ```
+
+Start it with `-m`. Running a file directly puts `src/nivaria` on `sys.path`,
+and `nivaria/snowflake` then shadows the Snowflake driver.
 
 `textual-dev` is in the dev group, so `textual console` and `textual run
 --dev` work for debugging the UI.
@@ -176,7 +179,7 @@ A new scope touches ten places:
 4. a `TableSpec`;
 5. a case in `Repository.spec_for`;
 6. a table in `schema.sql` and a `SCHEMA_VERSION` bump;
-7. a builder in `gateway/queries.py`;
+7. a builder in `snowflake/queries.py`;
 8. a method on the `SnowflakeGateway` protocol;
 9. the same on `PoolGateway`;
 10. a case in `jobs.fetch_page`.
