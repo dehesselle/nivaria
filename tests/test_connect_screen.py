@@ -22,7 +22,7 @@ from nivaria.snowflake.pool import (
 )
 from nivaria.ui.screens.connect import ConnectScreen, RecentList
 from nivaria.ui.screens.connecting import ConnectingDialog
-from tests.fakes import FakeConnector
+from tests.fakes import FakeConnector, LoginTimeoutError
 
 
 class Harness(App[None]):
@@ -472,6 +472,46 @@ async def test_a_failed_connect_reports_why_as_a_toast_and_re_enables_the_button
         messages = [toast.message for toast in pilot.app._notifications]
         assert any("Could not connect" in message for message in messages)
         assert pilot.app.screen.query_one("#connect-go", Button).disabled is False
+
+
+def _timing_out_connector(**_kwargs):
+    raise LoginTimeoutError(
+        "251016 (08001): Failed to connect to DB: acme.snowflakecomputing.com:443, "
+        "Unable to receive the OAuth message within a given timeout. Please check "
+        "the redirect URI and try again."
+    )
+
+
+async def test_a_browser_login_that_times_out_is_reported_in_plain_words(
+    tmp_path,
+) -> None:
+    app = make_app(tmp_path, connector=_timing_out_connector)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        messages = [toast.message for toast in pilot.app._notifications]
+    assert messages == ["Could not connect: the browser login did not finish in time"]
+
+
+async def test_any_other_failed_connect_keeps_what_the_driver_said(tmp_path) -> None:
+    """A wrong account name or an unreachable host is what the user has to fix,
+    and only the driver's message says which."""
+
+    def connector(**_kwargs):
+        raise RuntimeError("Incorrect username or password was specified.")
+
+    app = make_app(tmp_path, connector=connector)
+    async with app.run_test(size=(120, 40)) as pilot:
+        pilot.app.screen.query_one("#account", Input).value = "ACME"
+        pilot.app.screen.query_one("#user", Input).value = "me"
+        pilot.app.screen.submit()
+        await settle(pilot)
+        messages = [toast.message for toast in pilot.app._notifications]
+    assert messages == [
+        "Could not connect: Incorrect username or password was specified."
+    ]
 
 
 async def test_a_failed_connect_dismisses_the_connecting_dialog(tmp_path) -> None:

@@ -229,7 +229,9 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         if message == LOGIN_TIMED_OUT:
             # One unanswered prompt fails every scope waiting on it, and what
             # needs saying is about the login, not about any of them.
-            self._notify_once(f"{message} Press F5 to be asked again.", 8.0)
+            self._notify_once(
+                f"Login timed out: {message}. Press F5 to be asked again.", 8.0
+            )
             return
         if not missing:
             self.notify(

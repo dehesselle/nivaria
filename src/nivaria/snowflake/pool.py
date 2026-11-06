@@ -52,11 +52,22 @@ AUTHENTICATORS = (OAUTH, EXTERNAL_BROWSER, USERNAME_PASSWORD_MFA)
 #: accepted gap, also called out there.
 CONNECT_TIMEOUT_SECONDS = 20
 
-#: What a login nobody completed in time reports. The driver's own text, for
-#: errno 251016, names the account host and suggests checking the redirect URI,
-#: which is fine. Spelled out because this module never imports the driver.
+#: What a browser login that did not finish reports, for errno 251016. Nearly
+#: always nobody answered the prompt, which the driver's own text sends looking
+#: for a redirect URI problem. That can be the cause, so this does not claim the
+#: prompt went unanswered. Spelled out because this module never imports the
+#: driver.
 _LOGIN_TIMEOUT_ERRNO = 251016
-LOGIN_TIMED_OUT = "Login timed out: the prompt was not answered."
+LOGIN_TIMED_OUT = "the browser login did not finish in time"
+
+
+def _login_failure_text(error: Exception) -> str:
+    """What to tell the user about a failed login. The log gets the driver's."""
+    _log.warning("a login failed: %s", error)
+    if getattr(error, "errno", None) == _LOGIN_TIMEOUT_ERRNO:
+        return LOGIN_TIMED_OUT
+    return str(error)
+
 
 #: How often a worker waiting for a connection looks again at whether one can
 #: still come. A given-up connection puts nothing on the queue to wake it.
@@ -237,7 +248,7 @@ class ConnectionPool:
             # The driver raises many unrelated exception types; the caller
             # only needs "connecting failed, here is why".
             except Exception as error:
-                raise ConnectionError_(str(error)) from error
+                raise ConnectionError_(_login_failure_text(error)) from error
             self._all.append(connection)
             self._free.put(connection)
         self._adopt_resolved_session()
@@ -317,7 +328,7 @@ class ConnectionPool:
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             except Exception as error:
-                raise ConnectionError_(str(error)) from error
+                raise ConnectionError_(_login_failure_text(error)) from error
             self._all.append(connection)
             self._free.put(connection)
             self.size += 1
@@ -470,13 +481,8 @@ class ConnectionPool:
                 connection = self._connector(**self.params.to_connect_kwargs())
             # The driver raises many unrelated types, as in connect_all.
             except Exception as error:
-                _log.warning("a replacement login failed: %s", error)
                 self._login_failures += 1
-                self._login_error = (
-                    LOGIN_TIMED_OUT
-                    if getattr(error, "errno", None) == _LOGIN_TIMEOUT_ERRNO
-                    else str(error)
-                )
+                self._login_error = _login_failure_text(error)
                 raise ConnectionError_(self._login_error) from error
         with self._lock:
             self._all.append(connection)

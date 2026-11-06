@@ -158,10 +158,10 @@ exists.
 - **A login that fails** while replacing a dead connection, because a prompt
   went unanswered or the network is down, fails that fetch and the gauge's total
   shrinks. Your next action that needs a connection tries the login again, so
-  nothing needs restarting. An unanswered browser prompt shows one "Login timed
-  out" warning however many fetches it failed; `F5` asks again. Any other failed
-  login shows the driver's message. The Log panel has the driver's full text
-  either way.
+  nothing needs restarting. A browser login that does not finish in time shows
+  one "Login timed out" warning however many fetches it failed; `F5` asks again.
+  Any other failed login shows the driver's message. The Log panel has the
+  driver's full text either way.
 - **Reconnect** with `, a c` (Account › Connect). It replaces the whole pool
   and reopens the cache for the new identity.
 - The cache is never required: if it cannot be opened, nivaria runs with
@@ -220,6 +220,10 @@ under `~/.cache/snowflake/`.
   Windows Credential Manager cannot hold an OAuth token.
 - **Connecting hangs with browser SSO**: an abandoned or closed browser tab
   is never noticed. Quit and start again.
+- **"The browser login did not finish in time" although you completed it**: the
+  browser's answer never reached nivaria. The driver suggests checking the
+  redirect URI. The Log panel only exists after connecting, so a failure on the
+  first connection shows nothing there.
 - **Old data**: press `F5`, or lower **cache age**. `F5` refreshes what the
   screen shows at once, whatever its age. For pipe and task activity it asks only
   for the time since the previous refresh, and `ACCOUNT_USAGE`'s own lag still

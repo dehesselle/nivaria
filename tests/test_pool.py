@@ -226,6 +226,23 @@ def test_a_failure_to_grow_is_reported_as_a_nivaria_error() -> None:
         pool.grow(2)
 
 
+def test_a_browser_login_that_times_out_while_growing_fails_in_plain_words() -> None:
+    logins: list[int] = []
+    inner = FakeConnector()
+
+    def connector(**kwargs: Any) -> Any:
+        logins.append(1)
+        if len(logins) > 1:
+            raise LoginTimeoutError("Please check the redirect URI and try again.")
+        return inner(**kwargs)
+
+    pool = ConnectionPool(ConnectParams(account="a", user="u"), 1, connector=connector)
+    pool.connect_all()
+    with pytest.raises(ConnectionError_) as excinfo:
+        pool.grow(1)
+    assert str(excinfo.value) == LOGIN_TIMED_OUT
+
+
 def test_grow_requires_at_least_one_additional_connection() -> None:
     pool, _ = make_pool(size=1)
     pool.connect_all()
@@ -670,7 +687,7 @@ def test_those_waiting_on_an_unanswered_prompt_get_the_same_plain_words() -> Non
 
 def test_any_other_failed_login_keeps_what_the_driver_said() -> None:
     """A network that is down or an account that is locked is worth reading, and
-    "the prompt was not answered" would be wrong."""
+    a browser login timing out would be the wrong thing to report."""
     pool = _pool_with_a_failing_login(RuntimeError("could not reach the host"))
     with (
         pytest.raises(ConnectionError_, match="could not reach the host"),

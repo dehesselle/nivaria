@@ -96,12 +96,8 @@ async def test_a_prompt_nobody_answered_toasts_once_and_says_what_to_do() -> Non
         )
         await pilot.pause()
         toasts = [(toast.severity, toast.message) for toast in app._notifications]
-    assert toasts == [
-        (
-            "warning",
-            "Login timed out: the prompt was not answered. Press F5 to be asked again.",
-        ),
-    ]
+    text = "Login timed out: the browser login did not finish in time."
+    assert toasts == [("warning", f"{text} Press F5 to be asked again.")]
 
 
 async def test_the_app_opens_the_connect_screen_first() -> None:
