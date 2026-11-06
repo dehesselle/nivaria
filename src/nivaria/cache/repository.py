@@ -692,7 +692,7 @@ def _quote(name: str) -> str:
 
 
 class Repository:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database | MemoryDatabase) -> None:
         self._db = database
         #: Where DATA_PREVIEW scopes live instead of the file: table data,
         #: which must never reach the disk (see `MemoryDatabase`). One per

@@ -98,14 +98,11 @@ def test_wal_is_enabled_so_a_writer_never_blocks_the_ui(tmp_path) -> None:
     assert mode.lower() == "wal"
 
 
-def test_an_unusable_path_degrades_instead_of_raising(tmp_path) -> None:
-    """If the cache cannot be opened the app still has to start; it just has
-    nothing cached."""
+def test_an_unusable_path_says_so_instead_of_raising(tmp_path) -> None:
+    """The app has to start without a cache file: see `NivariaApp._open_repo`."""
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory")
-    database = Database(blocker / "cache.db")
-    assert database.prepare() is False
-    assert database.usable is False
+    assert Database(blocker / "cache.db").prepare() is False
 
 
 def test_a_failed_statement_rolls_back(tmp_path) -> None:

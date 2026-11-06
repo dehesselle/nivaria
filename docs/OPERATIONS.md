@@ -164,8 +164,8 @@ exists.
   driver's full text either way.
 - **Reconnect** with `, a c` (Account › Connect). It replaces the whole pool
   and reopens the cache for the new identity.
-- The cache is never required: if it cannot be opened, nivaria runs with
-  nothing cached.
+- The cache is never required: if it cannot be opened, nivaria warns once and
+  keeps everything in memory, so it starts from nothing next time.
 
 ## Quitting
 

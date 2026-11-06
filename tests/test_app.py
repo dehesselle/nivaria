@@ -10,6 +10,7 @@ import threading
 from tcoda.widgets import FooterBinding
 from textual.widgets import Input
 
+from nivaria import paths
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
 from nivaria.models import (
@@ -453,6 +454,32 @@ async def test_the_cache_is_prepared_once_connected(tmp_path) -> None:
         await settle(pilot)
         assert app.repo is not None
         assert app.repo._db.path.exists()
+
+
+async def test_a_cache_that_cannot_be_opened_costs_the_cache_not_the_session(
+    tmp_path, monkeypatch
+) -> None:
+    """Reading a file that never opened raises, which on the footer's tick would
+    end the app. Without it, the browser still connects, paints, fetches and
+    searches, and says that nothing will be kept."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    monkeypatch.setattr(paths, "cache_file", lambda *_: blocker / "cache.db")
+    app = NivariaApp(connector=FakeConnector())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = pilot.app.screen
+        screen.query_one("#account", Input).value = "ACME"
+        screen.query_one("#user", Input).value = "me"
+        screen.submit()
+        await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
+        assert isinstance(app.screen, MainScreen)
+        assert app.repo.entry(databases_scope()).answered
+        assert app.repo.search_corpus(["MYDB"]) == []
+        toasts = [toast.message for toast in app._notifications]
+    assert any("Cannot open the cache" in toast for toast in toasts)
 
 
 # ------------------------------------------------------------- main screen

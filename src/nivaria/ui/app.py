@@ -13,7 +13,7 @@ from textual import work
 from textual.app import App
 
 from nivaria import paths
-from nivaria.cache.db import Database
+from nivaria.cache.db import Database, MemoryDatabase
 from nivaria.cache.repository import Repository
 from nivaria.models import ScopeType
 from nivaria.profiles import ProfileStore
@@ -149,10 +149,22 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
 
     def _open_repo(self, pool: ConnectionPool) -> Repository:
         """The cache for whatever identity `pool.params` currently describes.
-        See `paths.cache_file` for why that identity is the whole key."""
-        database = Database(paths.cache_file(pool.params.account, pool.params.role))
-        database.prepare()
-        return Repository(database)
+        See `paths.cache_file` for why that identity is the whole key.
+
+        The cache is an optimisation, never a dependency, so one that cannot
+        be opened costs what it would have kept, not the session.
+        """
+        path = paths.cache_file(pool.params.account, pool.params.role)
+        database = Database(path)
+        if database.prepare():
+            return Repository(database)
+        self.notify(
+            f"Cannot open the cache at {path}. Nothing will be kept after this "
+            "session.",
+            severity="warning",
+            timeout=8,
+        )
+        return Repository(MemoryDatabase())
 
     def restart_fetch(self, pool: ConnectionPool) -> None:
         """A fresh FetchService against the current `self.repo` and `pool`.

@@ -352,8 +352,9 @@ overlap read again would add such a run once per pass.
 and asks for them at once, so a row the margin missed can be recovered. It
 has no key yet.
 
-The cache is an optimisation, never a dependency: if it cannot be opened the
-app still runs, it just has nothing cached. It uses WAL journalling so a
+The cache is an optimisation, never a dependency: if the file cannot be opened
+the app warns and runs on a `MemoryDatabase` (see "Table data never reaches the
+disk"), which keeps nothing past the session. The file uses WAL journalling so a
 writing worker never blocks the reading UI, and opens a connection per call
 rather than holding one, so the same code is usable from the event loop and
 from worker threads.
@@ -410,9 +411,10 @@ reach either way.
 
 The preview table lives in `preview.sql`, which only the memory database
 applies, so it is not part of the cache file's `SCHEMA_VERSION`. The memory
-database applies `schema.sql` too, for `cache_entry`: the ledger code reads
-both databases, so both must have the same table. The file's mirror tables
-come along and stay empty.
+database applies `schema.sql` and `search.sql` too. The ledger code reads both
+databases, so both must have the same `cache_entry`, and a memory database can
+stand in for a file that cannot be opened. As the previews' own store, its
+mirror tables stay empty.
 
 The mirror cannot follow "Shape: mirror Snowflake", because every table has
 its own columns. `data_preview` is generic instead: one row per table row,

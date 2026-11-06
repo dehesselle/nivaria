@@ -12,9 +12,10 @@ Two deliberate choices:
 * **WAL journalling.** A worker writing a page must not block the UI reading
   the rows it already has; WAL is what makes readers and one writer concurrent.
 
-The cache is an optimisation, never a dependency: if it cannot be opened, the
-app still runs, it just has nothing cached. For the same reason a file from
-another schema version is simply deleted and rebuilt.
+The cache is an optimisation, never a dependency: if the file cannot be opened,
+the app runs on a `MemoryDatabase` instead and keeps nothing after the session.
+For the same reason a file from another schema version is simply deleted and
+rebuilt.
 
 Table data never goes into the file. A Data tab preview is real rows,
 possibly personal data, so it lives in a `MemoryDatabase` instead and is gone
@@ -51,7 +52,6 @@ SCHEMA_VERSION = 9
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._usable = False
 
     def prepare(self) -> bool:
         """Create the file's schema, replacing a file from another schema
@@ -65,10 +65,9 @@ class Database:
                     connection.executescript(script)
                 # A PRAGMA takes no bound parameters; the value is a constant.
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            self._usable = True
         except (sqlite3.Error, OSError):
-            self._usable = False
-        return self._usable
+            return False
+        return True
 
     def _version(self) -> int:
         with self.connect() as connection:
@@ -80,10 +79,6 @@ class Database:
         replayed into the file that replaces it."""
         for suffix in ("", "-wal", "-shm"):
             path.with_name(path.name + suffix).unlink(missing_ok=True)
-
-    @property
-    def usable(self) -> bool:
-        return self._usable
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -103,17 +98,19 @@ class Database:
             connection.close()
 
 
-#: schema.sql for the freshness ledger, which has to be the same `cache_entry`
-#: the file has, since Repository's ledger code reads both. Its mirror tables
-#: come along and stay empty, which costs nothing. preview.sql for the rows.
+#: Everything the file has, because a `MemoryDatabase` can stand in for it, plus
+#: preview.sql for the rows only a memory database ever holds. As the previews'
+#: own store, the mirror tables stay empty, which costs nothing; it needs
+#: `cache_entry` regardless, since Repository's ledger code reads both.
 _MEMORY_SCRIPTS: tuple[str, ...] = tuple(
     files("nivaria.cache").joinpath(name).read_text(encoding="utf-8")
-    for name in ("schema.sql", "preview.sql")
+    for name in ("schema.sql", "search.sql", "preview.sql")
 )
 
 
 class MemoryDatabase:
-    """An in-memory sqlite database for what must never reach the disk.
+    """An in-memory sqlite database for what must never reach the disk, and
+    for everything when the cache file cannot be opened.
 
     The opposite of `Database` on the first choice above: one connection,
     held for this object's lifetime. An in-memory database belongs to the
@@ -124,8 +121,9 @@ class MemoryDatabase:
 
     The one connection is shared by the event loop and the fetch workers,
     so `connect` serialises them with a lock and there is no WAL. That
-    suits what lives here: a few hundred rows, written once per fetch and
-    read once per repaint. Reentrant, so a nested `connect` on one thread
+    suits a preview: a few hundred rows, written once per fetch and read once
+    per repaint. Standing in for the file it is slower under load, which beats
+    not running at all. Reentrant, so a nested `connect` on one thread
     cannot hang the UI. It would commit the outer unit of work early, though,
     so nothing nests one today.
     """
