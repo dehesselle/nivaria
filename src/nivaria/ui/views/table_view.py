@@ -25,11 +25,10 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from rich.text import Text
-from tcoda.widgets import DataTable
+from tcoda.widgets import DataTable, TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.widgets import DataTable as TextualDataTable
-from textual.widgets import Static, TabbedContent, TabPane
+from textual.widgets import Static
 
 from nivaria.cache.repository import Repository
 from nivaria.models import (
@@ -49,7 +48,6 @@ from nivaria.ui.views.tables import (
     GRANTS_NOTE,
     SOURCE_NOTE,
     PanelledTable,
-    TabbedView,
     failed_refresh,
     source_line,
     sync_scope_note,
@@ -86,7 +84,7 @@ def _data_cell(value: Any) -> Text:
     return Text(text)
 
 
-class ColumnsView(TabbedView, ObjectView):
+class ColumnsView(ObjectView):
     """Shared body for tables and views: Columns, Data and Grants,
     mnemonic switchable (`c`/`d`/`g`, hidden from the footer). A subclass
     adds tabs of its own after these through `compose_extra_tabs`.
@@ -100,12 +98,6 @@ class ColumnsView(TabbedView, ObjectView):
     tag's values joined on that one line), the same mechanism `PipeView`/
     `TaskView` use for a history row's error.
     """
-
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("c", "show_tab('columns')", "Columns", show=False),
-        Binding("d", "show_tab('data')", "Data", show=False),
-        Binding("g", "show_tab('grants')", "Grants", show=False),
-    ]
 
     #: Built in `compose`. Its `rows` double as the values the sort keys
     #: rank by: the table is handed a RowKey and looks the row up there, so
@@ -127,20 +119,20 @@ class ColumnsView(TabbedView, ObjectView):
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-columns"):
-            with TabPane("[$accent bold]C[/]olumns", id="tab-columns"):
+            with TabPane("Columns", mnemonic="c", id="tab-columns"):
                 yield Static("", id=SOURCE_NOTE)
                 table = DataTable(id="detail-columns", cursor_type="row")
                 table.zebra_stripes = True
                 self.columns_panel = PanelledTable(table, self.detail_text)
                 yield self.columns_panel
-            with TabPane("[$accent bold]D[/]ata", id="tab-data"):
+            with TabPane("Data", mnemonic="d", id="tab-data"):
                 yield Static("", id=DATA_NOTE)
                 data: TextualDataTable[Text] = TextualDataTable(
                     id=DATA_TABLE, cursor_type="row"
                 )
                 data.zebra_stripes = True
                 yield data
-            with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
+            with TabPane("Grants", mnemonic="g", id="tab-grants"):
                 yield Static("", id=GRANTS_NOTE)
                 self.grants_panel = compose_grants()
                 yield self.grants_panel

@@ -39,9 +39,9 @@ from abc import abstractmethod
 from typing import ClassVar
 
 from rich.text import Text
+from tcoda.widgets import TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.widgets import DataTable, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Static
 
 from nivaria.cache.repository import Repository
 from nivaria.models import SchemaRef, Scope, grants_scope, tag_references_scope
@@ -51,31 +51,25 @@ from nivaria.ui.views.grants import compose_grants, paint_grants
 from nivaria.ui.views.tables import (
     GRANTS_NOTE,
     TAGS_NOTE,
-    TabbedView,
     sync_scope_note,
 )
 
 _TAGS_COLUMNS = ("Tag", "Value")
 
 
-class _GrantsTagsView(TabbedView, _ScopedView):
+class _GrantsTagsView(_ScopedView):
     """Shared Grants/Tags tabs and rendering for SchemaView and DatabaseView."""
 
     #: What the notes call the object, as in "No tags on this schema."
     NOUN: ClassVar[str]
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("g", "show_tab('grants')", "Grants", show=False),
-        Binding("t", "show_tab('tags')", "Tags", show=False),
-    ]
-
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-grants"):
-            with TabPane("[$accent bold]G[/]rants", id="tab-grants"):
+            with TabPane("Grants", mnemonic="g", id="tab-grants"):
                 yield Static("", id=GRANTS_NOTE)
                 self.grants_panel = compose_grants()
                 yield self.grants_panel
-            with TabPane("[$accent bold]T[/]ags", id="tab-tags"):
+            with TabPane("Tags", mnemonic="t", id="tab-tags"):
                 yield Static("", id=TAGS_NOTE)
                 tags: DataTable[Text] = DataTable(id="detail-tags", cursor_type="row")
                 tags.zebra_stripes = True

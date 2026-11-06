@@ -101,11 +101,6 @@ def _requestable(scope: Scope) -> Scope:
 
 
 class MainScreen(Screen):
-    # Not Textual's default, the first focusable widget: that is inside the
-    # concealed log panel, whose level filter takes every printable key, so
-    # `,` would not start a chord until something else had been clicked.
-    AUTO_FOCUS = "#tree"
-
     BINDINGS: ClassVar[list[Binding]] = [
         # Only the footer's entry for the chords below. `ChordMixin` takes the
         # key before any binding sees it, so a press or a click on the entry

@@ -1451,9 +1451,9 @@ actually returns rather than a style choice:
 
 - **A single `DataTable`** when there is one thing to show: `TableListView`,
   `ViewListView`, `StageListView`, `TaskListView`.
-- **Tabs** when there are two genuinely different shapes for one node, with
-  mnemonic switching (hidden from the footer, the pattern sibling project
-  snakecam's `JobDetailsScreen` established): `PipeView` and `TaskView`
+- **Tabs** when there are two genuinely different shapes for one node, in
+  `tcoda`'s `TabbedContent`: a letter key per tab, hidden from the footer,
+  and the focus following into the tab just shown. `PipeView` and `TaskView`
   (history + SQL), `TableView` (columns + data + grants), `ViewView`
   (columns + data + grants + SQL), `PipeListView` (activity + status),
   `SchemaView`/`DatabaseView` (grants + tags). Tabs are laid out in
@@ -1461,10 +1461,7 @@ actually returns rather than a style choice:
   and does not follow that order -- `PipeListView` opens on Status,
   `PipeView`/`TaskView` on History. A mnemonic means the same tab on every
   view: `d` is Data, so an object's defining statement is SQL (`s`) rather
-  than Definition. Switching by mnemonic moves
-  focus into the tab just shown: a mnemonic only fires while focus is inside
-  the view, and Textual drops focus from a widget it hides instead of moving
-  it, so the next mnemonic would otherwise go nowhere.
+  than Definition.
 - **A detail panel under a table**, for what does not fit in a cell: the
   history views' error message for the highlighted row, a column's tags
   (`ColumnsView`), or a grantee's individual grants. It describes the
@@ -1529,7 +1526,6 @@ piece is there because duplicated versions drift:
   maps a **column header** to the field holding the untruncated value, not a
   *column index*, so reordering a view's columns cannot silently aim its
   tooltips at the wrong one.
-- **`TabbedView`** — the mnemonic tab switch, in one place instead of five.
 - **`_ScopedView.keeping_cursor`** — wraps a table's clear-and-repopulate
   so a repaint answering a cache update keeps the user's row. Without it,
   `DataTable.clear()` sends the cursor back to the first row each time an
@@ -1917,10 +1913,10 @@ rows, which nivaria declares none of.
 ## Shared widgets
 
 Chords, the settings system, the log panel (`LogViewer`, see "The SQL
-log"), the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
-and the terminal's window title (`TerminalTitleMixin` on `NivariaApp`) live
-in **`tcoda`** ("Textual coda") because they are shared between different
-projects.
+log"), the tabs (`TabbedContent`), the dialog chrome underneath the dialogs
+(`Dialog`, `ConfirmDialog`) and the terminal's window title
+(`TerminalTitleMixin` on `NivariaApp`) live in **`tcoda`** ("Textual coda")
+because they are shared between different projects.
 
 It is an ordinary runtime dependency from PyPI, bounded to one minor series in
 `pyproject.toml`; see
@@ -1946,12 +1942,6 @@ Things worth knowing about it from inside nivaria:
   `Binding("comma", "app.bell", "Menu")` exists only to be shown and pinned:
   `ChordMixin` takes the key before any binding sees it, so a press or a click
   on the entry starts a chord.
-- **`MainScreen.AUTO_FOCUS` names the tree.** Textual's default is the first
-  focusable widget, and that is inside the concealed log panel: `LogViewer`
-  conceals itself by `offset` so that its slide animation plays, which keeps
-  its children focusable. A chord's first step gives way to a key the focused
-  widget would type, and the level filter's overlay takes every printable key,
-  so `,` would not start a chord until something else had been clicked.
 
 The tree/Detail split's drag-to-resize border uses the same mechanism as
 sibling project snakecam's `ResizableTree`: dragging `ObjectTree`'s right

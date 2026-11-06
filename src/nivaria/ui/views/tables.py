@@ -13,8 +13,6 @@ already drifted:
   silently pointed its tooltips at the wrong column. This one maps *column
   headers* to fields and resolves the index from the live table, so there is
   no ordering to keep in step.
-* **`TabbedView`** -- the mnemonic `action_show_tab`, once repeated in five
-  views.
 * **`PanelledTable`** -- a table plus the panel below it that describes
   whichever row is highlighted, hidden when that row has nothing to say.
   Used for `PipeView`/`TaskView`'s load/run errors, a column's tags
@@ -41,16 +39,15 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from typing import Any, ClassVar, Protocol
+from typing import Any, Protocol
 
 from rich.text import Text
 from tcoda.widgets import DataTable
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable as TextualDataTable
-from textual.widgets import Static, TabbedContent
+from textual.widgets import Static
 from textual.widgets.data_table import CellDoesNotExist, ColumnKey, RowKey
 
 from nivaria.cache.repository import Entry, Repository
@@ -255,27 +252,6 @@ class HoverTooltipTable(DataTable):
         return (format_timestamp_full(row.get(field)) or None) if row else None
 
 
-class TabbedView:
-    """Mnemonic tab switching, for the views whose body is a `TabbedContent`.
-
-    A mixin rather than a base class: the views that need it already inherit
-    from `ObjectView`, `CategoryView` or `_ScopedView`, and what they share is
-    only this one action.
-    """
-
-    def action_show_tab(self, tab: str) -> None:
-        tabs = self.query_one(TabbedContent)  # type: ignore[attr-defined]
-        tabs.active = f"tab-{tab}"
-        # Focus follows into the tab just shown. A mnemonic only fires while
-        # focus is inside the view, usually on the table of the tab being
-        # left, and Textual drops focus from a widget it hides rather than
-        # moving it -- so the next mnemonic would go nowhere.
-        pane = tabs.get_pane(f"tab-{tab}")
-        target = next((w for w in pane.query("*") if w.focusable), None)
-        if target is not None:
-            target.focus()
-
-
 class PanelledTable(Vertical):
     """A table, and below it a panel describing whichever row is highlighted.
 
@@ -345,7 +321,7 @@ class PanelledTable(Vertical):
             self.panel.display = False
 
 
-class HistoryView(TabbedView):
+class HistoryView:
     """A history table in a `PanelledTable`, and the note above the table
     admitting when it was capped, empty, or errored.
 
@@ -353,10 +329,6 @@ class HistoryView(TabbedView):
     everything about that (and about the panel below it) is the same; only
     `detail_text` differs.
     """
-
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("s", "show_tab('sql')", "SQL", show=False),
-    ]
 
     #: Built in `compose_history`, repainted by the subclass.
     history_panel: PanelledTable

@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from tcoda.widgets import TabPane
 from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.widgets import TabPane, TextArea
+from textual.widgets import TextArea
 
 from nivaria.models import ObjectType
 from nivaria.ui.views.base import register_view
@@ -34,12 +34,8 @@ from nivaria.ui.views.tables import SQL
 class ViewView(ColumnsView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.VIEW
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("s", "show_tab('sql')", "SQL", show=False),
-    ]
-
     def compose_extra_tabs(self) -> ComposeResult:
-        with TabPane("[$accent bold]S[/]QL", id="tab-sql"):
+        with TabPane("SQL", mnemonic="s", id="tab-sql"):
             yield TextArea(
                 "",
                 id=SQL,

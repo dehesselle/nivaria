@@ -284,7 +284,7 @@ async def test_the_grants_tab_is_active_by_default(repo) -> None:
         assert view.query_one(TabbedContent).active == "tab-grants"
 
 
-async def test_the_schema_tab_mnemonic_actions_switch_tabs(repo) -> None:
+async def test_the_schema_tab_mnemonics_switch_tabs(repo) -> None:
     ref = SchemaRef(database="MYDB", name="PUBLIC")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
@@ -293,13 +293,15 @@ async def test_the_schema_tab_mnemonic_actions_switch_tabs(repo) -> None:
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
         assert tabs.active == "tab-grants"
-        view.action_show_tab("tags")
+        # Bindings reach the tabs only through the focus chain.
+        pane.query_one("#detail-grants", DataTable).focus()
+        await pilot.press("t")
         assert tabs.active == "tab-tags"
-        view.action_show_tab("grants")
+        await pilot.press("g")
         assert tabs.active == "tab-grants"
 
 
-async def test_the_database_tab_mnemonic_actions_switch_tabs(repo) -> None:
+async def test_the_database_tab_mnemonics_switch_tabs(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
         pane = app.query_one(DetailPane)
@@ -307,7 +309,9 @@ async def test_the_database_tab_mnemonic_actions_switch_tabs(repo) -> None:
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
         assert tabs.active == "tab-grants"
-        view.action_show_tab("tags")
+        # Bindings reach the tabs only through the focus chain.
+        pane.query_one("#detail-grants", DataTable).focus()
+        await pilot.press("t")
         assert tabs.active == "tab-tags"
 
 

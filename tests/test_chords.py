@@ -180,8 +180,8 @@ async def test_clicking_the_footer_hint_starts_a_chord(repo) -> None:
 
 
 async def test_the_tree_has_the_focus_when_the_screen_opens(repo) -> None:
-    """By default the first focusable widget gets it, which is in the concealed
-    log panel. Its level filter takes printable keys, so `,` would not start a
+    """The first focusable widget gets it, and the concealed log panel must not
+    be that: its level filter takes printable keys, so `,` would not start a
     chord there."""
     app = Harness(repo)
     async with app.run_test(size=(120, 40)) as pilot:

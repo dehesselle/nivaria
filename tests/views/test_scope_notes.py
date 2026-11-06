@@ -11,7 +11,7 @@ came back with nothing, or failed -- see `tables.sync_scope_note` and
 
 from __future__ import annotations
 
-from textual.widgets import Static
+from textual.widgets import Static, TabbedContent
 
 from nivaria.models import (
     ObjectType,
@@ -238,7 +238,7 @@ async def test_a_grants_tab_says_it_is_still_looking(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         assert _text(pane, "detail-grants-note") == "Looking for grants..."
 
@@ -255,7 +255,7 @@ async def test_an_empty_grants_tab_says_there_are_none_the_role_can_see(
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         assert _text(pane, "detail-grants-note") == (
             "No grants on this table that your role can see."
@@ -269,7 +269,7 @@ async def test_the_data_tab_says_it_is_still_looking(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("data")
+        view.query_one(TabbedContent).active = "tab-data"
         await pilot.pause()
         assert _text(pane, "detail-data-note") == "Looking for rows..."
 

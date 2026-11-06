@@ -586,7 +586,7 @@ async def test_showing_the_grants_tab_asks_for_the_tables_grants(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         assert _GRANTS_KEY in app.needed
         assert object_grants_scope(ref) in view.scopes()
@@ -600,7 +600,7 @@ async def test_the_table_tab_mnemonics_switch_tabs(repo) -> None:
         view = pane.show(ref)
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
-        # Bindings reach the view only through the focus chain.
+        # Bindings reach the tabs only through the focus chain.
         pane.query_one("#detail-columns", DataTable).focus()
         await pilot.press("g")
         assert tabs.active == "tab-grants"
@@ -620,7 +620,7 @@ async def test_the_grants_tab_lists_one_row_per_grantee(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         table = pane.query_one("#detail-grants", DataTable)
         assert table.row_count == 2
@@ -645,7 +645,7 @@ async def test_a_grantee_and_a_column_each_drive_only_their_own_panel(repo) -> N
         tags_panel = pane.query_one("#detail-columns-item", Static)
         assert "PII = true" in str(tags_panel.render())
 
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         grants = pane.query_one("#detail-grants", DataTable)
         grants_panel = pane.query_one("#detail-grants-item", Static)
@@ -669,7 +669,7 @@ async def test_a_grants_update_repaints_only_while_the_tab_is_shown(repo) -> Non
         await pilot.pause()
         assert grants.row_count == 0
 
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         assert grants.row_count == 1
 
@@ -686,7 +686,7 @@ async def _show_data(app: Harness, pilot, ref):
     pane = app.query_one(DetailPane)
     view = pane.show(ref)
     await pilot.pause()
-    view.action_show_tab("data")
+    view.query_one(TabbedContent).active = "tab-data"
     await pilot.pause()
     return pane, view
 

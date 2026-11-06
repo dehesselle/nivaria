@@ -324,7 +324,7 @@ async def test_the_task_sql_tab_falls_back_when_uncached(repo) -> None:
         assert pane.query_one("#detail-sql", TextArea).text == "-- not cached"
 
 
-async def test_the_task_tab_mnemonic_actions_switch_tabs(repo) -> None:
+async def test_the_task_tab_mnemonics_switch_tabs(repo) -> None:
     ref = put_task(repo, "REFRESH_ORDERS")
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:
@@ -333,9 +333,11 @@ async def test_the_task_tab_mnemonic_actions_switch_tabs(repo) -> None:
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
         assert tabs.active == "tab-history"
-        view.action_show_tab("sql")
+        # Bindings reach the tabs only through the focus chain.
+        pane.query_one("#detail-history", DataTable).focus()
+        await pilot.press("s")
         assert tabs.active == "tab-sql"
-        view.action_show_tab("history")
+        await pilot.press("h")
         assert tabs.active == "tab-history"
 
 

@@ -36,9 +36,9 @@ import json
 from typing import Any, ClassVar
 
 from rich.text import Text
+from tcoda.widgets import TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.widgets import DataTable, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Static
 
 from nivaria.cache.repository import Repository
 from nivaria.format import (
@@ -63,7 +63,6 @@ from nivaria.ui.views.tables import (
     LIST_TABLE,
     SOURCE_NOTE,
     HoverTooltipTable,
-    TabbedView,
     lag_note,
     source_line,
     sync_list_note,
@@ -102,13 +101,8 @@ _STATUS_TOOLTIP_FIELDS = {"Created": "created_on"}
 
 
 @register_category_view
-class PipeListView(TabbedView, CategoryView):
+class PipeListView(CategoryView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.PIPE
-
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("s", "show_tab('status')", "Status", show=False),
-        Binding("a", "show_tab('activity')", "Activity", show=False),
-    ]
 
     def __init__(self, repo: Repository, scope: Scope) -> None:
         super().__init__(repo, scope)
@@ -118,7 +112,7 @@ class PipeListView(TabbedView, CategoryView):
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-status"):
-            with TabPane("[$accent bold]A[/]ctivity", id="tab-activity"):
+            with TabPane("Activity", mnemonic="a", id="tab-activity"):
                 # Every column here but Name comes from ACCOUNT_USAGE.
                 yield lag_note("Load activity", COPY_HISTORY_PUBLISHED_LAG)
                 yield Static("", id=LIST_NOTE)
@@ -128,7 +122,7 @@ class PipeListView(TabbedView, CategoryView):
                 )
                 activity.zebra_stripes = True
                 yield activity
-            with TabPane("[$accent bold]S[/]tatus", id="tab-status"):
+            with TabPane("Status", mnemonic="s", id="tab-status"):
                 yield Static("", id=_STATUS_NOTE)
                 yield Static("", id=_STATUS_SOURCE_NOTE)
                 status: DataTable[Text] = HoverTooltipTable(

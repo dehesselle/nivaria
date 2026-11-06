@@ -13,7 +13,7 @@ here instead of three.
 from __future__ import annotations
 
 from textual.coordinate import Coordinate
-from textual.widgets import DataTable
+from textual.widgets import DataTable, TabbedContent
 
 from nivaria.format import format_timestamp_full
 from nivaria.models import ObjectType, objects_scope
@@ -27,7 +27,7 @@ async def _mounted_table(app: Harness, pilot) -> DataTable:
     await pilot.pause()
     # The table lives on the "Activity" tab, not the default "Status"
     # one -- switch there first, same as a user pressing "a".
-    view.action_show_tab("activity")
+    view.query_one(TabbedContent).active = "tab-activity"
     await pilot.pause()
     return pane.query_one("#detail-list", DataTable)
 

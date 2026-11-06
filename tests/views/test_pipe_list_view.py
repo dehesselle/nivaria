@@ -110,11 +110,11 @@ async def test_the_status_scope_is_watched_only_while_the_status_tab_is_shown(
         await pilot.pause()
         assert status in view.scopes()
         assert status.key in app.needed
-        view.action_show_tab("activity")
+        view.query_one(TabbedContent).active = "tab-activity"
         await pilot.pause()
         assert status not in view.scopes()
         app.needed.clear()
-        view.action_show_tab("status")
+        view.query_one(TabbedContent).active = "tab-status"
         await pilot.pause()
         assert status in view.scopes()
         assert status.key in app.needed
@@ -147,7 +147,7 @@ async def test_the_status_tab_is_active_by_default(repo) -> None:
         assert view.query_one(TabbedContent).active == "tab-status"
 
 
-async def test_the_pipe_list_tab_mnemonic_actions_switch_tabs(repo) -> None:
+async def test_the_pipe_list_tab_mnemonics_switch_tabs(repo) -> None:
     put_pipe(repo, "LOAD_ORDERS")
     scope = objects_scope(ObjectType.PIPE, "MYDB", "PUBLIC")
     app = Harness(repo)
@@ -157,9 +157,11 @@ async def test_the_pipe_list_tab_mnemonic_actions_switch_tabs(repo) -> None:
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
         assert tabs.active == "tab-status"
-        view.action_show_tab("activity")
+        # Bindings reach the tabs only through the focus chain.
+        pane.query_one("#detail-status", DataTable).focus()
+        await pilot.press("a")
         assert tabs.active == "tab-activity"
-        view.action_show_tab("status")
+        await pilot.press("s")
         assert tabs.active == "tab-status"
 
 

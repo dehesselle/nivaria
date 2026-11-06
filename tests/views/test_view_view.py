@@ -98,7 +98,7 @@ async def test_the_view_tab_mnemonics_switch_tabs(repo) -> None:
         view = pane.show(ref)
         await pilot.pause()
         tabs = view.query_one(TabbedContent)
-        # Bindings reach the view only through the focus chain.
+        # Bindings reach the tabs only through the focus chain.
         pane.query_one("#detail-columns", DataTable).focus()
         await pilot.press("s")
         assert tabs.active == "tab-sql"
@@ -134,7 +134,7 @@ async def test_showing_the_grants_tab_asks_for_the_views_grants(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         assert _GRANTS_KEY in app.needed
         assert object_grants_scope(ref) in view.scopes()
@@ -152,7 +152,7 @@ async def test_the_view_grants_tab_lists_one_row_per_grantee(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("grants")
+        view.query_one(TabbedContent).active = "tab-grants"
         await pilot.pause()
         table = pane.query_one("#detail-grants", DataTable)
         assert table.row_count == 2
@@ -166,7 +166,7 @@ async def test_showing_the_data_tab_asks_for_the_views_rows(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("data")
+        view.query_one(TabbedContent).active = "tab-data"
         await pilot.pause()
         assert _DATA_KEY in app.needed
         assert data_preview_scope("MYDB", "PUBLIC", "ORDERS_V") in view.scopes()
@@ -180,7 +180,7 @@ async def test_the_view_data_tab_shows_the_cached_rows(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("data")
+        view.query_one(TabbedContent).active = "tab-data"
         await pilot.pause()
         table = pane.query_one("#detail-data", DataTable)
         assert [cell.plain for cell in table.get_row_at(0)] == ["1", "2.5"]
@@ -194,7 +194,7 @@ async def test_an_empty_view_says_so(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("data")
+        view.query_one(TabbedContent).active = "tab-data"
         await pilot.pause()
         note = pane.query_one("#detail-data-note", Static)
         assert note.display
@@ -210,7 +210,7 @@ async def test_a_capped_view_preview_gives_no_total(repo) -> None:
         pane = app.query_one(DetailPane)
         view = pane.show(ref)
         await pilot.pause()
-        view.action_show_tab("data")
+        view.query_one(TabbedContent).active = "tab-data"
         await pilot.pause()
         note = pane.query_one("#detail-data-note", Static)
         assert str(note.render()) == "Showing 2 rows, in no particular order."

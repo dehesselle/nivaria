@@ -42,9 +42,9 @@ from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
 from rich.text import Text
+from tcoda.widgets import TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.widgets import DataTable, TabbedContent, TabPane, TextArea
+from textual.widgets import DataTable, TextArea
 
 from nivaria.format import format_timestamp_minutes, parse_timestamp
 from nivaria.gateway.queries import TASK_HISTORY_RETENTION_DAYS
@@ -77,16 +77,11 @@ def _merge_key(row: dict[str, Any]) -> tuple[Any, Any]:
 class TaskView(HistoryView, ObjectView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TASK
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("h", "show_tab('history')", "History", show=False),
-        *HistoryView.BINDINGS,
-    ]
-
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
-            with TabPane("[$accent bold]H[/]istory", id="tab-history"):
+            with TabPane("History", mnemonic="h", id="tab-history"):
                 yield from self.compose_history()
-            with TabPane("[$accent bold]S[/]QL", id="tab-sql"):
+            with TabPane("SQL", mnemonic="s", id="tab-sql"):
                 yield TextArea(
                     "",
                     id=SQL,
