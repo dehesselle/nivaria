@@ -110,7 +110,7 @@ async def test_connecting_hands_over_to_the_browser() -> None:
         assert app.fetch is not None
 
 
-async def test_connect_open_menu_item_reopens_the_connect_dialog() -> None:
+async def test_the_connect_chord_reopens_the_connect_dialog() -> None:
     """Get back to the connect dialog without restarting the app, e.g. to
     switch accounts mid-session."""
     app = NivariaApp(connector=FakeConnector())
@@ -125,11 +125,7 @@ async def test_connect_open_menu_item_reopens_the_connect_dialog() -> None:
         await settle(pilot)
         assert isinstance(pilot.app.screen, MainScreen)
 
-        await pilot.press("f9")
-        await pilot.pause()
-        await pilot.press("c")  # "Connection" menu's mnemonic
-        await pilot.pause()
-        await pilot.press("o")  # "Open..." item's mnemonic
+        await pilot.press("comma", "a", "c")
         await settle(pilot)
         assert isinstance(pilot.app.screen, ConnectScreen)
 
@@ -201,11 +197,7 @@ async def _connect(pilot, account: str) -> None:
 
 
 async def _reopen_connect(pilot) -> None:
-    await pilot.press("f9")
-    await pilot.pause()
-    await pilot.press("c")  # "Connection" menu's mnemonic
-    await pilot.pause()
-    await pilot.press("o")  # "Open..." item's mnemonic
+    await pilot.press("comma", "a", "c")
     await settle(pilot)
 
 

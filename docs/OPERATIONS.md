@@ -139,8 +139,8 @@ exists.
   removes the node. "Does not exist" is shown as a warning.
 - **A failed fetch is retried** one cache age after it failed, when you
   navigate back to it, or right after you pick a warehouse — not in a loop.
-- **Reconnect** with `Ctrl+O` (Connection › Open...). It replaces the whole
-  pool and reopens the cache for the new identity.
+- **Reconnect** with `, a c` (Account › Connect). It replaces the whole pool
+  and reopens the cache for the new identity.
 - The cache is never required: if it cannot be opened, nivaria runs with
   nothing cached.
 

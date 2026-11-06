@@ -16,19 +16,9 @@ from importlib.resources import files
 from math import ceil
 from typing import ClassVar
 
-from tcoda.widgets import (
-    OPEN_ACTION,
-    AboutMenuItem,
-    Countdown,
-    Footer,
-    LogViewer,
-    Menu,
-    MenuBar,
-    MenuItem,
-    MenuSeparator,
-    SettingsMenuItem,
-)
-from textual import on, work
+from tcoda.dialogs import AboutDialog, SettingsDialog
+from tcoda.widgets import ChordViewer, Countdown, Footer, LogViewer
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
@@ -85,9 +75,9 @@ from nivaria.version import __version__
 #: enough to run on the event loop: an int read plus one indexed sqlite lookup.
 TICK = 0.3
 
-#: The Nivaria menu's About text. A real filesystem Path even for an
-#: installed (non-zipped) wheel, which is what AboutDialog needs -- it reads
-#: this with Path.read_text() rather than importlib.resources' API.
+#: The About dialog's text. A real filesystem Path even for an installed
+#: (non-zipped) wheel, which is what AboutDialog needs -- it reads this with
+#: Path.read_text() rather than importlib.resources' API.
 ABOUT_PATH = files("nivaria.ui").joinpath("about.txt")
 
 
@@ -111,19 +101,33 @@ def _requestable(scope: Scope) -> Scope:
 
 
 class MainScreen(Screen):
-    # No F9 here: `MenuBar` installs its own binding on whichever screen it
-    # is mounted on, so the key and its footer entry come with the widget.
+    # Not Textual's default, the first focusable widget: that is inside the
+    # concealed log panel, whose level filter takes every printable key, so
+    # `,` would not start a chord until something else had been clicked.
+    AUTO_FOCUS = "#tree"
+
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("ctrl+d", "pick_databases", "Databases", show=False),
-        Binding("ctrl+o", "open_connect", "Open", show=False),
-        Binding("ctrl+r", "pick_role", "Role", show=False),
-        Binding("ctrl+w", "pick_warehouse", "Warehouse", show=False),
+        # Only the footer's entry for the chords below. `ChordMixin` takes the
+        # key before any binding sees it, so a press or a click on the entry
+        # starts a chord and this action never runs.
+        Binding("comma", "app.bell", "Menu"),
+        # On the screen rather than the app, so that they do not exist on the
+        # connect screen. Hidden from the footer, not from `ChordViewer`, which
+        # is where they are found.
+        Binding("comma a c", "open_connect", "Connect", show=False),
+        Binding("comma a w", "pick_warehouse", "Warehouse selection", show=False),
+        Binding("comma a r", "pick_role", "Role selection", show=False),
+        Binding("comma a d", "pick_databases", "Database selection", show=False),
+        Binding("comma s", "settings", "Settings", show=False),
+        Binding("comma ?", "about", "About", show=False),
         Binding("slash", "search", "Search"),
         Binding("f5", "refresh", "Refresh"),
         # "Web", not "Snowsight": a label starts with its key's letter, and
         # `s` is already the SQL tab's.
         Binding("w", "open_in_snowsight", "Web"),
     ]
+
+    CHORD_GROUPS: ClassVar[dict[str, str]] = {"comma a": "Account"}
 
     def __init__(
         self,
@@ -140,47 +144,21 @@ class MainScreen(Screen):
         self.databases: list[str] = []
 
     def compose(self) -> ComposeResult:
-        # The nesting is the DOM structure, not style: a Menu is a child of
-        # the bar, not a sibling.
-        with MenuBar():
-            with Menu("Nivaria", id="nivaria-menu"):
-                yield AboutMenuItem(path=ABOUT_PATH, variables={"version": __version__})
-                yield MenuSeparator()
-                yield SettingsMenuItem()
-                yield MenuSeparator()
-                yield MenuItem(
-                    "Quit",
-                    id="quit",
-                    mnemonic="q",
-                    shortcut="ctrl+Q",
-                    action="app.quit",
-                )
-            # "connection-menu", not "connection": a Menu id is a CSS id too,
-            # and app.tcss already styles #connect (the connect dialog).
-            with Menu("Connection", id="connection-menu"):
-                yield MenuItem("Open...", id="open", mnemonic="o", shortcut="ctrl+O")
-                yield MenuSeparator()
-                yield MenuItem(
-                    "Databases ...", id="database", mnemonic="d", shortcut="ctrl+D"
-                )
-                yield MenuItem(
-                    "Warehouse ...", id="warehouse", mnemonic="w", shortcut="ctrl+W"
-                )
-                yield MenuItem("Role ...", id="role", mnemonic="r", shortcut="ctrl+R")
         yield LogViewer(show_key=False)
         tree = ObjectTree(self.repo, id="tree")
         tree.border_title = "Databases"
         yield tree
         yield DetailPane(self.repo, id="detail")
-        # The menu key is pinned, so it holds the left corner
+        # The chord key is pinned, so it holds the left corner
         # whatever the focus chain is doing. Nothing reserves the right
         # corner any more: this footer gives ctrl+p no special treatment,
         # so the status area simply sits there.
-        with Footer(pinned=(OPEN_ACTION)):
+        with Footer(pinned=("comma",)):
             yield RoleLabel(id="footer-role")
             yield WarehouseLabel(id="footer-warehouse")
             yield Countdown(id="footer-countdown")
             yield PoolGauge(id="footer-pool")
+        yield ChordViewer()
 
     def on_mount(self) -> None:
         self.prefetch_session_lists()
@@ -323,35 +301,19 @@ class MainScreen(Screen):
             return
         self._select(hit)
 
-    # ------------------------------------------------------------- menu bar
-
-    # The bar drives itself (F9, the staged bar/dropdown flow, mnemonics);
-    # all that is left here is what each item means. Every handler hands off
-    # to the same `@work` wrapper its key binding uses, because a plain
-    # message handler has no worker context and `push_screen_wait` needs one.
-
-    @on(MenuItem.Pressed, "#open")
-    def _menu_open_connect(self) -> None:
-        self._open_connect()
-
-    def action_open_connect(self) -> None:
-        self._open_connect()
-
+    # A worker, like every action below that waits on a dialog:
+    # `push_screen_wait` needs a worker context.
     @work
-    async def _open_connect(self) -> None:
+    async def action_open_connect(self) -> None:
         await self.app.open_connect()
 
-    @on(MenuItem.Pressed, "#database")
-    def _menu_database(self) -> None:
-        self._pick_databases()
+    def action_about(self) -> None:
+        self.app.push_screen(
+            AboutDialog(ABOUT_PATH, variables={"version": __version__})
+        )
 
-    @on(MenuItem.Pressed, "#warehouse")
-    def _menu_warehouse(self) -> None:
-        self._pick_warehouse()
-
-    @on(MenuItem.Pressed, "#role")
-    def _menu_role(self) -> None:
-        self._pick_role()
+    def action_settings(self) -> None:
+        self.app.push_screen(SettingsDialog())
 
     # --------------------------------------------------------------- routing
 
@@ -440,20 +402,9 @@ class MainScreen(Screen):
         self.tree.set_databases(databases)
         self.detail.clear()
 
-    def action_pick_databases(self) -> None:
-        self._pick_databases()
-
     @work
-    async def _pick_databases(self) -> None:
-        await self.pick_databases()
-
-    async def pick_databases(self) -> None:
-        """Open the database picker.
-
-        Not decorated itself: both callers -- the `ctrl+d` binding and the
-        menu item -- already wrap it in `_pick_databases`, and
-        `push_screen_wait` needs exactly one worker context, not two.
-        """
+    async def action_pick_databases(self) -> None:
+        """Open the database picker."""
         cached = self.repo.databases(databases_scope())
         if cached.is_empty:
             # Nothing to choose from yet; ask, and let the user try again once
@@ -497,16 +448,9 @@ class MainScreen(Screen):
 
     # ------------------------------------------------------ warehouse / role
 
-    def action_pick_warehouse(self) -> None:
-        self._pick_warehouse()
-
     @work
-    async def _pick_warehouse(self) -> None:
-        await self.pick_warehouse()
-
-    async def pick_warehouse(self) -> None:
-        """Open the warehouse picker. See `pick_databases` for why this is
-        not itself a worker."""
+    async def action_pick_warehouse(self) -> None:
+        """Open the warehouse picker."""
         if self.pool is None:
             return
         cached = self.repo.warehouses(warehouses_scope())
@@ -540,16 +484,9 @@ class MainScreen(Screen):
                 hints[row.name] = parts
         return hints
 
-    def action_pick_role(self) -> None:
-        self._pick_role()
-
     @work
-    async def _pick_role(self) -> None:
-        await self.pick_role()
-
-    async def pick_role(self) -> None:
-        """Open the role picker. See `pick_databases` for why this is not
-        itself a worker."""
+    async def action_pick_role(self) -> None:
+        """Open the role picker."""
         if self.pool is None:
             return
         cached = self.repo.roles(roles_scope())
@@ -682,7 +619,7 @@ class MainScreen(Screen):
         published later than the lag margin, which no later window asks for
         again. Each scope's coverage is forgotten first, so its next pass is
         a full one, then they are asked for now. Deliberately bound to no key
-        and no menu yet; the UI that offers it is still to come.
+        yet; the UI that offers it is still to come.
         """
         for scope in self.detail.scopes():
             if log_policy(scope) is None:

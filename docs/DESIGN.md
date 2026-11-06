@@ -113,8 +113,6 @@ that explains it in full.
     protocol.** That keeps the cache, scheduler, matcher and formatting
     testable as plain functions, and lets every test run offline against a
     fake gateway without importing the Snowflake driver.
-17. **A `Menu`/`MenuItem` id must not match an `app.tcss` id**, because the id
-    is also a CSS id and a clash garbles the menu bar. See "Shared widgets".
 
 ---
 
@@ -345,7 +343,7 @@ overlap read again would add such a run once per pass.
 
 `MainScreen.full_refresh` forgets the coverage of the log scopes on screen
 and asks for them at once, so a row the margin missed can be recovered. It
-has no key or menu item yet.
+has no key yet.
 
 The cache is an optimisation, never a dependency: if it cannot be opened the
 app still runs, it just has nothing cached. It uses WAL journalling so a
@@ -1918,7 +1916,7 @@ rows, which nivaria declares none of.
 
 ## Shared widgets
 
-The menu bar, the settings system, the log panel (`LogViewer`, see "The SQL
+Chords, the settings system, the log panel (`LogViewer`, see "The SQL
 log"), the dialog chrome underneath the dialogs (`Dialog`, `ConfirmDialog`)
 and the terminal's window title (`TerminalTitleMixin` on `NivariaApp`) live
 in **`tcoda`** ("Textual coda") because they are shared between different
@@ -1933,39 +1931,27 @@ Things worth knowing about it from inside nivaria:
 
 - **`tcoda` ships its TCSS inline**, as `DEFAULT_CSS` on each widget, rather
   than in a stylesheet -- a library cannot rely on a consumer's `CSS_PATH`.
-  So the menu-bar and settings-dialog rules are not in `app.tcss`.
+  So the chord-panel and settings-dialog rules are not in `app.tcss`.
   `app.tcss` outranks `DEFAULT_CSS` regardless of specificity, so anything
   tcoda does style can still be overridden here.
-- **`MenuBar` installs its own `F9` binding** on whichever screen it is
-  mounted on, which is why `MainScreen.BINDINGS` carries none. Textual only
-  consults the focus chain plus the screen and the app when resolving a key,
-  so a bar that is never focused cannot own the binding itself.
-- **nivaria only declares what is in the menu bar**, inline in
-  `MainScreen.compose`: the staged bar-only/dropdown flow, mnemonics and
-  separators are `MenuBar`'s. **About ...** is a `tcoda.widgets.AboutMenuItem`
-  reading `ui/about.txt` through a real filesystem path rather than just an
-  `importlib.resources` handle, and **Settings ...** a
-  `tcoda.widgets.SettingsMenuItem`, which opens the dialog itself, so nivaria
-  wires nothing for it. Choosing any other entry posts `MenuItem.Pressed`,
-  handled with `@on(MenuItem.Pressed, "#database")` and the like on
-  `MainScreen`, which hands off to the same `@work` wrapper the matching key
-  binding uses -- a plain message handler has no worker context, and
-  `push_screen_wait` needs one.
-- **A `shortcut` label advertises a key binding**, independent of `mnemonic`
-  (which drives in-menu letter selection). `Ctrl+O`/`Ctrl+D`/`Ctrl+R`/`Ctrl+W`
-  are live key bindings hidden from the footer (`show=False`): the menu's
-  `shortcut` label is where they are advertised, keeping the footer down to
-  the bindings someone would reach for without having opened the menu first.
-- **A `Menu`/`MenuItem` id is also a CSS id.** Textual only requires it to be
-  unique among one menu's own children, but any `app.tcss` rule of the same
-  name styles it too -- and for a widget inside a one-row bar that does not
-  show up as a wrong colour, it shows up as a garbled row of scrollbar
-  blocks. The Connection menu is `#connection-menu` rather than `#connection`
-  for exactly this reason: `#connect` (note the different word) is the
-  connect dialog's container, and `#connection` sits close enough to invite
-  the same mistake later. `test_menubar.py` asserts the title's *geometry*,
-  not just its text, so a future clash fails a test instead of only looking
-  wrong.
+- **`ChordMixin` is on `NivariaApp`, the chords on `MainScreen`.** Only the
+  app sees a key before the focused widget does, so the matching has to live
+  there. The chords are ordinary `BINDINGS` with `show=False`: being the
+  screen's, they do not exist on the connect screen or in a dialog, where `,`
+  stays a comma, and hidden from the footer, they are found in the
+  `ChordViewer` composed on the same screen. That widget raises `TypeError` on
+  an app without the mixin, so a test harness mounting `MainScreen` needs it
+  too.
+- **The footer's `,` entry is a binding that never runs.**
+  `Binding("comma", "app.bell", "Menu")` exists only to be shown and pinned:
+  `ChordMixin` takes the key before any binding sees it, so a press or a click
+  on the entry starts a chord.
+- **`MainScreen.AUTO_FOCUS` names the tree.** Textual's default is the first
+  focusable widget, and that is inside the concealed log panel: `LogViewer`
+  conceals itself by `offset` so that its slide animation plays, which keeps
+  its children focusable. A chord's first step gives way to a key the focused
+  widget would type, and the level filter's overlay takes every printable key,
+  so `,` would not start a chord until something else had been clicked.
 
 The tree/Detail split's drag-to-resize border uses the same mechanism as
 sibling project snakecam's `ResizableTree`: dragging `ObjectTree`'s right

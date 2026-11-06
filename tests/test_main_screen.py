@@ -10,6 +10,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from tcoda.chords import ChordMixin
 from textual.app import App
 from textual.widgets import Input
 
@@ -72,7 +73,7 @@ class RecordingFetch:
         return [key for key, _ in self.requests]
 
 
-class Harness(App[None]):
+class Harness(ChordMixin, App[None]):
     CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
 
     def __init__(
@@ -316,13 +317,13 @@ async def test_reselecting_the_same_database_does_nothing(repo) -> None:
     assert fetch.cancelled == []
 
 
-async def test_ctrl_d_opens_the_multipicker(repo) -> None:
+async def test_the_database_chord_opens_the_multipicker(repo) -> None:
     put_databases(repo, "ALPHA", "BETA")
     fetch = RecordingFetch()
     app = Harness(repo, fetch)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+d")
+        await pilot.press("comma", "a", "d")
         await settle(pilot)
         assert isinstance(app.screen, MultiPickerDialog)
 
@@ -335,7 +336,7 @@ async def test_picking_from_the_dialog_selects_the_database(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         main = app.screen
-        await pilot.press("ctrl+d")
+        await pilot.press("comma", "a", "d")
         await settle(pilot)
         app.screen.query_one("#picker-query", Input).value = "BETA"
         await settle(pilot)
@@ -354,7 +355,7 @@ async def test_multiple_databases_can_be_picked_at_once(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         main = app.screen
-        await pilot.press("ctrl+d")
+        await pilot.press("comma", "a", "d")
         await settle(pilot)
         await pilot.click("#multipicker-all")
         await settle(pilot)
@@ -372,7 +373,7 @@ async def test_picking_databases_persists_them_to_the_profile(repo, tmp_path) ->
     app = Harness(repo, fetch, pool=pool, profiles=store)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+d")
+        await pilot.press("comma", "a", "d")
         await settle(pilot)
         await pilot.click("#multipicker-all")
         await settle(pilot)
@@ -393,7 +394,7 @@ async def test_picking_databases_keeps_the_profiles_name(repo, tmp_path) -> None
     app = Harness(repo, fetch, pool=pool, profiles=store)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+d")
+        await pilot.press("comma", "a", "d")
         await settle(pilot)
         await pilot.click("#multipicker-all")
         await settle(pilot)
@@ -410,7 +411,7 @@ async def test_the_picker_is_not_opened_with_nothing_to_show(repo) -> None:
     app = Harness(repo, fetch)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+d")
+        await pilot.press("comma", "a", "d")
         await settle(pilot)
         assert isinstance(app.screen, MainScreen)
     assert fetch.scopes.count("databases") >= 2

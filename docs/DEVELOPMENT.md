@@ -16,7 +16,7 @@ uv sync --all-groups
 
 Use the project `.venv` to run anything. Add a dependency with `uv add`.
 
-The menu bar, settings and dialog chrome come from **tcoda**, a shared library
+Chords, settings and dialog chrome come from **tcoda**, a shared library
 installed from PyPI like any other dependency. Its source is the sibling
 checkout `../tcoda`; `../snakecam` and `../vc` use it too.
 

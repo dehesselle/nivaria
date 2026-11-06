@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from time import monotonic
 
+from tcoda.chords import ChordMixin
 from tcoda.terminal_title import TerminalTitleMixin
 from textual import work
 from textual.app import App
@@ -30,7 +31,7 @@ from nivaria.ui.screens.main import MainScreen
 _MISSING_TIMEOUT = 5.0
 
 
-class NivariaApp(TerminalTitleMixin, App[None]):
+class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
     CSS_PATH = "app.tcss"
     TITLE = "nivaria"
     TERMINAL_TITLE = TITLE
@@ -93,8 +94,8 @@ class NivariaApp(TerminalTitleMixin, App[None]):
     async def open_connect(self) -> None:
         """Reopen the connect dialog and swap in the resulting pool.
 
-        Invoked from the "Connect > Open..." menu item once already browsing.
-        A cancelled dialog leaves the existing connection untouched.
+        Invoked from the Account > Connect chord once already browsing. A
+        cancelled dialog leaves the existing connection untouched.
 
         The old fetch service and pool are stopped *before* anything about
         the new one becomes visible to `MainScreen` -- the same discipline

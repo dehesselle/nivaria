@@ -48,9 +48,7 @@ These are the names used for the parts of the screen, here and in the other
 documents.
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│                            Menu bar (F9)                                 │
-├────────────────────┬─────────────────────────────────────────────────────┤
+┌────────────────────┬─────────────────────────────────────────────────────┐
 │ ┌─────────────────┐│                                                     │
 │ │  MYDB (12)      ││                                                     │
 │ │  OTHERDB (5)    ││              Detail pane                            │
@@ -59,7 +57,7 @@ documents.
 │ │                 ││                                                     │
 │ └─────────────────┘│                                                     │
 ├────────────────────┴─────────────────────────────────────────────────────┤
-│ F1 Log  / Search  F5 Refresh                       Role  Warehouse  (2/5)│
+│ , Menu  / Search  F5 Refresh                       Role  Warehouse  (2/5)│
 └──────────────────────────── Status footer ───────────────────────────────┘
 ```
 
@@ -81,12 +79,12 @@ terminal:
 
 | Name | What it is |
 | --- | --- |
-| **Menu bar** | Hidden except while in use, Midnight-Commander style: opened by `F9` or by clicking a title. Two menus, **Nivaria** and **Connection** (see "Menus"). |
 | **Object tree** | The browser. One top-level node per selected database, showing its schema count (`MYDB (12)`), expanding into schemas → `Tables (n)` / `Views (n)` / … → object. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database. |
 | **Detail pane** | Shows one detail view for whatever node the cursor is on. Its border with the Object tree can be dragged to resize both panes. |
 | **Object view** | The detail view for one object (e.g. Table view, Pipe view). Category, schema and database nodes have views of their own (see "Detail views"). |
 | **Status footer** | Key bindings on the left; **Role**, **Warehouse**, **Countdown** and **Pool gauge** on the right. |
+| **Chord panel** | Hidden until you pause partway through a chord, then covers the Status footer and lists what can come next (see "Chords"). |
 | **Log panel** | Hidden until `F1`, then slides down over the top third of the screen, showing every statement nivaria sends, live. `F1` hides it again. It has its own level and source filters. |
 
 The tree takes a quarter of the width at start. A dragged width is not kept
@@ -96,29 +94,39 @@ across sessions.
 
 | Key | Action |
 | --- | --- |
-| `F9` | Open the menu bar |
+| `,` | Start a chord (see "Chords") |
 | `F1` | Show or hide the Log panel |
 | `/` | Open search |
 | `F5` | Refresh whatever the cursor is on, and what the detail pane shows for it |
 | `w` | Open whatever the cursor is on in Snowsight |
-| `Ctrl+O` | Reopen the connect dialog (reconnect, or switch account) |
-| `Ctrl+D` | Pick databases |
-| `Ctrl+W` | Pick warehouse |
-| `Ctrl+R` | Pick role |
 | `Ctrl+Q` | Quit; press again to quit without waiting for running statements |
 
-## Menus
+## Chords
 
-**Nivaria** (`n`): **About ...** (`a`), **Settings ...** (`s`), **Quit** (`q`).
+Commands are typed as a sequence of keys starting with `,`, one key after the
+other.
 
-**Connection** (`c`): **Open...** (`o`), **Databases ...** (`d`),
-**Warehouse ...** (`w`), **Role ...** (`r`).
+| Keys | Action |
+| --- | --- |
+| `, a c` | Connect: reopen the connect dialog (reconnect, or switch account) |
+| `, a w` | Warehouse selection |
+| `, a r` | Role selection |
+| `, a d` | Database selection |
+| `, s` | Settings |
+| `, ?` | About |
 
-A letter in parentheses selects the entry while its menu is open.
+`a` is the **Account** group.
+
+Pause after any key and the Chord panel lists what can come next, and waits for
+you. While it is up, `backspace` steps back and `escape` closes it. Clicking an
+entry presses its key, and clicking `, Menu` in the Status footer starts a chord.
+
+A key that continues no chord abandons it and does nothing else. Chords belong
+to the main screen: in a dialog, `,` is an ordinary comma.
 
 ## Browsing
 
-`Ctrl+D` opens the **Databases picker**: type to filter, `space` or a click
+`, a d` opens the **Databases picker**: type to filter, `space` or a click
 toggles a database, and `enter` or **Ok** confirms. Each selected database gets
 its own top-level node, and the selection is remembered per connection.
 
@@ -237,8 +245,7 @@ History or Data table says when they were fetched.
 
 ## Settings
 
-**Settings ...** (Nivaria menu) lists every setting by group, each editable in
-place. **OK** validates, saves and closes; **Apply** saves and stays open;
+**Settings** (`, s`) lists every setting by group, each editable in place. **OK** validates, saves and closes; **Apply** saves and stays open;
 **Cancel** or `escape` discards, asking first if anything changed. Clearing a
 field and confirming resets it to its default. A change takes effect without a
 restart, except **fetch page size**, which applies from the next reconnect or

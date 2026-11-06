@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tcoda.chords import ChordMixin
 from tcoda.widgets import Countdown, Footer, FooterBinding
 from textual.app import App
 
@@ -34,7 +35,7 @@ def repo(tmp_path) -> Repository:
     return Repository(database)
 
 
-class Harness(App[None]):
+class Harness(ChordMixin, App[None]):
     CSS_PATH = str(Path(app_module.__file__).parent / "app.tcss")
 
     def __init__(self, repo: Repository, fetch, pool=None) -> None:
@@ -201,23 +202,21 @@ async def test_key_bindings_are_still_shown(repo) -> None:
         for _ in range(4):
             await pilot.pause()
         keys = {key.key for key in app.screen.query(FooterBinding)}
-    assert "f9" in keys
+    assert "comma" in keys
     assert "slash" in keys
     assert "f5" in keys
 
 
-async def test_the_picker_and_quit_shortcuts_are_hidden_from_the_footer(
-    repo,
-) -> None:
-    """They live in the Connection menu instead, right-aligned as `shortcut`."""
+async def test_the_chords_are_hidden_from_the_footer_behind_one_hint(repo) -> None:
+    """They are found in the chord viewer. The footer only says how to get
+    there, from its left corner."""
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
         for _ in range(4):
             await pilot.pause()
-        keys = {key.key for key in app.screen.query(FooterBinding)}
-    assert "ctrl+d" not in keys
-    assert "ctrl+r" not in keys
-    assert "ctrl+w" not in keys
+        keys = [key.key for key in app.screen.query(FooterBinding)]
+    assert keys[0] == "comma"
+    assert not [key for key in keys if " " in key]
 
 
 async def test_the_gauge_follows_the_pool(repo) -> None:

@@ -24,8 +24,9 @@ nivaria
 ```
 
 Enter your account and user in the connect dialog, pick an authenticator
-(OAuth, browser SSO or password + MFA) and connect. `Ctrl+D` selects the
-databases to browse, `/` searches, `F9` opens the menu.
+(OAuth, browser SSO or password + MFA) and connect. `, a d` selects the
+databases to browse, `/` searches, and `,` followed by a pause lists all
+commands.
 
 ## Caveats
 

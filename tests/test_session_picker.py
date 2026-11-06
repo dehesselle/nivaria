@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: 0BSD
 
 """The warehouse and role pickers: same fuzzy-picker pattern as the database
-picker (see test_main_screen.py), but wired through the Connection menu and,
-unlike the database picker, actually rewriting the pool's session."""
+picker (see test_main_screen.py), but, unlike the database picker, actually
+rewriting the pool's session."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-from tcoda.widgets import MenuItem
+from tcoda.chords import ChordMixin
 from textual.app import App
 from textual.widgets import Input, OptionList
 
@@ -34,7 +34,7 @@ def repo(tmp_path) -> Repository:
     return Repository(database)
 
 
-class Harness(App[None]):
+class Harness(ChordMixin, App[None]):
     """Stands in for NivariaApp: MainScreen's role-switch path needs the app
     to repoint it at a different identity's cache (see NivariaApp.switch_repo
     / restart_fetch), so this fake provides the same two methods, backed by a
@@ -54,10 +54,6 @@ class Harness(App[None]):
     def on_mount(self) -> None:
         self.push_screen(MainScreen(self.repo, self.fetch, self._pool))
 
-    async def open_connect(self) -> None:
-        """Never exercised here, but the Connection menu always declares the
-        item that calls it."""
-
     def restart_fetch(self, pool) -> None:
         self.fetch = RecordingFetch()
 
@@ -76,42 +72,20 @@ def put_roles(repo: Repository, *names: str) -> None:
     load(repo, roles_scope(), [{"name": name, "comment": ""} for name in names])
 
 
-async def open_via_menu(pilot, mnemonic: str) -> None:
-    """Drive the menu bar exactly the way a user would: F9, the Connection
-    menu's own mnemonic, then the item's own mnemonic."""
-    await pilot.press("f9")
-    await pilot.pause()
-    await pilot.press("c")
-    await pilot.pause()
-    await pilot.press(mnemonic)
+async def open_via_chord(pilot, step: str) -> None:
+    """Press the chord the way a user would: `,`, Account, then the entry."""
+    await pilot.press("comma", "a", step)
     await settle(pilot)
 
 
-# ------------------------------------------------------------------- listing
-
-
-async def test_the_connection_menu_lists_warehouse_and_role(repo) -> None:
-    pool, _ = make_pool(size=1)
-    pool.connect_all()
-    app = Harness(repo, RecordingFetch(), pool)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        # Read the declarations off the DOM rather than the open dropdown:
-        # the menu is composed, so this is the same list the dropdown builds
-        # from, without reaching into it.
-        labels = {item.label for item in app.screen.query(MenuItem)}
-        assert "Warehouse ..." in labels
-        assert "Role ..." in labels
-
-
-async def test_the_warehouse_item_opens_a_picker_over_cached_warehouses(repo) -> None:
+async def test_the_warehouse_chord_opens_a_picker_over_cached_warehouses(repo) -> None:
     put_warehouses(repo, "COMPUTE_WH", "ETL_WH")
     pool, _ = make_pool(size=1)
     pool.connect_all()
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "w")
+        await open_via_chord(pilot, "w")
         assert isinstance(app.screen, PickerDialog)
 
 
@@ -126,7 +100,7 @@ async def test_the_warehouse_picker_shows_size_as_a_hint(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "w")
+        await open_via_chord(pilot, "w")
         options = app.screen.query_one("#picker-results", OptionList)
         prompt = options.get_option_at_index(0).prompt
     assert prompt.plain == "COMPUTE_WH  X-Small"
@@ -146,7 +120,7 @@ async def test_the_default_warehouse_shows_a_default_hint(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "w")
+        await open_via_chord(pilot, "w")
         options = app.screen.query_one("#picker-results", OptionList)
         default_prompt = options.get_option_at_index(0).prompt
         other_prompt = options.get_option_at_index(1).prompt
@@ -165,36 +139,9 @@ async def test_an_empty_warehouse_cache_requests_a_fetch_instead_of_a_dead_dialo
     app = Harness(repo, fetch, pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "w")
+        await open_via_chord(pilot, "w")
         assert isinstance(app.screen, MainScreen)
     assert "warehouses" in fetch.scopes
-
-
-async def test_ctrl_w_opens_the_warehouse_picker(repo) -> None:
-    """The key binding is hidden from the footer, but stays live -- see the
-    Connection menu's `Ctrl+W` shortcut label."""
-    put_warehouses(repo, "COMPUTE_WH", "ETL_WH")
-    pool, _ = make_pool(size=1)
-    pool.connect_all()
-    app = Harness(repo, RecordingFetch(), pool)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("ctrl+w")
-        await settle(pilot)
-        assert isinstance(app.screen, PickerDialog)
-
-
-async def test_ctrl_r_opens_the_role_picker(repo) -> None:
-    """Same as `ctrl+w`, but for `Ctrl+R` and the role picker."""
-    put_roles(repo, "SYSADMIN", "ACCOUNTADMIN")
-    pool, _ = make_pool(size=1)
-    pool.connect_all()
-    app = Harness(repo, RecordingFetch(), pool)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        await pilot.press("ctrl+r")
-        await settle(pilot)
-        assert isinstance(app.screen, PickerDialog)
 
 
 # ------------------------------------------------------------------ switching
@@ -207,7 +154,7 @@ async def test_picking_a_warehouse_switches_every_pooled_connection(repo) -> Non
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "w")
+        await open_via_chord(pilot, "w")
         app.screen.query_one("#picker-query", Input).value = "ETL"
         await settle(pilot)
         await pilot.press("enter")
@@ -228,7 +175,7 @@ async def test_picking_a_role_switches_every_pooled_connection(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "r")
+        await open_via_chord(pilot, "r")
         app.screen.query_one("#picker-query", Input).value = "SYSADMIN"
         await settle(pilot)
         await pilot.press("enter")
@@ -253,7 +200,7 @@ async def test_a_successful_role_switch_repoints_the_screen_at_a_new_cache(
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         original_repo = app.screen.repo
-        await open_via_menu(pilot, "r")
+        await open_via_chord(pilot, "r")
         app.screen.query_one("#picker-query", Input).value = "SYSADMIN"
         await settle(pilot)
         await pilot.press("enter")
@@ -292,7 +239,7 @@ async def test_switching_back_to_a_role_reopens_its_own_warm_cache(repo) -> None
         await pilot.pause()
 
         # Switch away to ROLE_B.
-        await open_via_menu(pilot, "r")
+        await open_via_chord(pilot, "r")
         app.screen.query_one("#picker-query", Input).value = "ROLE_B"
         await settle(pilot)
         await pilot.press("enter")
@@ -309,7 +256,7 @@ async def test_switching_back_to_a_role_reopens_its_own_warm_cache(repo) -> None
         put_roles(app.repo, "ROLE_A", "ROLE_B")
 
         # Switch back to ROLE_A.
-        await open_via_menu(pilot, "r")
+        await open_via_chord(pilot, "r")
         app.screen.query_one("#picker-query", Input).value = "ROLE_A"
         await settle(pilot)
         await pilot.press("enter")
@@ -334,7 +281,7 @@ async def test_reselecting_the_current_warehouse_does_nothing(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "w")
+        await open_via_chord(pilot, "w")
         await pilot.press("enter")
         await settle(pilot)
     # The one USE from the setup call above, and no more from reselecting it.
@@ -364,7 +311,7 @@ async def test_the_footer_reflects_a_completed_switch(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await open_via_menu(pilot, "w")
+        await open_via_chord(pilot, "w")
         await pilot.press("enter")
         await settle(pilot)
         for _ in range(20):

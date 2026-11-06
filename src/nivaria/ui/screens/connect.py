@@ -76,9 +76,9 @@ class ConnectScreen(ModalScreen["ConnectionPool | None"]):
     """Collects connection details and returns a connected pool.
 
     A modal, not a plain Screen: opened at startup it looks the same either
-    way (nothing is behind it), but reopened from the "Connect > Open..."
-    menu item it dims the browser behind it instead of fully replacing it --
-    the same treatment `ConfirmDialog` and `PickerDialog` already get.
+    way (nothing is behind it), but reopened from the Account > Connect chord
+    it dims the browser behind it instead of fully replacing it -- the same
+    treatment `ConfirmDialog` and `PickerDialog` already get.
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
