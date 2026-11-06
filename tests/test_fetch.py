@@ -25,6 +25,7 @@ from nivaria.models import (
     pipe_status_scope,
     prime_scope,
     schemas_scope,
+    table_stats_scope,
     tag_references_scope,
     task_activity_history_scope,
     task_activity_scope,
@@ -810,6 +811,89 @@ def test_a_worker_survives_being_unable_to_record_a_failure(repo, monkeypatch) -
         )
     finally:
         service.stop()
+
+
+def test_a_scope_is_requestable_by_the_time_the_ui_hears_it_finished(repo) -> None:
+    """Telling the UI waits for its event loop, which can be busy for a while. A
+    request made on hearing the result must not be dropped as a duplicate of the
+    pass that has just ended."""
+    scope = databases_scope()
+    heard: list[tuple[bool, bool]] = []
+
+    def notify(_scope, complete: bool) -> None:
+        if complete and not heard:
+            heard.append((service.is_busy(scope), service.request(scope)))
+
+    gateway = FakeGateway(databases=["ACME"])
+    service = make_service(gateway, repo, notify=notify)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: len(heard) == 1)
+        assert heard == [(False, True)]
+        assert wait_until(
+            lambda: sum(call == "show_databases" for call, _ in gateway.calls) == 2
+        )
+    finally:
+        service.stop()
+
+
+def test_a_scope_is_requestable_by_the_time_the_ui_hears_it_failed(repo) -> None:
+    """This is the retry after a warehouse switch: with the event loop busy, it
+    ran while the failed scope still read as busy, and so was skipped."""
+    scope = table_stats_scope("MYDB", "PUBLIC")
+    heard: list[bool] = []
+    gateway = FakeGateway()
+    gateway.raise_on_table_stats = True
+    service = make_service(
+        gateway,
+        repo,
+        on_error=lambda _s, _message, _m: heard.append(service.is_busy(scope)),
+    )
+    try:
+        service.request(scope)
+        assert wait_until(lambda: bool(heard))
+        assert heard == [False]
+    finally:
+        service.stop()
+
+
+def test_a_worker_handing_on_a_page_leaves_the_next_workers_claim_alone(repo) -> None:
+    """The worker that queued the next page tidied up after itself a moment later.
+    If another worker had claimed that page by then, its statement ran unrecorded:
+    quitting would not wait for it, and a second pass could start beside it."""
+    scope = databases_scope()
+    unclaimed: list[int] = []
+    seen: list[int] = []
+    holder: dict[str, FetchService] = {}
+
+    class Checking(FakeGateway):
+        def show_databases(self, *args, **kwargs):
+            result = super().show_databases(*args, **kwargs)
+            seen.append(1)
+            time.sleep(0.03)
+            if holder["service"].running_count == 0:
+                unclaimed.append(1)
+            return result
+
+    gateway = Checking(databases=[f"DB{index:02d}" for index in range(12)])
+    service = FetchService(gateway, repo, workers=2, page_size=2)
+    holder["service"] = service
+    put = service._queue.put
+
+    def preempted_after_put(job, *args, **kwargs):
+        put(job, *args, **kwargs)
+        if not job.shutdown:
+            time.sleep(0.01)
+
+    service._queue.put = preempted_after_put
+    service.start()
+    try:
+        service.request(scope)
+        assert wait_until(lambda: len(seen) >= 3, timeout=5)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert unclaimed == []
 
 
 def test_a_listener_that_raises_does_not_strand_the_worker(repo) -> None:

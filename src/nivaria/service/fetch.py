@@ -82,7 +82,10 @@ class FetchService:
         #: longer the value here has been superseded and is skipped -- which is
         #: how a priority upgrade works, since PriorityQueue has no decrease-key.
         self._pending: dict[Scope, FetchJob] = {}
-        self._running: set[Scope] = set()
+        #: The job that owns each scope with a statement in flight. By job, not
+        #: just by scope, so a worker done with a page cannot clear the claim
+        #: of the worker that has already picked up the next one.
+        self._running: dict[Scope, FetchJob] = {}
         #: Scopes cancelled while a page was already in flight. Checked before
         #: a continuation is enqueued, since the running page cannot be stopped.
         self._cancelled: set[Scope] = set()
@@ -198,8 +201,19 @@ class FetchService:
             try:
                 self._execute(job)
             finally:
-                with self._lock:
-                    self._running.discard(job.scope)
+                self._release(job)
+
+    def _release(self, job: FetchJob) -> None:
+        """Stop counting `job` as running, if nothing has taken over its scope.
+
+        Called as soon as its result is committed, before anyone is told.
+        Telling the UI waits for its event loop, however busy that is, and
+        whatever it does on hearing -- retrying a failed scope after a warehouse
+        switch, say -- must not find the finished job still counted as busy.
+        """
+        with self._lock:
+            if self._running.get(job.scope) is job:
+                del self._running[job.scope]
 
     def _claim(self, job: FetchJob) -> bool:
         """Take ownership of a dequeued job, unless it has been superseded."""
@@ -209,7 +223,7 @@ class FetchService:
             if self._stopped or self._pending.get(job.scope) is not job:
                 return False
             del self._pending[job.scope]
-            self._running.add(job.scope)
+            self._running[job.scope] = job
             return True
 
     def _execute(self, job: FetchJob) -> None:
@@ -298,6 +312,7 @@ class FetchService:
             self._repo.finish_pass(
                 scope, generation, truncated=page.truncated, **finish
             )
+            self._release(job)
             self._announce(scope, complete=True)
             return
 
@@ -318,6 +333,7 @@ class FetchService:
                 cursor,
             )
             self._repo.finish_pass(scope, generation, truncated=page.truncated)
+            self._release(job)
             self._announce(scope, complete=True)
             return
         if job.page + 1 >= config.get(MAX_PAGES_PER_PASS):
@@ -330,6 +346,7 @@ class FetchService:
                 "reaching the end of this result"
             )
             self._repo.fail_pass(scope, generation, message)
+            self._release(job)
             self._report(scope, message)
             self._announce(scope, complete=True)
             return
@@ -381,6 +398,7 @@ class FetchService:
             # Truncated at Snowflake's SHOW cap and not safely pageable, so
             # fall back to a job per schema. Slower, but correct.
             self._fan_out(object_type, database, job.priority)
+            self._release(job)
             self._announce(scope, complete=True)
             return
 
@@ -399,6 +417,7 @@ class FetchService:
             ).append(row)
 
         self._repo.replace_grouped(grouped, started_at)
+        self._release(job)
         for filled in grouped:
             self._announce(filled, complete=True)
         self._announce(scope, complete=True)
@@ -437,6 +456,7 @@ class FetchService:
         if missing:
             for container in containing_scopes(scope):
                 self.request(container, job.priority)
+        self._release(job)
         self._report(scope, message, missing=missing)
         self._announce(scope, complete=True)
 

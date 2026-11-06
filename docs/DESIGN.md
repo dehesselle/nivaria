@@ -1239,7 +1239,11 @@ worker writes into sqlite and then posts a message naming the scope it changed.
 - **Deduplicated**: a scope already queued or running is not queued again. A
   higher-priority request for an already-queued scope supersedes it rather than
   duplicating it. This is what stops a burst of expand events queueing the same
-  work five times.
+  work five times. A job stops counting as running once its result is committed,
+  before the UI is told: telling it waits for the event loop, and a request made
+  on hearing the result must not be dropped as a duplicate of the pass that ended.
+  `_running` records the owning job, so a worker done with a page cannot clear
+  the claim of the worker that picked up the next one.
 - **Self-healing**: a job that fails with "does not exist" requests the
   listing one level up, at its own priority, so a node for something dropped
   elsewhere disappears straight away -- see "Scopes: the unit of
