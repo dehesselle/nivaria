@@ -131,8 +131,7 @@ class SchemaView(_GrantsTagsView):
     NOUN = "schema"
 
     def __init__(self, repo: Repository, ref: SchemaRef) -> None:
-        super().__init__()
-        self.repo = repo
+        super().__init__(repo)
         self.ref = ref
 
     def show(self, ref: SchemaRef) -> None:
@@ -152,8 +151,7 @@ class DatabaseView(_GrantsTagsView):
     NOUN = "database"
 
     def __init__(self, repo: Repository, database: str) -> None:
-        super().__init__()
-        self.repo = repo
+        super().__init__(repo)
         self.database = database
 
     def show(self, database: str) -> None:

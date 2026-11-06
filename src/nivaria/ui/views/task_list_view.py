@@ -45,11 +45,9 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
-from nivaria.cache.repository import Repository
 from nivaria.format import format_timestamp_minutes
-from nivaria.models import ObjectRef, ObjectType, Scope, task_activity_scope
+from nivaria.models import ObjectType, Scope, task_activity_scope
 from nivaria.snowflake.queries import TASK_HISTORY_PUBLISHED_LAG
-from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
     LIST_NOTE,
@@ -81,40 +79,18 @@ _TOOLTIP_FIELDS = {"Last Scheduled": "SCHEDULED_TIME"}
 class TaskListView(CategoryView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TASK
 
-    def __init__(self, repo: Repository, scope: Scope) -> None:
-        super().__init__(repo, scope)
-        #: This paint's rows, keyed by task name -- the merged show_tasks +
-        #: activity dict the hover tooltip reads full-precision values from.
-        self._rows: dict[str, dict[str, Any]] = {}
-
     def compose(self) -> ComposeResult:
         # The last-run columns come from ACCOUNT_USAGE.
         yield lag_note("Run history", TASK_HISTORY_PUBLISHED_LAG)
         yield Static("", id=LIST_NOTE)
         yield Static("", id=SOURCE_NOTE)
-        table: DataTable[Text] = HoverTooltipTable(
-            self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
-        )
-        table.zebra_stripes = True
-        yield table
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Enter on a row opens that task's detail view, revealed in the
-        tree -- see PipeListView's identical handler for the full reasoning."""
-        name = event.row_key.value
-        if name is None:
-            return
-        ref = ObjectRef(ObjectType.TASK, self.scope.database, self.scope.schema, name)
-        self.post_message(ObjectOpened(ref))
+        yield HoverTooltipTable(self, _TOOLTIP_FIELDS, id=LIST_TABLE)
 
     def activity_scope(self) -> Scope:
         return task_activity_scope(self.scope.database, self.scope.schema)
 
     def scopes(self) -> list[Scope]:
         return [self.scope, self.activity_scope()]
-
-    def row_for(self, key: str) -> dict[str, Any] | None:
-        return self._rows.get(key)
 
     def update_content(self) -> None:
         sync_list_note(

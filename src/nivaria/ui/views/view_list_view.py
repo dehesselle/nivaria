@@ -31,26 +31,23 @@ not because of a cache miss.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
-from nivaria.cache.repository import Repository
 from nivaria.format import (
     format_bytes,
     format_date,
     format_timestamp_minutes,
 )
 from nivaria.models import (
-    ObjectRef,
     ObjectType,
     Scope,
     materialized_view_stats_scope,
     view_stats_scope,
 )
-from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
     LIST_NOTE,
@@ -87,30 +84,10 @@ _TOOLTIP_FIELDS = {
 class ViewListView(CategoryView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.VIEW
 
-    def __init__(self, repo: Repository, scope: Scope) -> None:
-        super().__init__(repo, scope)
-        #: This paint's rows, keyed by view name -- the merged show_views +
-        #: stats dict the hover tooltip reads full-precision values from.
-        self._rows: dict[str, dict[str, Any]] = {}
-
     def compose(self) -> ComposeResult:
         yield Static("", id=LIST_NOTE)
         yield Static("", id=SOURCE_NOTE)
-        table: DataTable[Text] = HoverTooltipTable(
-            self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
-        )
-        table.zebra_stripes = True
-        yield table
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Enter on a row opens that view's detail view, revealed in the
-        tree -- see TableListView's identical handler for the full
-        reasoning."""
-        name = event.row_key.value
-        if name is None:
-            return
-        ref = ObjectRef(ObjectType.VIEW, self.scope.database, self.scope.schema, name)
-        self.post_message(ObjectOpened(ref))
+        yield HoverTooltipTable(self, _TOOLTIP_FIELDS, id=LIST_TABLE)
 
     def stats_scope(self) -> Scope:
         return view_stats_scope(self.scope.database, self.scope.schema)
@@ -120,9 +97,6 @@ class ViewListView(CategoryView):
 
     def scopes(self) -> list[Scope]:
         return [self.scope, self.stats_scope(), self.materialized_stats_scope()]
-
-    def row_for(self, key: str) -> dict[str, Any] | None:
-        return self._rows.get(key)
 
     def update_content(self) -> None:
         sync_list_note(

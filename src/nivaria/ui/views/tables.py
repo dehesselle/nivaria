@@ -29,8 +29,8 @@ history table, detail panel or SQL pane applies to every other view's too.
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from collections.abc import Callable, Iterable, Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from rich.text import Text
@@ -42,9 +42,10 @@ from textual.widgets import DataTable as TextualDataTable
 from textual.widgets import Static
 from textual.widgets.data_table import CellDoesNotExist, ColumnKey, RowKey
 
-from nivaria.cache.repository import Entry, Repository
-from nivaria.format import format_timestamp_full
+from nivaria.cache.repository import Entry
+from nivaria.format import format_timestamp_full, parse_timestamp
 from nivaria.models import CacheState, Scope
+from nivaria.ui.views.base import ObjectView
 
 #: The one list/table in whichever detail view is mounted.
 LIST_TABLE = "detail-list"
@@ -60,8 +61,6 @@ ITEM_DETAIL = "detail-item"
 #: The line above a history table admitting that it is not the whole
 #: history -- see `HistoryView.sync_history_note`.
 HISTORY_NOTE = "detail-history-note"
-#: A single object's defining SQL.
-SQL = "detail-sql"
 #: The line above a list or history saying its rows come from ACCOUNT_USAGE
 #: and lag behind -- see `lag_note`.
 LAG_NOTE = "detail-lag-note"
@@ -206,7 +205,7 @@ class HoverTooltipTable(DataTable):
     def __init__(
         self, view: RowSource, tooltips: dict[str, str], **kwargs: Any
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(cursor_type="row", zebra_stripes=True, **kwargs)
         self._view = view
         self._tooltips = tooltips
 
@@ -295,7 +294,7 @@ class PanelledTable(Vertical):
             self.panel.display = False
 
 
-class HistoryView:
+class HistoryView(ObjectView):
     """A history table in a `PanelledTable`, and the note above the table
     admitting when it was capped, empty, or errored.
 
@@ -306,6 +305,34 @@ class HistoryView:
 
     #: Built in `compose_history`, repainted by the subclass.
     history_panel: PanelledTable
+
+    def merged_rows(
+        self,
+        sources: Iterable[Scope],
+        merge_key: Callable[[dict[str, Any]], Any],
+        time_column: str,
+        show_days: int,
+    ) -> list[dict[str, Any]]:
+        """The rows of `sources` as one history, newest first.
+
+        A later source wins on overlap, which needs no reasoning about which
+        scope succeeded: one that is empty or failed simply adds nothing.
+        Rows older than the display window are left out of the view only, so
+        shrinking that setting needs no refetch.
+        """
+        merged: dict[Any, dict[str, Any]] = {}
+        for scope in sources:
+            for row in self.repo.raw_rows(scope):
+                merged[merge_key(row)] = row
+        cutoff = datetime.now().astimezone() - timedelta(days=show_days)
+        dated = [
+            (moment, row)
+            for row in merged.values()
+            if (moment := parse_timestamp(row.get(time_column))) is not None
+            and moment >= cutoff
+        ]
+        dated.sort(key=lambda pair: pair[0], reverse=True)
+        return [row for _, row in dated]
 
     @abstractmethod
     def detail_text(self, row: dict[str, Any]) -> str | None:
@@ -324,8 +351,7 @@ class HistoryView:
 
     def sync_history_note(
         self,
-        repo: Repository,
-        dated: Sequence[Any],
+        shown: Sequence[Any],
         show_days: int,
         noun: str,
         sources: Sequence[tuple[Scope, int | None]],
@@ -362,14 +388,14 @@ class HistoryView:
         of a cached history keeps its rows and is not waited for, so a
         revisit stays as quiet as before.
 
-        Emptiness is judged against `dated` -- this paint's post-window-
+        Emptiness is judged against `shown` -- this paint's post-window-
         filter merge -- rather than the merge sources' own row counts, since
         the display window (which can be narrower than the fetch window) is
         what actually gates what ends up on screen: older history can exist
         without making today's paint anything but empty.
         """
-        note = self.query_one(f"#{HISTORY_NOTE}", Static)  # type: ignore[attr-defined]
-        covers = [(repo.entry(scope), days) for scope, days in sources]
+        note = self.query_one(f"#{HISTORY_NOTE}", Static)
+        covers = [(self.repo.entry(scope), days) for scope, days in sources]
         entries = [entry for entry, _ in covers]
         capped = any(entry.truncated for entry in entries)
         covered = max(
@@ -385,10 +411,10 @@ class HistoryView:
             ((entry, days) for entry, days in covers if entry.first_fetch_failed),
             (None, None),
         )
-        empty = settled and not dated and not capped
+        empty = settled and not shown and not capped
         looking = not settled and not capped
         error = empty and errored is not None
-        partial = not capped and not error and errored is not None and bool(dated)
+        partial = not capped and not error and errored is not None and bool(shown)
         stale = next(
             (text for entry in entries if (text := failed_refresh(entry))), None
         )
@@ -414,7 +440,7 @@ class HistoryView:
         elif empty:
             note.update(Text(f"No {noun} in the last {show_days} days."))
         elif looking:
-            note.update(Text(_looking(dated, noun, covered)))
+            note.update(Text(_looking(shown, noun, covered)))
 
         failed = not capped and (error or partial or stale is not None)
         note.set_class(capped, "-capped")
@@ -430,12 +456,12 @@ def last_line(message: str | None) -> str:
     return lines[-1].strip() if lines else (message or "")
 
 
-def _looking(dated: Sequence[Any], noun: str, covered: int) -> str:
+def _looking(shown: Sequence[Any], noun: str, covered: int) -> str:
     """What a history note says while some source has not answered yet."""
-    if covered and dated:
+    if covered and shown:
         return f"Showing the last {covered} days. Still looking for older {noun}..."
     if covered:
         return f"No {noun} in the last {covered} days. Still looking..."
-    if dated:
+    if shown:
         return f"Still looking for more {noun}..."
     return f"Looking for {noun}..."

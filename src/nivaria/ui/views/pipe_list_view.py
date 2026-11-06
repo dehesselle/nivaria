@@ -40,7 +40,6 @@ from tcoda.widgets import TabbedContent, TabPane
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
-from nivaria.cache.repository import Repository
 from nivaria.format import (
     format_bytes,
     format_date,
@@ -48,14 +47,12 @@ from nivaria.format import (
 )
 from nivaria.models import (
     CacheState,
-    ObjectRef,
     ObjectType,
     Scope,
     pipe_activity_scope,
     pipe_status_scope,
 )
 from nivaria.snowflake.queries import COPY_HISTORY_PUBLISHED_LAG
-from nivaria.ui.messages import ObjectOpened
 from nivaria.ui.views.base import CategoryView, register_category_view
 from nivaria.ui.views.tables import (
     LIST_NOTE,
@@ -103,12 +100,6 @@ _STATUS_TOOLTIP_FIELDS = {"Created": "created_on"}
 class PipeListView(CategoryView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.PIPE
 
-    def __init__(self, repo: Repository, scope: Scope) -> None:
-        super().__init__(repo, scope)
-        #: This paint's rows, keyed by pipe name -- the merged show_pipes +
-        #: activity dict the hover tooltip reads full-precision values from.
-        self._rows: dict[str, dict[str, Any]] = {}
-
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-status"):
             with TabPane("Activity", mnemonic="a", id="tab-activity"):
@@ -116,37 +107,15 @@ class PipeListView(CategoryView):
                 yield lag_note("Load activity", COPY_HISTORY_PUBLISHED_LAG)
                 yield Static("", id=LIST_NOTE)
                 yield Static("", id=SOURCE_NOTE)
-                activity: DataTable[Text] = HoverTooltipTable(
-                    self, _TOOLTIP_FIELDS, id=LIST_TABLE, cursor_type="row"
-                )
-                activity.zebra_stripes = True
-                yield activity
+                yield HoverTooltipTable(self, _TOOLTIP_FIELDS, id=LIST_TABLE)
             with TabPane("Status", mnemonic="s", id="tab-status"):
                 yield Static("", id=_STATUS_NOTE)
                 yield Static("", id=_STATUS_SOURCE_NOTE)
-                status: DataTable[Text] = HoverTooltipTable(
-                    self, _STATUS_TOOLTIP_FIELDS, id="detail-status", cursor_type="row"
+                status = HoverTooltipTable(
+                    self, _STATUS_TOOLTIP_FIELDS, id="detail-status"
                 )
-                status.zebra_stripes = True
                 status.add_columns(*_STATUS_COLUMNS)
                 yield status
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Enter on a row opens that pipe's detail view, revealed in the tree.
-
-        Takes the same path a search hit does (`MainScreen._select` ->
-        `tree.reveal` + `detail.show`), so the tree cursor follows to the
-        object instead of staying on the category, which would leave nothing
-        on screen naming what the Detail pane shows. Its own message rather
-        than the tree's `ObjectSelected`, which only shows: a tree highlight
-        must never reveal (docs/DESIGN.md "A highlight is not a jump"), and
-        sharing that message is how this once lost its reveal unnoticed.
-        """
-        name = event.row_key.value
-        if name is None:
-            return
-        ref = ObjectRef(ObjectType.PIPE, self.scope.database, self.scope.schema, name)
-        self.post_message(ObjectOpened(ref))
 
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.scope.database, self.scope.schema)
@@ -173,9 +142,6 @@ class PipeListView(CategoryView):
         if self._status_wanted():
             scopes.append(self.status_scope())
         return scopes
-
-    def row_for(self, key: str) -> dict[str, Any] | None:
-        return self._rows.get(key)
 
     def update_content(self) -> None:
         activity_scope = self.activity_scope()

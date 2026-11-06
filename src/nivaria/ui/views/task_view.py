@@ -38,13 +38,12 @@ except by reading it back off cached copy-history data.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
 from rich.text import Text
 from tcoda.widgets import TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.widgets import DataTable, TextArea
+from textual.widgets import DataTable
 
 from nivaria.format import format_timestamp_minutes, parse_timestamp
 from nivaria.models import (
@@ -55,12 +54,8 @@ from nivaria.models import (
 )
 from nivaria.settings import TASK_HISTORY_SHOW_DAYS, config
 from nivaria.snowflake.queries import TASK_HISTORY_RETENTION_DAYS
-from nivaria.ui.views.base import ObjectView, register_view
-from nivaria.ui.views.tables import (
-    HISTORY_TABLE,
-    SQL,
-    HistoryView,
-)
+from nivaria.ui.views.base import register_view
+from nivaria.ui.views.tables import HISTORY_TABLE, HistoryView
 
 _HISTORY_COLUMNS = ("Scheduled", "Started", "Completed", "State")
 
@@ -74,21 +69,14 @@ def _merge_key(row: dict[str, Any]) -> tuple[Any, Any]:
 
 
 @register_view
-class TaskView(HistoryView, ObjectView):
+class TaskView(HistoryView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TASK
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):
             with TabPane("History", mnemonic="h", id="tab-history"):
                 yield from self.compose_history()
-            with TabPane("SQL", mnemonic="s", id="tab-sql"):
-                yield TextArea(
-                    "",
-                    id=SQL,
-                    read_only=True,
-                    soft_wrap=True,
-                    show_line_numbers=False,
-                )
+            yield from self.compose_sql_tab()
 
     def activity_history_scope(self) -> Scope:
         return task_activity_history_scope(
@@ -111,7 +99,7 @@ class TaskView(HistoryView, ObjectView):
 
     def update_content(self) -> None:
         self._update_history()
-        self._update_definition()
+        self.paint_sql("definition")
 
     def _update_history(self) -> None:
         activity_history_scope = self.activity_history_scope()
@@ -119,28 +107,20 @@ class TaskView(HistoryView, ObjectView):
 
         # Merged by (SCHEDULED_TIME, ATTEMPT_NUMBER) -- see the module
         # docstring for why that key and not QUERY_ID.
-        merged: dict[tuple[Any, Any], dict[str, Any]] = {}
-        for r in self.repo.raw_rows(activity_history_scope):
-            merged[_merge_key(r)] = r
-        for r in self.repo.raw_rows(history_scope):
-            merged[_merge_key(r)] = r
-
         show_days = config.get(TASK_HISTORY_SHOW_DAYS)
-        cutoff = datetime.now().astimezone() - timedelta(days=show_days)
-        dated: list[tuple[datetime, dict[str, Any]]] = []
-        for r in merged.values():
-            scheduled_at = parse_timestamp(r.get("SCHEDULED_TIME"))
-            if scheduled_at is not None and scheduled_at >= cutoff:
-                dated.append((scheduled_at, r))
-        dated.sort(key=lambda pair: pair[0], reverse=True)
+        shown = self.merged_rows(
+            [activity_history_scope, history_scope],
+            _merge_key,
+            "SCHEDULED_TIME",
+            show_days,
+        )
 
         # Both merge sources carry their own row cap, and either one hitting
         # it leaves the merged table short -- see HistoryView. Judged against
-        # `dated`, not the merge sources' own row counts -- see
+        # `shown`, not the merge sources' own row counts -- see
         # HistoryView.sync_history_note.
         self.sync_history_note(
-            self.repo,
-            dated,
+            shown,
             show_days,
             "run history",
             [
@@ -154,7 +134,7 @@ class TaskView(HistoryView, ObjectView):
             table.clear(columns=True)
             table.add_columns(*_HISTORY_COLUMNS)
             rows = self.history_panel.rows = {}
-            for _, r in dated:
+            for r in shown:
                 # The run's own identity, not its position, so the cursor is
                 # found again by key after a repaint -- same as PipeView.
                 key = str(_merge_key(r))
@@ -167,11 +147,6 @@ class TaskView(HistoryView, ObjectView):
                     key=key,
                 )
         self.history_panel.sync()
-
-    def _update_definition(self) -> None:
-        row = self.repo.object_detail(self.ref)
-        text = (row or {}).get("definition") or "-- not cached"
-        self.query_one(f"#{SQL}", TextArea).text = text
 
     def detail_text(self, row: dict[str, Any]) -> str | None:
         """A failed run's own error, for the panel under the history table."""

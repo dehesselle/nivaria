@@ -25,12 +25,13 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from tcoda.widgets import TabbedContent
+from tcoda.widgets import TabbedContent, TabPane
+from textual.app import ComposeResult
 from textual.coordinate import Coordinate
 from textual.widget import Widget
-from textual.widgets import DataTable
+from textual.widgets import DataTable, TextArea
 from textual.widgets.data_table import CellDoesNotExist
 
 from nivaria.cache.repository import Repository
@@ -43,7 +44,10 @@ from nivaria.models import (
     objects_scope,
 )
 from nivaria.settings import CACHE_TTL, config
-from nivaria.ui.messages import ScopeNeeded
+from nivaria.ui.messages import ObjectOpened, ScopeNeeded
+
+#: A single object's defining SQL.
+SQL = "detail-sql"
 
 _registry: dict[ObjectType, type[ObjectView]] = {}
 _category_registry: dict[ObjectType, type[CategoryView]] = {}
@@ -58,17 +62,16 @@ class _ScopedView(Widget):
     it needs the exact same freshness and cache-update plumbing.
     """
 
-    #: Set by every concrete subclass. Declared here because `ensure` below
-    #: reads it, so the contract is visible where it is relied on rather than
-    #: only in the three constructors that happen to satisfy it.
-    repo: Repository
-
     #: The scope whose cache update this repaint answers, while it runs.
     _announcing: Scope | None = None
 
     #: Whether the cursor has rested here long enough for `ensure` to ask
     #: anything. `DetailPane` manages it; a view outside one is always settled.
     settled: bool = True
+
+    def __init__(self, repo: Repository) -> None:
+        super().__init__()
+        self.repo = repo
 
     def on_mount(self) -> None:
         self.repaint()
@@ -180,13 +183,30 @@ class ObjectView(_ScopedView):
     OBJECT_TYPE: ClassVar[ObjectType]
 
     def __init__(self, repo: Repository, ref: ObjectRef) -> None:
-        super().__init__()
-        self.repo = repo
+        super().__init__(repo)
         self.ref = ref
 
     def listing_scope(self) -> Scope:
         """The list holding this object's SHOW row, for a view that reads it."""
         return objects_scope(self.ref.type, self.ref.database, self.ref.schema)
+
+    def compose_sql_tab(self) -> ComposeResult:
+        """The tab of a type with a defining statement. See `paint_sql`."""
+        with TabPane("SQL", mnemonic="s", id="tab-sql"):
+            yield TextArea(
+                "",
+                id=SQL,
+                read_only=True,
+                soft_wrap=True,
+                show_line_numbers=False,
+            )
+
+    def paint_sql(self, column: str) -> None:
+        """Show the statement `column` holds in this object's SHOW row, which
+        has no scope of its own: the listing's update repaints it."""
+        row = self.repo.object_detail(self.ref)
+        text = (row or {}).get(column) or "-- not cached"
+        self.query_one(f"#{SQL}", TextArea).text = text
 
     def show(self, ref: ObjectRef) -> None:
         """Re-point an already mounted view at another object of its type.
@@ -208,9 +228,11 @@ class CategoryView(_ScopedView):
     OBJECT_TYPE: ClassVar[ObjectType]
 
     def __init__(self, repo: Repository, scope: Scope) -> None:
-        super().__init__()
-        self.repo = repo
+        super().__init__(repo)
         self.scope = scope
+        #: This paint's rows, keyed by object name: the merged row a hover
+        #: tooltip reads its full-precision value from (`row_for`).
+        self._rows: dict[str, dict[str, Any]] = {}
 
     def show(self, scope: Scope) -> None:
         """Re-point an already mounted view at another category of the same
@@ -218,6 +240,25 @@ class CategoryView(_ScopedView):
         self.scope = scope
         if self.is_mounted:
             self.repaint()
+
+    def row_for(self, key: str) -> dict[str, Any] | None:
+        return self._rows.get(key)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Enter on a row opens that object's detail view, revealed in the tree.
+
+        Takes the same path a search hit does (`MainScreen._select` ->
+        `tree.reveal` + `detail.show`), so the tree cursor follows to the
+        object instead of staying on the category, which would leave nothing
+        on screen naming what the Detail pane shows. Its own message rather
+        than the tree's `ObjectSelected`, which only shows: a tree highlight
+        must never reveal (docs/DESIGN.md "A highlight is not a jump").
+        """
+        name = event.row_key.value
+        if name is None:
+            return
+        ref = ObjectRef(self.OBJECT_TYPE, self.scope.database, self.scope.schema, name)
+        self.post_message(ObjectOpened(ref))
 
 
 def register_view[T: type[ObjectView]](cls: T) -> T:

@@ -58,15 +58,14 @@ target table, being filtered by PIPE_NAME, and it answers sooner.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
 from rich.text import Text
 from tcoda.widgets import TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Static, TextArea
+from textual.widgets import DataTable, Static
 
-from nivaria.format import format_bytes, format_timestamp_minutes, parse_timestamp
+from nivaria.format import format_bytes, format_timestamp_minutes
 from nivaria.models import (
     CacheState,
     ObjectType,
@@ -80,11 +79,10 @@ from nivaria.snowflake.queries import (
     COPY_HISTORY_PUBLISHED_LAG,
     PIPE_HISTORY_RETENTION_DAYS,
 )
-from nivaria.ui.views.base import ObjectView, register_view
+from nivaria.ui.views.base import register_view
 from nivaria.ui.views.tables import (
     HISTORY_TABLE,
     LAG_NOTE,
-    SQL,
     HistoryView,
     lag_note,
 )
@@ -102,7 +100,7 @@ def _merge_key(row: dict[str, Any]) -> tuple[Any, Any]:
 
 
 @register_view
-class PipeView(HistoryView, ObjectView):
+class PipeView(HistoryView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.PIPE
 
     def compose(self) -> ComposeResult:
@@ -110,14 +108,7 @@ class PipeView(HistoryView, ObjectView):
             with TabPane("History", mnemonic="h", id="tab-history"):
                 yield lag_note("Load activity", COPY_HISTORY_PUBLISHED_LAG)
                 yield from self.compose_history()
-            with TabPane("SQL", mnemonic="s", id="tab-sql"):
-                yield TextArea(
-                    "",
-                    id=SQL,
-                    read_only=True,
-                    soft_wrap=True,
-                    show_line_numbers=False,
-                )
+            yield from self.compose_sql_tab()
 
     def activity_scope(self) -> Scope:
         return pipe_activity_scope(self.ref.database, self.ref.schema)
@@ -181,7 +172,7 @@ class PipeView(HistoryView, ObjectView):
 
     def update_content(self) -> None:
         self._update_history()
-        self._update_definition()
+        self.paint_sql("definition")
 
     def _update_history(self) -> None:
         # Not read into the merge -- it only ever holds this pipe's latest
@@ -196,28 +187,18 @@ class PipeView(HistoryView, ObjectView):
         history_scope = self.history_scope() if target is not None else None
 
         # Merged by (FILE_NAME, PIPE_RECEIVED_TIME) -- see the module
-        # docstring for why that key, and why this needs no "which scope
-        # succeeded" branching.
-        merged: dict[tuple[Any, Any], dict[str, Any]] = {}
-        if activity_history_scope is not None:
-            for r in self.repo.raw_rows(activity_history_scope):
-                merged[_merge_key(r)] = r
-        if history_scope is not None:
-            for r in self.repo.raw_rows(history_scope):
-                merged[_merge_key(r)] = r
-
+        # docstring for why that key.
         show_days = config.get(PIPE_HISTORY_SHOW_DAYS)
-        cutoff = datetime.now().astimezone() - timedelta(days=show_days)
-        dated: list[tuple[datetime, dict[str, Any]]] = []
-        for r in merged.values():
-            loaded_at = parse_timestamp(r.get("LAST_LOAD_TIME"))
-            if loaded_at is not None and loaded_at >= cutoff:
-                dated.append((loaded_at, r))
-        dated.sort(key=lambda pair: pair[0], reverse=True)
+        shown = self.merged_rows(
+            [s for s in (activity_history_scope, history_scope) if s is not None],
+            _merge_key,
+            "LAST_LOAD_TIME",
+            show_days,
+        )
 
         # Both merge sources carry their own row cap, and either one hitting
         # it leaves the merged table short -- see HistoryView. Judged against
-        # `dated`, not the merge sources' own row counts -- see
+        # `shown`, not the merge sources' own row counts -- see
         # HistoryView.sync_history_note.
         # The snapshot is a source in its own right: without the backfill it
         # is the answer for the window before the 14-day history, and the
@@ -227,7 +208,7 @@ class PipeView(HistoryView, ObjectView):
         sources: list[tuple[Scope, int | None]] = [(backfill, None)]
         if history_scope is not None:
             sources.append((history_scope, PIPE_HISTORY_RETENTION_DAYS))
-        self.sync_history_note(self.repo, dated, show_days, "load activity", sources)
+        self.sync_history_note(shown, show_days, "load activity", sources)
         # Only ACCOUNT_USAGE speaks for a pipe without a target, or one whose
         # target cannot be read. Otherwise INFORMATION_SCHEMA covers the
         # recent days near real time.
@@ -242,7 +223,7 @@ class PipeView(HistoryView, ObjectView):
             table.clear(columns=True)
             table.add_columns(*_HISTORY_COLUMNS)
             rows = self.history_panel.rows = {}
-            for _, r in dated:
+            for r in shown:
                 # The load's own identity, not its position: a new load arriving
                 # at the top would otherwise shift every row's key, and the
                 # cursor is found again by key after a repaint.
@@ -258,11 +239,6 @@ class PipeView(HistoryView, ObjectView):
                     key=key,
                 )
         self.history_panel.sync()
-
-    def _update_definition(self) -> None:
-        row = self.repo.object_detail(self.ref)
-        text = (row or {}).get("definition") or "-- not cached"
-        self.query_one(f"#{SQL}", TextArea).text = text
 
     def detail_text(self, row: dict[str, Any]) -> str | None:
         """A failed load's own error, for the panel under the history table."""
