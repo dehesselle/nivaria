@@ -15,9 +15,9 @@ Every statement is built in `gateway/queries.py`, and every one is read-only:
 `SNOWFLAKE.ACCOUNT_USAGE`, the Data tab's `SELECT * ... LIMIT n`, and `USE
 ROLE` / `USE WAREHOUSE` when you switch. Once per connect, `SELECT
 CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()` reads the names Snowsight
-links need; it uses no warehouse. The Log panel (`F1`) shows each statement as
-it is sent, and [data-retrieval.md](data-retrieval.md) lists what each screen
-sends.
+links need; it uses no warehouse. At level Debug, the Log panel (`F1`) shows
+each statement as it is sent, and [data-retrieval.md](data-retrieval.md) lists
+what each screen sends.
 
 Every session reports itself as `nivaria` in
 `SNOWFLAKE.ACCOUNT_USAGE.SESSIONS.CLIENT_ENVIRONMENT:APPLICATION`; join on
@@ -195,9 +195,10 @@ under `~/.cache/snowflake/`.
 
 ## Troubleshooting
 
-- **See what nivaria is doing**: `F1` opens the Log panel with every
-  statement as it is sent, before Snowflake answers, so a hung statement is
-  visible too.
+- **See what nivaria is doing**: `F1` opens the Log panel. Set its level to
+  Debug. Every statement from then on appears as it is sent, before Snowflake
+  answers, so a hung statement is visible too. One sent before you lowered the
+  level isn't kept.
 - **Blank columns or tabs**: the session has no warehouse, or the role lacks
   `IMPORTED PRIVILEGES` on `SNOWFLAKE` (see "Warehouse and privileges").
   Everything from `SHOW` still shows.

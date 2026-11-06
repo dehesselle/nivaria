@@ -1903,10 +1903,10 @@ nothing about the cache needs to change when it does.
 ## The SQL log
 
 The `F1` log panel is `tcoda`'s `LogViewer` (see "Shared widgets"), mounted in
-`MainScreen.compose` with its defaults, so nivaria wires nothing for it: the
-widget installs its own key binding and its own screen layer, owns a rolling
-in-memory buffer that exists whether or not the panel is mounted, and offers
-level and source filters of its own.
+`MainScreen.compose` with only its footer entry turned off, so nivaria wires
+nothing for it: the widget installs its own key binding and its own screen
+layer, owns a rolling in-memory buffer that exists whether or not the panel is
+mounted, and offers level and source filters of its own.
 
 What nivaria contributes is the content. **`gateway/sql_log.py` logs every
 statement before it is sent**, not after, and that ordering is the point:
