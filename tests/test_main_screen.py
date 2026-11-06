@@ -247,6 +247,36 @@ async def test_tables_are_searchable_without_expanding_a_schema(tmp_path) -> Non
     assert [text for text, _ in repo.search_corpus(["MYDB"])] == ["AAA.ORDERS"]
 
 
+async def test_a_task_with_no_warehouse_sends_its_failing_statements_once(repo) -> None:
+    """The whole path, through a real FetchService: each failure repaints the
+    view, and on a live account that kept both statements running, at about
+    one login a second, until the cursor moved away."""
+    ref = put_task(repo, "NIGHTLY")
+    gateway = FakeGateway()
+    gateway.raise_on_task_history = True
+    gateway.raise_on_task_activity_history = True
+    app = Harness(repo, None)
+    fetch = FetchService(
+        gateway,
+        repo,
+        notify=lambda scope, complete: app.screen.post_message(
+            CacheUpdated(scope, complete)
+        ),
+    )
+    app._fetch = fetch
+    fetch.start()
+    try:
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.on_object_selected(ObjectSelected(ref))
+            await settle(pilot, rounds=10)
+    finally:
+        fetch.stop()
+    calls = [call for call, _ in gateway.calls]
+    assert calls.count("task_history") == 1
+    assert calls.count("task_activity_history") == 1
+
+
 async def test_a_schema_refresh_does_not_prime_what_was_already_fetched(repo) -> None:
     """Otherwise each schema list refresh would refetch what nobody looks at."""
     put_schemas(repo, "MYDB", "AAA")

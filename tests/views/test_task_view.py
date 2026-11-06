@@ -58,6 +58,71 @@ async def test_opening_a_task_requests_both_history_scopes_unconditionally(
     assert task_history_scope("MYDB", "PUBLIC", "REFRESH_ORDERS").key in app.needed
 
 
+def _fail(repo, scope) -> None:
+    repo.fail_pass(scope, repo.begin_pass(scope), "No active warehouse selected")
+
+
+async def test_a_repaint_does_not_ask_again_for_another_scope_that_failed(repo) -> None:
+    """With no warehouse both of a task's history scopes fail. Each failure
+    repaints the view, and asking for the other from there kept both failing
+    statements running for as long as the task stayed on screen."""
+    ref = put_task(repo, "NIGHTLY")
+    activity = task_activity_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    history = task_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        _fail(repo, activity)
+        _fail(repo, history)
+        app.needed.clear()
+
+        pane.cache_updated(activity)
+        await pilot.pause()
+    assert app.needed == []
+
+
+async def test_a_repaint_still_asks_for_another_scope_that_did_not_fail(repo) -> None:
+    """The guard is about failures only: a repaint is how a scope that became
+    askable, or simply went stale, gets asked for."""
+    ref = put_task(repo, "NIGHTLY")
+    activity = task_activity_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    history = task_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        _fail(repo, activity)
+        app.needed.clear()
+
+        pane.cache_updated(activity)
+        await pilot.pause()
+    assert app.needed == [history.key]
+
+
+async def test_coming_back_to_a_task_asks_again_for_what_failed(repo) -> None:
+    ref = put_task(repo, "NIGHTLY")
+    other = put_task(repo, "HOURLY")
+    activity = task_activity_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    history = task_history_scope("MYDB", "PUBLIC", "NIGHTLY")
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        pane.show(ref)
+        await pilot.pause()
+        _fail(repo, activity)
+        _fail(repo, history)
+        pane.show(other)
+        await pilot.pause()
+        app.needed.clear()
+
+        pane.show(ref)
+        await pilot.pause()
+    assert set(app.needed) == {activity.key, history.key}
+
+
 async def test_a_tasks_history_table_is_empty_with_nothing_cached(repo) -> None:
     ref = put_task(repo, "REFRESH_ORDERS")
     app = Harness(repo)

@@ -33,7 +33,14 @@ from textual.widgets import DataTable
 from textual.widgets.data_table import CellDoesNotExist
 
 from nivaria.cache.repository import Repository
-from nivaria.models import ObjectRef, ObjectType, Scope, is_stale, objects_scope
+from nivaria.models import (
+    CacheState,
+    ObjectRef,
+    ObjectType,
+    Scope,
+    is_stale,
+    objects_scope,
+)
 from nivaria.ui.messages import ScopeNeeded
 
 _registry: dict[ObjectType, type[ObjectView]] = {}
@@ -113,13 +120,13 @@ class _ScopedView(Widget):
     def ensure(self, scope: Scope, ttl: float, *, interactive: bool = True) -> bool:
         """Ask for `scope` if it is missing or stale. Returns whether it asked.
 
-        Never for the scope whose own update is being painted. A scope whose
-        first fetch failed has no `fetched_at` and so always reads as stale,
-        and asking again from the repaint its failure caused made a failing
-        statement retry itself: whether it looped depended only on the
-        worker leaving `FetchService._running` before this ran. Reordering
-        that would make the loop certain rather than remove it. The sweep and
-        navigating back still retry it.
+        Never for the scope whose own update is being painted, nor, from any
+        repaint answering a cache update, for one that failed. A failed scope
+        keeps the `fetched_at` of its last good pass, if it had one, and so
+        reads as stale. Asking from those repaints made a failing statement
+        retry itself, and made two failing scopes on one view retry each other
+        for as long as the view stayed on screen. The sweep, navigating back
+        and a warehouse switch still retry it.
 
         Nor while the cursor is still moving: `DetailPane` calls this for
         every scope once it has rested, so the answer reflects the cache then
@@ -127,7 +134,10 @@ class _ScopedView(Widget):
         """
         if not self.settled or scope == self._announcing:
             return False
-        if is_stale(self.repo.entry(scope).age(), ttl):
+        entry = self.repo.entry(scope)
+        if self._announcing is not None and entry.state is CacheState.ERROR:
+            return False
+        if is_stale(entry.age(), ttl):
             self.post_message(ScopeNeeded(scope, interactive=interactive))
             return True
         return False

@@ -1318,11 +1318,13 @@ selected database's never-fetched listings (see "Database priming"). A TTL of
 `0` disables the sweep entirely.
 
 A view's paint-time check never re-requests the scope whose own update it is
-painting. A scope whose first fetch failed has no `fetched_at`, so it always
-reads as stale, and re-requesting it from the repaint its failure caused
-would make a failing statement (no warehouse, say) retry itself — looping or
-not depending on whether the worker left `FetchService._running` before the
-repaint ran.
+painting, nor, from a repaint answering a cache update, a scope that failed. A
+failed scope keeps the `fetched_at` of its last good pass, if it had one, so it
+reads as stale. Re-requesting it there would make a failing statement (no
+warehouse, say) retry itself, and two failing scopes on one view retry each
+other for as long as the view stayed on screen. Reading `Entry.due` there
+instead would not do: it would also hold back navigating back, which retries at
+once.
 
 ---
 
