@@ -302,7 +302,7 @@ class FetchService:
             return
         scope = job.scope
         cursor = page.cursor
-        if not self._repo.write_page(scope, generation, page.rows, cursor):
+        if not self._repo.write_page(scope, generation, page.rows):
             # A newer pass claimed this scope while the page was in flight.
             return
 

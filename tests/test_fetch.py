@@ -649,7 +649,7 @@ def test_a_failing_fetch_records_the_error_and_keeps_stale_rows(repo) -> None:
 
     scope = databases_scope()
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.write_page(scope, generation, [{"name": "ACME"}])
     repo.finish_pass(scope, generation)
 
     errors: list[tuple[str, str]] = []
@@ -673,7 +673,7 @@ def cache_schemas(repo, database: str, *names: str) -> None:
     scope = schemas_scope(database)
     generation = repo.begin_pass(scope)
     rows = [{"name": name, "database_name": database} for name in names]
-    repo.write_page(scope, generation, rows, None)
+    repo.write_page(scope, generation, rows)
     repo.finish_pass(scope, generation)
 
 
@@ -1283,7 +1283,7 @@ def prime_gateway() -> FakeGateway:
 def load_schemas_named(repo, gateway, database: str) -> None:
     scope = schemas_scope(database)
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, gateway.show_schemas(database), None)
+    repo.write_page(scope, generation, gateway.show_schemas(database))
     repo.finish_pass(scope, generation)
 
 
@@ -1853,7 +1853,6 @@ def test_pipe_history_resolves_a_never_loaded_pipes_target_from_its_definition(
                 "definition": "COPY INTO mydb.raw.orders FROM @s",
             }
         ],
-        None,
     )
     repo.finish_pass(pipes, generation)
     history_scope = pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS")
@@ -2172,7 +2171,7 @@ def test_a_failed_page_budget_leaves_the_rows_that_were_already_there(repo) -> N
 
     scope = databases_scope()
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, [{"name": "YESTERDAY", "comment": ""}], None)
+    repo.write_page(scope, generation, [{"name": "YESTERDAY", "comment": ""}])
     repo.finish_pass(scope, generation)
 
     config.set(MAX_PAGES_PER_PASS, 2)

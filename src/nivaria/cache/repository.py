@@ -11,7 +11,7 @@ The write side is a **pass protocol**, and it is what makes a chunked refresh
 safe to show while it is still running::
 
     generation = repo.begin_pass(scope)                    # claims the scope
-    repo.write_page(scope, generation, rows, next_cursor)  # repeat per page
+    repo.write_page(scope, generation, rows)               # repeat per page
     repo.finish_pass(scope, generation)                    # sweep + complete
 
 Every row a pass writes is stamped with that pass's generation. Rows are only
@@ -1023,13 +1023,12 @@ class Repository:
                 """
                 INSERT INTO cache_entry
                     (scope, state, generation, fetched_at, attempted_at,
-                     next_cursor, row_count, error, truncated)
-                VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, 0)
+                     row_count, error, truncated)
+                VALUES (?, ?, ?, ?, ?, 0, NULL, 0)
                 ON CONFLICT(scope) DO UPDATE SET
                     state = excluded.state,
                     generation = excluded.generation,
                     attempted_at = excluded.attempted_at,
-                    next_cursor = NULL,
                     row_count = 0,
                     error = NULL,
                     truncated = 0
@@ -1049,7 +1048,6 @@ class Repository:
         scope: Scope,
         generation: int,
         rows: Sequence[dict[str, Any]],
-        next_cursor: str | None,
     ) -> bool:
         """Upsert one page. Returns False if this pass has been superseded.
 
@@ -1058,16 +1056,14 @@ class Repository:
         their writes have to be rejected on arrival instead.
         """
         spec = spec_for(scope)
-        now = time.time()
         with self._store(scope).connect() as connection:
             if self._entry(connection, scope).generation != generation:
                 return False
             if rows:
-                self._upsert(connection, spec, scope, generation, rows, now)
+                self._upsert(connection, spec, scope, generation, rows)
             connection.execute(
-                "UPDATE cache_entry SET next_cursor = ?, row_count = row_count + ? "
-                "WHERE scope = ?",
-                (next_cursor, len(rows), scope.key),
+                "UPDATE cache_entry SET row_count = row_count + ? WHERE scope = ?",
+                (len(rows), scope.key),
             )
         return True
 
@@ -1078,9 +1074,8 @@ class Repository:
         scope: Scope,
         generation: int,
         rows: Sequence[dict[str, Any]],
-        now: float,
     ) -> None:
-        columns = (*spec.columns, "_scope", "_generation", "_fetched_at")
+        columns = (*spec.columns, "_scope", "_generation")
         placeholders = ", ".join("?" for _ in columns)
         quoted = ", ".join(_quote(column) for column in columns)
         conflict = ", ".join(_quote(column) for column in spec.key)
@@ -1099,8 +1094,7 @@ class Repository:
         connection.executemany(
             statement,
             [
-                [row.get(column) for column in spec.columns]
-                + [scope.key, generation, now]
+                [row.get(column) for column in spec.columns] + [scope.key, generation]
                 for row in rows
             ],
         )
@@ -1164,8 +1158,7 @@ class Repository:
             connection.execute(
                 """
                 UPDATE cache_entry
-                   SET state = ?, fetched_at = attempted_at, next_cursor = NULL,
-                       row_count = ?, error = NULL, truncated = ?,
+                   SET state = ?, fetched_at = attempted_at, row_count = ?, error = NULL, truncated = ?,
                        covered_from = COALESCE(?, covered_from)
                  WHERE scope = ?
                 """,
@@ -1247,7 +1240,7 @@ class Repository:
         """
         for scope, rows in grouped.items():
             generation = self.begin_pass(scope, started_at)
-            self.write_page(scope, generation, rows, None)
+            self.write_page(scope, generation, rows)
             self.finish_pass(scope, generation)
 
     def fail_pass(self, scope: Scope, generation: int, error: str) -> bool:

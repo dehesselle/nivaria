@@ -27,7 +27,6 @@
 -- a Snowflake column name:
 --   _scope       which cache_entry row owns this row
 --   _generation  the refresh pass that last wrote it (see mark-and-sweep)
---   _fetched_at  when that pass wrote it
 
 CREATE TABLE IF NOT EXISTS show_databases (
     name            TEXT NOT NULL PRIMARY KEY,
@@ -40,8 +39,7 @@ CREATE TABLE IF NOT EXISTS show_databases (
     origin          TEXT,
     retention_time  TEXT,
     _scope          TEXT    NOT NULL,
-    _generation     INTEGER NOT NULL,
-    _fetched_at     REAL    NOT NULL
+    _generation     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS show_databases_scope ON show_databases(_scope);
 
@@ -56,7 +54,6 @@ CREATE TABLE IF NOT EXISTS show_schemas (
     retention_time  TEXT,
     _scope          TEXT    NOT NULL,
     _generation     INTEGER NOT NULL,
-    _fetched_at     REAL    NOT NULL,
     PRIMARY KEY (database_name, name)
 );
 CREATE INDEX IF NOT EXISTS show_schemas_scope ON show_schemas(_scope);
@@ -87,7 +84,6 @@ CREATE TABLE IF NOT EXISTS show_tables (
     is_dynamic           TEXT,
     _scope               TEXT    NOT NULL,
     _generation          INTEGER NOT NULL,
-    _fetched_at          REAL    NOT NULL,
     PRIMARY KEY (database_name, schema_name, name)
 );
 CREATE INDEX IF NOT EXISTS show_tables_scope ON show_tables(_scope);
@@ -106,7 +102,6 @@ CREATE TABLE IF NOT EXISTS show_views (
     change_tracking TEXT,
     _scope          TEXT    NOT NULL,
     _generation     INTEGER NOT NULL,
-    _fetched_at     REAL    NOT NULL,
     PRIMARY KEY (database_name, schema_name, name)
 );
 CREATE INDEX IF NOT EXISTS show_views_scope ON show_views(_scope);
@@ -131,7 +126,6 @@ CREATE TABLE IF NOT EXISTS show_pipes (
     is_snowflake_managed TEXT,
     _scope               TEXT    NOT NULL,
     _generation          INTEGER NOT NULL,
-    _fetched_at          REAL    NOT NULL,
     PRIMARY KEY (database_name, schema_name, name)
 );
 CREATE INDEX IF NOT EXISTS show_pipes_scope ON show_pipes(_scope);
@@ -154,7 +148,6 @@ CREATE TABLE IF NOT EXISTS show_stages (
     directory_enabled   TEXT,
     _scope              TEXT    NOT NULL,
     _generation         INTEGER NOT NULL,
-    _fetched_at         REAL    NOT NULL,
     PRIMARY KEY (database_name, schema_name, name)
 );
 CREATE INDEX IF NOT EXISTS show_stages_scope ON show_stages(_scope);
@@ -178,7 +171,6 @@ CREATE TABLE IF NOT EXISTS show_tasks (
     last_suspended_on TEXT,
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
-    _fetched_at       REAL    NOT NULL,
     PRIMARY KEY (database_name, schema_name, name)
 );
 CREATE INDEX IF NOT EXISTS show_tasks_scope ON show_tasks(_scope);
@@ -205,7 +197,6 @@ CREATE TABLE IF NOT EXISTS information_schema_columns (
     _desc_type               TEXT,
     _scope                   TEXT    NOT NULL,
     _generation              INTEGER NOT NULL,
-    _fetched_at              REAL    NOT NULL,
     PRIMARY KEY (TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME)
 );
 CREATE INDEX IF NOT EXISTS information_schema_columns_scope
@@ -226,7 +217,6 @@ CREATE TABLE IF NOT EXISTS information_schema_tables (
     LAST_ALTERED  TEXT,
     _scope        TEXT    NOT NULL,
     _generation   INTEGER NOT NULL,
-    _fetched_at   REAL    NOT NULL,
     PRIMARY KEY (TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME)
 );
 CREATE INDEX IF NOT EXISTS information_schema_tables_scope
@@ -253,7 +243,6 @@ CREATE TABLE IF NOT EXISTS information_schema_views (
     LAST_ALTERED  TEXT,
     _scope        TEXT    NOT NULL,
     _generation   INTEGER NOT NULL,
-    _fetched_at   REAL    NOT NULL,
     PRIMARY KEY (TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME)
 );
 CREATE INDEX IF NOT EXISTS information_schema_views_scope
@@ -281,7 +270,6 @@ CREATE TABLE IF NOT EXISTS show_materialized_views (
     bytes         INTEGER,
     _scope        TEXT    NOT NULL,
     _generation   INTEGER NOT NULL,
-    _fetched_at   REAL    NOT NULL,
     PRIMARY KEY (database_name, schema_name, name)
 );
 CREATE INDEX IF NOT EXISTS show_materialized_views_scope
@@ -319,7 +307,6 @@ CREATE TABLE IF NOT EXISTS account_usage_copy_history (
     FIRST_ERROR_LINE_NUMBER INTEGER,
     _scope                  TEXT    NOT NULL,
     _generation             INTEGER NOT NULL,
-    _fetched_at             REAL    NOT NULL,
     PRIMARY KEY (PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME, FILE_NAME, LAST_LOAD_TIME)
 );
 CREATE INDEX IF NOT EXISTS account_usage_copy_history_scope
@@ -352,7 +339,6 @@ CREATE TABLE IF NOT EXISTS account_usage_copy_history_detail (
     FIRST_ERROR_LINE_NUMBER INTEGER,
     _scope                  TEXT    NOT NULL,
     _generation             INTEGER NOT NULL,
-    _fetched_at             REAL    NOT NULL,
     PRIMARY KEY (_scope, FILE_NAME, LAST_LOAD_TIME)
 );
 CREATE INDEX IF NOT EXISTS account_usage_copy_history_detail_scope
@@ -376,7 +362,6 @@ CREATE TABLE IF NOT EXISTS information_schema_copy_history (
     FIRST_ERROR_LINE_NUMBER INTEGER,
     _scope                  TEXT    NOT NULL,
     _generation             INTEGER NOT NULL,
-    _fetched_at             REAL    NOT NULL,
     PRIMARY KEY (_scope, FILE_NAME, LAST_LOAD_TIME)
 );
 CREATE INDEX IF NOT EXISTS information_schema_copy_history_scope
@@ -395,7 +380,6 @@ CREATE TABLE IF NOT EXISTS system_pipe_status (
     PIPE_STATUS       TEXT,
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
-    _fetched_at       REAL    NOT NULL,
     PRIMARY KEY (PIPE_CATALOG_NAME, PIPE_SCHEMA_NAME, PIPE_NAME)
 );
 CREATE INDEX IF NOT EXISTS system_pipe_status_scope
@@ -434,7 +418,6 @@ CREATE TABLE IF NOT EXISTS account_usage_task_history (
     ERROR_MESSAGE     TEXT,
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
-    _fetched_at       REAL    NOT NULL,
     PRIMARY KEY (DATABASE_NAME, SCHEMA_NAME, NAME, SCHEDULED_TIME, ATTEMPT_NUMBER)
 );
 CREATE INDEX IF NOT EXISTS account_usage_task_history_scope
@@ -463,7 +446,6 @@ CREATE TABLE IF NOT EXISTS account_usage_task_history_detail (
     ERROR_MESSAGE     TEXT,
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
-    _fetched_at       REAL    NOT NULL,
     -- Not QUERY_ID, for the reason given on account_usage_task_history.
     PRIMARY KEY (_scope, SCHEDULED_TIME, ATTEMPT_NUMBER)
 );
@@ -494,7 +476,6 @@ CREATE TABLE IF NOT EXISTS information_schema_task_history (
     ERROR_MESSAGE     TEXT,
     _scope            TEXT    NOT NULL,
     _generation       INTEGER NOT NULL,
-    _fetched_at       REAL    NOT NULL,
     PRIMARY KEY (_scope, SCHEDULED_TIME, ATTEMPT_NUMBER)
 );
 CREATE INDEX IF NOT EXISTS information_schema_task_history_scope
@@ -527,7 +508,6 @@ CREATE TABLE IF NOT EXISTS show_grants (
     granted_by_role_type  TEXT,
     _scope                TEXT    NOT NULL,
     _generation           INTEGER NOT NULL,
-    _fetched_at           REAL    NOT NULL,
     PRIMARY KEY (_scope, granted_to, grantee_name, privilege, granted_on, name, granted_by, created_on)
 );
 CREATE INDEX IF NOT EXISTS show_grants_scope ON show_grants(_scope);
@@ -555,7 +535,6 @@ CREATE TABLE IF NOT EXISTS information_schema_tag_references (
     DOMAIN       TEXT,
     _scope       TEXT    NOT NULL,
     _generation  INTEGER NOT NULL,
-    _fetched_at  REAL    NOT NULL,
     PRIMARY KEY (_scope, TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE)
 );
 CREATE INDEX IF NOT EXISTS information_schema_tag_references_scope
@@ -580,7 +559,6 @@ CREATE TABLE IF NOT EXISTS information_schema_tag_references_all_columns (
     COLUMN_NAME  TEXT,
     _scope       TEXT    NOT NULL,
     _generation  INTEGER NOT NULL,
-    _fetched_at  REAL    NOT NULL,
     PRIMARY KEY (_scope, COLUMN_NAME, TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE)
 );
 CREATE INDEX IF NOT EXISTS information_schema_tag_references_all_columns_scope
@@ -597,8 +575,7 @@ CREATE TABLE IF NOT EXISTS show_warehouses (
     size        TEXT,
     is_default  TEXT,
     _scope      TEXT    NOT NULL,
-    _generation INTEGER NOT NULL,
-    _fetched_at REAL    NOT NULL
+    _generation INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS show_warehouses_scope ON show_warehouses(_scope);
 
@@ -606,8 +583,7 @@ CREATE TABLE IF NOT EXISTS show_roles (
     name        TEXT NOT NULL PRIMARY KEY,
     comment     TEXT,
     _scope      TEXT    NOT NULL,
-    _generation INTEGER NOT NULL,
-    _fetched_at REAL    NOT NULL
+    _generation INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS show_roles_scope ON show_roles(_scope);
 
@@ -623,15 +599,13 @@ CREATE TABLE IF NOT EXISTS cache_entry (
     -- the first page asked for rather than the last one received; a failed
     -- pass is retried one TTL after it.
     attempted_at REAL,
-    next_cursor TEXT,
     row_count   INTEGER NOT NULL DEFAULT 0,
     error       TEXT,
     -- Whether the statement behind the last completed pass hit its own
     -- row cap, so rows exist that were deliberately not fetched. Distinct
     -- from ERROR (nothing arrived) and from COMPLETE (everything did):
     -- the rows here are real and current, there are just more of them
-    -- upstream. Added in place, which means an existing cache file has to
-    -- be deleted -- see the header above.
+    -- upstream.
     truncated   INTEGER NOT NULL DEFAULT 0,
     -- Only for a log scope (see TableSpec.log): the epoch back to which the
     -- stored rows are complete, set by a full pass. A window pass asks only

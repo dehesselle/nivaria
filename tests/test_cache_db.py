@@ -11,9 +11,9 @@ import pytest
 
 from nivaria.cache.db import _SCHEMA_SCRIPTS, SCHEMA_VERSION, Database, MemoryDatabase
 
-#: The SHA-256 of the schema scripts as of SCHEMA_VERSION 8. Change it only
+#: The SHA-256 of the schema scripts as of SCHEMA_VERSION 10. Change it only
 #: together with a bump of SCHEMA_VERSION.
-SCHEMA_DIGEST = "85f15e9bca5e77c7d9cf453c7b157c745f0de6442baafce7e4e1d8082a08a57d"
+SCHEMA_DIGEST = "55f9c445d968b4f47e09fe7a13bb86ae6ff71cd3e3b6a9521cb3b594d478f60b"
 
 
 def test_prepare_creates_the_file_and_its_parent_directory(tmp_path) -> None:
@@ -82,7 +82,7 @@ def test_a_schema_change_comes_with_a_version_bump() -> None:
     search.sql therefore fails here until both the version and the digest
     above are updated."""
     digest = hashlib.sha256("".join(_SCHEMA_SCRIPTS).encode()).hexdigest()
-    assert (SCHEMA_VERSION, digest) == (9, SCHEMA_DIGEST), (
+    assert (SCHEMA_VERSION, digest) == (10, SCHEMA_DIGEST), (
         "the schema scripts changed: bump SCHEMA_VERSION in cache/db.py, then "
         "update the version and SCHEMA_DIGEST in this test"
     )
@@ -171,8 +171,8 @@ def test_a_memory_database_keeps_its_rows_between_units_of_work() -> None:
     database = MemoryDatabase()
     with database.connect() as connection:
         connection.execute(
-            "INSERT INTO data_preview (_row_number, _values, _scope, _generation,"
-            " _fetched_at) VALUES (0, '{}', 'data_preview:MYDB.PUBLIC.ORDERS', 1, 0)"
+            "INSERT INTO data_preview (_row_number, _values, _scope, _generation)"
+            " VALUES (0, '{}', 'data_preview:MYDB.PUBLIC.ORDERS', 1)"
         )
     with database.connect() as connection:
         assert (

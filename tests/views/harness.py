@@ -59,7 +59,7 @@ class Harness(App[None]):
 
 def load(repo: Repository, scope, rows, *, truncated: bool = False) -> None:
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, rows, None)
+    repo.write_page(scope, generation, rows)
     repo.finish_pass(scope, generation, truncated=truncated)
 
 

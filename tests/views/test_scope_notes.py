@@ -202,7 +202,6 @@ async def test_the_status_tab_says_how_far_a_first_status_pass_got(repo) -> None
             }
             for name in ("P_A", "P_B")
         ],
-        "P_B",
     )
     app = Harness(repo)
     async with app.run_test(size=(100, 30)) as pilot:

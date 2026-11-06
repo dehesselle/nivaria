@@ -17,7 +17,6 @@ CREATE TABLE IF NOT EXISTS data_preview (
     _values     TEXT    NOT NULL,
     _scope      TEXT    NOT NULL,
     _generation INTEGER NOT NULL,
-    _fetched_at REAL    NOT NULL,
     PRIMARY KEY (_scope, _row_number)
 );
 CREATE INDEX IF NOT EXISTS data_preview_scope ON data_preview(_scope);

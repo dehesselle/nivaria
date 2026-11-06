@@ -56,7 +56,7 @@ def table_rows(*names: str) -> list[dict]:
 
 def load(repo: Repository, scope, rows) -> None:
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, rows, None)
+    repo.write_page(scope, generation, rows)
     repo.finish_pass(scope, generation)
 
 
@@ -147,11 +147,11 @@ def test_pages_become_visible_before_the_pass_finishes(repo) -> None:
     user can see, rather than staying blank until the last page lands."""
     scope = databases_scope()
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, db_rows("ACME"), next_cursor="ACME")
+    repo.write_page(scope, generation, db_rows("ACME"))
     assert [d.name for d in repo.databases(scope)] == ["ACME"]
     assert repo.entry(scope).state is CacheState.PARTIAL
 
-    repo.write_page(scope, generation, db_rows("BETA"), next_cursor=None)
+    repo.write_page(scope, generation, db_rows("BETA"))
     repo.finish_pass(scope, generation)
     assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
 
@@ -164,7 +164,7 @@ def test_a_refresh_never_shows_an_empty_list_on_the_way_to_a_full_one(repo) -> N
 
     generation = repo.begin_pass(scope)
     assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
-    repo.write_page(scope, generation, db_rows("ACME"), next_cursor="ACME")
+    repo.write_page(scope, generation, db_rows("ACME"))
     assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
     repo.finish_pass(scope, generation)
     assert [d.name for d in repo.databases(scope)] == ["ACME"]
@@ -183,7 +183,7 @@ def test_an_unfinished_pass_sweeps_nothing(repo) -> None:
     scope = databases_scope()
     load(repo, scope, db_rows("ACME", "BETA"))
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, db_rows("ACME"), next_cursor="ACME")
+    repo.write_page(scope, generation, db_rows("ACME"))
     assert [d.name for d in repo.databases(scope)] == ["ACME", "BETA"]
 
 
@@ -219,12 +219,12 @@ def test_a_superseded_pass_cannot_write(repo) -> None:
     current = repo.begin_pass(scope)
     assert stale != current
 
-    assert repo.write_page(scope, stale, db_rows("GHOST"), None) is False
+    assert repo.write_page(scope, stale, db_rows("GHOST")) is False
     assert repo.databases(scope) == []
     assert repo.finish_pass(scope, stale) is False
     assert repo.fail_pass(scope, stale, "boom") is False
 
-    assert repo.write_page(scope, current, db_rows("ACME"), None) is True
+    assert repo.write_page(scope, current, db_rows("ACME")) is True
     assert repo.finish_pass(scope, current) is True
     assert [d.name for d in repo.databases(scope)] == ["ACME"]
 
@@ -436,7 +436,7 @@ def fail_old_rows(repo, scope, fetched_ago: float, attempted_ago: float) -> None
     `attempted_ago` seconds back."""
     now = time.time()
     generation = repo.begin_pass(scope, now - fetched_ago)
-    repo.write_page(scope, generation, db_rows("ACME"), None)
+    repo.write_page(scope, generation, db_rows("ACME"))
     repo.finish_pass(scope, generation)
     repo.fail_pass(scope, repo.begin_pass(scope, now - attempted_ago), "no warehouse")
 
@@ -464,8 +464,8 @@ def test_rows_count_as_fetched_when_their_pass_began(repo) -> None:
     scope = databases_scope()
     started = time.time() - 30
     generation = repo.begin_pass(scope, started)
-    repo.write_page(scope, generation, db_rows("ACME"), "ACME")
-    repo.write_page(scope, generation, db_rows("BETA"), None)
+    repo.write_page(scope, generation, db_rows("ACME"))
+    repo.write_page(scope, generation, db_rows("BETA"))
     repo.finish_pass(scope, generation)
     assert repo.entry(scope).fetched_at == started
 
@@ -1270,7 +1270,7 @@ def test_a_pass_is_not_truncated_unless_it_says_so(repo) -> None:
     about must not claim rows are missing."""
     scope = databases_scope()
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.write_page(scope, generation, [{"name": "ACME"}])
     repo.finish_pass(scope, generation)
     assert not repo.entry(scope).truncated
 
@@ -1282,7 +1282,7 @@ def test_a_truncated_pass_is_still_complete_not_an_error(repo) -> None:
     of them upstream."""
     scope = databases_scope()
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.write_page(scope, generation, [{"name": "ACME"}])
     repo.finish_pass(scope, generation, truncated=True)
     entry = repo.entry(scope)
     assert entry.truncated
@@ -1295,12 +1295,12 @@ def test_a_new_pass_clears_a_previous_truncation(repo) -> None:
     flag -- otherwise the note outlives the condition it describes."""
     scope = databases_scope()
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.write_page(scope, generation, [{"name": "ACME"}])
     repo.finish_pass(scope, generation, truncated=True)
 
     generation = repo.begin_pass(scope)
     assert not repo.entry(scope).truncated
-    repo.write_page(scope, generation, [{"name": "ACME"}], None)
+    repo.write_page(scope, generation, [{"name": "ACME"}])
     repo.finish_pass(scope, generation)
     assert not repo.entry(scope).truncated
 
@@ -1417,13 +1417,13 @@ def _load_row(pipe: str, at: float, file: str = "a.csv") -> dict:
 
 def _full_pass(repo, scope, rows, covered_from: float = 0.0) -> None:
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, rows, None)
+    repo.write_page(scope, generation, rows)
     repo.finish_pass(scope, generation, covered_from=covered_from)
 
 
 def _window_pass(repo, scope, rows, prune: Prune, *, truncated=False) -> None:
     generation = repo.begin_pass(scope)
-    repo.write_page(scope, generation, rows, None)
+    repo.write_page(scope, generation, rows)
     repo.finish_pass(scope, generation, truncated=truncated, prune=prune)
 
 

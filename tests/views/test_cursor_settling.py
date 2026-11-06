@@ -37,7 +37,7 @@ def waiting() -> None:
 
 def _fetched_long_ago(repo: Repository, scope) -> None:
     generation = repo.begin_pass(scope, time.time() - 10 * config.get(CACHE_TTL))
-    repo.write_page(scope, generation, [], None)
+    repo.write_page(scope, generation, [])
     repo.finish_pass(scope, generation)
 
 
