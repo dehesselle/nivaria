@@ -591,18 +591,27 @@ class Entry:
         disagree. Zero or less once due; None when a `ttl` of 0 disables
         refreshing.
 
-        EMPTY is due at once: a scope claimed by a pass that has not finished
-        yet carries the previous pass's fetched_at, so it can read as fresh
-        while holding no rows. A failed refresh keeps its old `fetched_at`,
-        so it ages from its last attempt instead. Aged by `fetched_at`, it
-        would read as overdue forever, and every sweep would rerun the
-        failing statement.
+        A failed refresh keeps its old `fetched_at`, so it ages from its last
+        attempt instead. Aged by `fetched_at`, it would read as overdue
+        forever, and every sweep would rerun the failing statement.
         """
-        if self.state is CacheState.EMPTY:
-            return 0.0
         if self.state is CacheState.ERROR:
             return due_in(_since(self.attempted_at, now), ttl)
         return due_in(self.age(now), ttl)
+
+    @property
+    def answered(self) -> bool:
+        """Whether this scope has an answer on record, failed or not.
+
+        A refresh keeps the previous rows and their `fetched_at`, so only a
+        first fetch counts as unanswered.
+        """
+        return self.fetched_at is not None or self.state is CacheState.ERROR
+
+    @property
+    def first_fetch_failed(self) -> bool:
+        """Whether it failed with no earlier pass's rows to fall back on."""
+        return self.state is CacheState.ERROR and self.fetched_at is None
 
 
 def _since(moment: float | None, now: float | None) -> float | None:
@@ -651,8 +660,7 @@ def plan_window(entry: Entry, fetch_seconds: int, margin: float, now: float) -> 
     """
     full = Window(seconds=fetch_seconds, full=True)
     if (
-        entry.state is CacheState.EMPTY
-        or entry.fetched_at is None
+        entry.fetched_at is None
         or entry.covered_from is None
         or entry.covered_from > now - fetch_seconds
     ):

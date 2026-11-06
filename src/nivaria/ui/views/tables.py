@@ -107,18 +107,6 @@ def failed_refresh(entry: Entry) -> str | None:
     )
 
 
-def _answered(entry: Entry) -> bool:
-    """Whether a scope has an answer on record, failed or not.
-
-    A refresh keeps the previous rows and their `fetched_at`, so only a
-    first fetch counts as unanswered. EMPTY can carry a `fetched_at` with no
-    rows behind it -- see `Entry.due`.
-    """
-    if entry.state is CacheState.ERROR:
-        return True
-    return entry.fetched_at is not None and entry.state is not CacheState.EMPTY
-
-
 def sync_scope_note(
     note: Static, entry: Entry, *, empty: str, looking: str | None = None
 ) -> None:
@@ -132,10 +120,10 @@ def sync_scope_note(
     is not waited for, so a revisit stays quiet. Same toggle-display,
     recompute-in-full-every-repaint shape as `HistoryView.sync_history_note`.
     """
-    error = entry.state is CacheState.ERROR and entry.fetched_at is None
+    error = entry.first_fetch_failed
     stale = failed_refresh(entry)
     is_empty = entry.state is CacheState.COMPLETE and entry.row_count == 0
-    is_looking = looking is not None and not _answered(entry)
+    is_looking = looking is not None and not entry.answered
     if error:
         note.update(Text(f"Could not fetch: {entry.error}"))
     elif stale is not None:
@@ -170,7 +158,7 @@ def source_line(
     first fetch is out the line says so, with `progress` if the pass has
     some to report. A refresh of values already on record stays quiet.
     """
-    if entry.state is CacheState.ERROR and entry.fetched_at is None:
+    if entry.first_fetch_failed:
         return f"{label}: could not fetch: {last_line(entry.error)}", True
     if entry.state is CacheState.ERROR:
         assert entry.fetched_at is not None
@@ -180,7 +168,7 @@ def source_line(
             f"{last_line(entry.error)}"
         )
         return text, True
-    if not _answered(entry):
+    if not entry.answered:
         return f"{label}: {progress or 'looking'}...", False
     return None
 
@@ -388,23 +376,13 @@ class HistoryView:
             (
                 days
                 for entry, days in covers
-                if days is not None and _has_rows_on_record(entry)
+                if days is not None and entry.fetched_at is not None
             ),
             default=0,
         )
-        settled = (
-            all(
-                entry.state is CacheState.ERROR or _has_rows_on_record(entry)
-                for entry in entries
-            )
-            or covered >= show_days
-        )
+        settled = all(entry.answered for entry in entries) or covered >= show_days
         errored, errored_days = next(
-            (
-                (entry, days)
-                for entry, days in covers
-                if entry.state is CacheState.ERROR and entry.fetched_at is None
-            ),
+            ((entry, days) for entry, days in covers if entry.first_fetch_failed),
             (None, None),
         )
         empty = settled and not dated and not capped
@@ -442,15 +420,6 @@ class HistoryView:
         note.set_class(capped, "-capped")
         note.set_class(failed, "-error")
         note.display = capped or failed or empty or looking
-
-
-def _has_rows_on_record(entry: Entry) -> bool:
-    """Whether a scope's cached rows are some pass's whole answer.
-
-    A refresh keeps the previous rows and their `fetched_at` while it runs.
-    EMPTY can carry a `fetched_at` with no rows behind it -- see `Entry.due`.
-    """
-    return entry.fetched_at is not None and entry.state is not CacheState.EMPTY
 
 
 def last_line(message: str | None) -> str:

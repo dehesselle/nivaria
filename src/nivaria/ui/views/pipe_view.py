@@ -160,9 +160,9 @@ class PipeView(HistoryView, ObjectView):
         same view and would fail the same way.
         """
         entry = self.repo.entry(self.activity_scope())
-        if entry.state is CacheState.ERROR and entry.fetched_at is None:
+        if entry.first_fetch_failed:
             return False
-        if entry.fetched_at is None or entry.state is CacheState.EMPTY:
+        if entry.fetched_at is None:
             return True
         idle = self.repo.pipe_idle_as_of(
             self.ref.database, self.ref.schema, self.ref.name

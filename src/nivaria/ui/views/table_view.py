@@ -48,7 +48,6 @@ from nivaria.ui.views.tables import (
     GRANTS_NOTE,
     SOURCE_NOTE,
     PanelledTable,
-    failed_refresh,
     source_line,
     sync_scope_note,
     sync_source_note,
@@ -355,29 +354,21 @@ class ColumnsView(ObjectView):
         """
         note = self.query_one(f"#{DATA_NOTE}", Static)
         entry = self.repo.entry(self.data_scope())
-        error = entry.state is CacheState.ERROR and entry.fetched_at is None
-        stale = failed_refresh(entry)
-        empty = entry.state is CacheState.COMPLETE and count == 0
-        capped = entry.truncated and count > 0
-        # Only a first fetch: a refresh keeps the rows on screen.
-        looking = entry.state is not CacheState.ERROR and (
-            entry.fetched_at is None or entry.state is CacheState.EMPTY
+        sync_scope_note(
+            note,
+            entry,
+            empty=f"No rows in this {self.ref.type.value.lower()}.",
+            looking="Looking for rows...",
         )
-        if error:
-            note.update(Text(f"Could not fetch: {entry.error}"))
-        elif stale is not None:
-            note.update(Text(stale))
-        elif empty:
-            note.update(Text(f"No rows in this {self.ref.type.value.lower()}."))
-        elif capped:
+        # Excludes everything the note above can say: a pass that failed or
+        # is still running has `truncated` cleared, and one that came back
+        # empty has nothing on screen to be capped.
+        if entry.truncated and count > 0:
             detail = self.repo.object_detail(self.ref) or {}
             total = detail.get("rows")
             of = f" of {total:,}" if isinstance(total, int) and total > count else ""
             note.update(Text(f"Showing {count:,}{of} rows, in no particular order."))
-        elif looking:
-            note.update(Text("Looking for rows..."))
-        note.set_class(error or stale is not None, "-error")
-        note.display = error or stale is not None or empty or capped or looking
+            note.display = True
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
