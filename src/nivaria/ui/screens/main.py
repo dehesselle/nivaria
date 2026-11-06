@@ -33,8 +33,10 @@ from nivaria.models import (
     Warehouse,
     databases_scope,
     filling_prime,
+    objects_scope,
     prime_scope,
     roles_scope,
+    schemas_scope,
     warehouses_scope,
 )
 from nivaria.profiles import ProfileStore
@@ -66,7 +68,7 @@ from nivaria.ui.views import (  # noqa: F401 -- registers views
     view_view,
 )
 from nivaria.ui.widgets.detail_pane import DetailPane
-from nivaria.ui.widgets.object_tree import NodeType, ObjectTree
+from nivaria.ui.widgets.object_tree import TREE_TYPES, NodeType, ObjectTree
 from nivaria.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
 from nivaria.version import __version__
 
@@ -217,7 +219,9 @@ class MainScreen(Screen):
         ]
         # The countdown runs its own spinner off this, so there is no frame
         # counter to drive from here any more.
-        countdown.refreshing = any(self._busy(scope) for scope in watched)
+        countdown.refreshing = self._priming() or any(
+            self._busy(scope) for scope in watched
+        )
 
         # Read at the point of use, so changing it in settings takes effect
         # without a restart.
@@ -246,6 +250,39 @@ class MainScreen(Screen):
         return self.fetch.is_busy(scope) or (
             prime is not None and self.fetch.is_busy(prime)
         )
+
+    def _priming(self) -> bool:
+        """Whether a selected database's object lists are being fetched.
+
+        A prime for schemas nobody expanded fills no watched scope, so the
+        spinner would settle early, and a search opened then keeps a partial
+        corpus until it is reopened.
+        """
+        if self.fetch is None:
+            return False
+        return any(
+            self.fetch.is_busy(prime_scope(object_type, database))
+            for database in self.databases
+            for object_type in TREE_TYPES
+        )
+
+    def _prime_unfetched(self, database: str) -> None:
+        """Fetch the object lists of `database` that were never fetched.
+
+        Search reads only the cache, so without this it finds no objects until
+        a schema has been expanded. Never-fetched rather than stale: a refresh
+        of what nobody is looking at would be work nobody is waiting on, and
+        this runs again on every schema list refresh. Needs the schema list:
+        without it a prime cannot complete an empty schema, and one over the
+        chunk threshold would fan out to nothing.
+        """
+        schemas = self.repo.schemas(schemas_scope(database)).rows
+        for object_type in TREE_TYPES:
+            listings = [
+                objects_scope(object_type, database, schema.name) for schema in schemas
+            ]
+            if self.repo.unfetched_scopes(listings):
+                self._request(prime_scope(object_type, database), Priority.BACKGROUND)
 
     def _idle_watched(self) -> list[Scope]:
         """The scopes on screen that nothing is fetching yet.
@@ -313,7 +350,21 @@ class MainScreen(Screen):
     # --------------------------------------------------------------- routing
 
     def on_cache_updated(self, event: CacheUpdated) -> None:
-        self._route_cache_update(event.scope)
+        scope = event.scope
+        self._route_cache_update(scope)
+        if (
+            event.complete
+            and scope.type is ScopeType.SCHEMAS
+            and scope.database in self.databases
+        ):
+            self._prime_unfetched(scope.database)
+
+    def on_screen_resume(self) -> None:
+        # A cache update only reaches this screen while it is on top, so a
+        # schema list landing behind a dialog would otherwise leave its
+        # database unprimed until that list next refreshes.
+        for database in self.databases:
+            self._prime_unfetched(database)
 
     def _route_cache_update(self, scope: Scope) -> None:
         self.tree.cache_updated(scope)
@@ -396,6 +447,10 @@ class MainScreen(Screen):
             self.fetch.cancel_where(lambda scope: scope.database in removed)
         self.tree.set_databases(databases)
         self.detail.clear()
+        # A schema list still fresh in the cache is not fetched again, so no
+        # update will come to prime from.
+        for database in databases:
+            self._prime_unfetched(database)
 
     @work
     async def action_pick_databases(self) -> None:

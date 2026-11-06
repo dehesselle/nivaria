@@ -846,6 +846,21 @@ Schemas that returned nothing still get a completed pass. Otherwise they would
 read as "never fetched", the tree would keep asking, and the node would never
 settle.
 
+A selected database is primed without being browsed, because search reads only
+the cache and would otherwise find no objects until a schema has been expanded.
+`MainScreen._prime_unfetched` requests the prime of every object type with a
+schema whose listing was never fetched, at background priority. An expand still
+overtakes it, and it can never cause an MFA prompt. It runs when a completed
+schema list lands, when a database is selected, since a schema list still fresh
+in the cache brings no update, and when a dialog closes, since an update only
+reaches `MainScreen` while it is on top.
+
+- **Never fetched, not stale.** It runs on every schema list refresh, and asking
+  for stale listings there would keep refreshing what nobody is looking at. So a
+  warm start sends nothing, and a schema created later costs one prime per type.
+- **Only with a schema list.** Without one a prime cannot complete an empty
+  schema, and one over the chunk threshold would fan out to nothing.
+
 > **Do not add keyset paging to the database-wide prime.** Object names are not
 > unique across schemas — an `ORDERS` table in forty schemas is forty rows
 > sharing one cursor value — so resuming after a name silently skips the rest
@@ -1291,8 +1306,9 @@ With nothing left to count, the countdown shows the full TTL. Scopes nobody
 is looking at are never refreshed this way; anything urgent was already
 requested interactively on the way in (`_ScopedView.ensure`,
 `ObjectTree._ensure`). Nothing else fetches in the background except the
-initial requests `MainScreen.on_mount` issues at startup. A TTL of `0`
-disables the sweep entirely.
+initial requests `MainScreen.on_mount` issues at startup and the prime of a
+selected database's never-fetched listings (see "Database priming"). A TTL of
+`0` disables the sweep entirely.
 
 A view's paint-time check never re-requests the scope whose own update it is
 painting. A scope whose first fetch failed has no `fetched_at`, so it always
@@ -1663,6 +1679,13 @@ background update would not reach a live corpus here any more than it
 reaches the tree or detail pane while any other modal (the database picker,
 say) is on top. Closing and reopening the dialog picks up whatever changed in
 between.
+
+That includes a dialog opened while a selected database is still being primed
+(see "Database priming"): its corpus stays partial until it is reopened. So the
+footer spinner stays on for those primes (`MainScreen._priming`), though they
+fill no watched scope, and a settled spinner means search is complete. The one
+exception is a prime over the chunk threshold: the spinner ends with the prime,
+not with the per-schema jobs it fans out to.
 
 ### Matching and ranking
 

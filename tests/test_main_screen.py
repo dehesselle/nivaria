@@ -29,6 +29,8 @@ from nivaria.models import (
     schemas_scope,
 )
 from nivaria.profiles import Profile, ProfileStore
+from nivaria.service.fetch import FetchService
+from nivaria.service.jobs import Priority
 from nivaria.settings import SNOWSIGHT_URL, config
 from nivaria.ui.messages import ScopeNeeded
 from nivaria.ui.screens.main import CacheUpdated, MainScreen
@@ -36,7 +38,7 @@ from nivaria.ui.screens.multipicker import MultiPickerDialog
 from nivaria.ui.screens.picker import PickerDialog
 from nivaria.ui.views.schema_view import DatabaseView, SchemaView
 from nivaria.ui.widgets.object_tree import ObjectTree
-from tests.fakes import FakeConnector, make_pool
+from tests.fakes import FakeConnector, FakeGateway, make_pool
 
 
 class RecordingFetch:
@@ -155,6 +157,183 @@ async def test_no_database_is_selected_initially(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         assert app.screen.databases == []
+
+
+# ------------------------------------------------------------- startup prime
+
+STARTUP_PRIMES = {
+    f"{object_type.plural}@MYDB"
+    for object_type in (
+        ObjectType.TABLE,
+        ObjectType.VIEW,
+        ObjectType.PIPE,
+        ObjectType.STAGE,
+        ObjectType.TASK,
+    )
+}
+
+
+async def test_a_selected_databases_objects_are_primed_once_its_schemas_land(
+    repo,
+) -> None:
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await settle(pilot)
+        assert not STARTUP_PRIMES & set(fetch.scopes)
+
+        put_schemas(repo, "MYDB", "AAA")
+        screen.post_message(CacheUpdated(schemas_scope("MYDB"), True))
+        await settle(pilot)
+    assert STARTUP_PRIMES <= set(fetch.scopes)
+
+
+async def test_a_startup_prime_waits_for_the_last_page_of_the_schema_list(repo) -> None:
+    """A prime completes only the schemas known when it runs, so a partial
+    list would leave the rest reading as never fetched."""
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        put_schemas(repo, "MYDB", "AAA")
+        screen.post_message(CacheUpdated(schemas_scope("MYDB"), False))
+        await settle(pilot)
+    assert not STARTUP_PRIMES & set(fetch.scopes)
+
+
+async def test_tables_are_searchable_without_expanding_a_schema(tmp_path) -> None:
+    """The whole path, through a real FetchService and the corpus search reads."""
+    database = Database(tmp_path / "cache.db")
+    assert database.prepare()
+    repo = Repository(database)
+    gateway = FakeGateway(
+        schemas={"MYDB": ["AAA"]},
+        objects={("MYDB", "AAA", ObjectType.TABLE): ["ORDERS"]},
+    )
+    app = Harness(repo, None)
+    fetch = FetchService(
+        gateway,
+        repo,
+        notify=lambda scope, complete: app.screen.post_message(
+            CacheUpdated(scope, complete)
+        ),
+    )
+    app._fetch = fetch
+    fetch.start()
+    try:
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.set_databases(["MYDB"])
+            for _ in range(100):
+                await settle(pilot, rounds=1)
+                if repo.search_corpus(["MYDB"]):
+                    break
+    finally:
+        fetch.stop()
+    assert [text for text, _ in repo.search_corpus(["MYDB"])] == ["AAA.ORDERS"]
+
+
+async def test_a_schema_refresh_does_not_prime_what_was_already_fetched(repo) -> None:
+    """Otherwise each schema list refresh would refetch what nobody looks at."""
+    put_schemas(repo, "MYDB", "AAA")
+    for object_type in (
+        ObjectType.TABLE,
+        ObjectType.VIEW,
+        ObjectType.PIPE,
+        ObjectType.STAGE,
+        ObjectType.TASK,
+    ):
+        load(repo, objects_scope(object_type, "MYDB", "AAA"), [])
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        screen.post_message(CacheUpdated(schemas_scope("MYDB"), True))
+        await settle(pilot)
+    assert not STARTUP_PRIMES & set(fetch.scopes)
+
+
+async def test_a_fresh_schema_list_with_unfetched_objects_is_still_primed(repo) -> None:
+    """A fresh schema list is not fetched again, so no update will announce it."""
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.set_databases(["MYDB"])
+        await settle(pilot)
+    assert "schemas:MYDB" not in fetch.scopes
+    assert STARTUP_PRIMES <= set(fetch.scopes)
+
+
+async def test_a_schema_list_that_landed_behind_a_dialog_is_primed_when_it_closes(
+    repo,
+) -> None:
+    """A cache update only reaches the main screen while it is on top."""
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        app.push_screen(MultiPickerDialog(["MYDB"], title="Databases"))
+        await settle(pilot)
+        put_schemas(repo, "MYDB", "AAA")
+        assert not STARTUP_PRIMES & set(fetch.scopes)
+
+        app.pop_screen()
+        await settle(pilot)
+    assert STARTUP_PRIMES <= set(fetch.scopes)
+
+
+async def test_the_spinner_stays_on_while_a_startup_prime_runs(repo) -> None:
+    """Nothing watched depends on it, yet it decides what a search would find."""
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await settle(pilot)
+        fetch.busy = {"tables@MYDB"}
+        screen._tick()
+        assert screen.countdown.refreshing
+
+        fetch.busy = set()
+        screen._tick()
+        assert not screen.countdown.refreshing
+
+
+async def test_an_expand_overtakes_a_queued_startup_prime(repo) -> None:
+    """The prime is at background priority; expanding asks for it at a higher
+    one, which FetchService.request lets supersede what is queued."""
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await settle(pilot)
+        assert ("tables@MYDB", int(Priority.BACKGROUND)) in fetch.requests
+
+        tree = screen.query_one(ObjectTree)
+        tree.root.children[0].expand()
+        await pilot.pause()
+        tree.root.children[0].children[0].expand()
+        await settle(pilot)
+    assert ("tables@MYDB", int(Priority.VISIBLE)) in fetch.requests
 
 
 # ----------------------------------------------------------------- routing

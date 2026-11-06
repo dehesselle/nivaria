@@ -480,6 +480,22 @@ def test_a_failed_refresh_is_listed_as_failed_and_keeps_its_rows_age(repo) -> No
     assert repo.failed_scopes([scope, schemas_scope("MYDB")]) == [scope]
 
 
+def test_a_scope_nothing_has_fetched_counts_as_unfetched(repo) -> None:
+    assert repo.unfetched_scopes([schemas_scope("MYDB")]) == [schemas_scope("MYDB")]
+
+
+def test_a_failed_first_fetch_counts_as_unfetched(repo) -> None:
+    scope = schemas_scope("MYDB")
+    repo.fail_pass(scope, repo.begin_pass(scope), "no warehouse")
+    assert repo.unfetched_scopes([scope]) == [scope]
+
+
+def test_a_scope_fetched_empty_does_not_count_as_unfetched(repo) -> None:
+    scope = schemas_scope("MYDB")
+    repo.finish_pass(scope, repo.begin_pass(scope))
+    assert repo.unfetched_scopes([scope]) == []
+
+
 def test_next_due_is_none_when_refreshing_is_off(repo) -> None:
     assert repo.next_due(0, [databases_scope()]) is None
 

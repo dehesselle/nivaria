@@ -169,7 +169,10 @@ search, `escape` closes it without choosing. Opening an object also reveals
 it in the tree; opening a schema expands it there and shows its Grants and
 Tags.
 
-Search covers what is cached. Column names are not searched.
+Search covers what is cached. The objects of a selected database are fetched
+in the background the first time, without browsing it; the footer spinner runs
+until that is done. A search opened before then shows what has arrived so far,
+and reopening it shows the rest. Column names are not searched.
 
 ## Detail views
 

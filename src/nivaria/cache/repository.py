@@ -1089,6 +1089,12 @@ class Repository:
             if entry.state is CacheState.ERROR
         ]
 
+    def unfetched_scopes(self, among: Iterable[Scope]) -> list[Scope]:
+        """Which of `among` have never completed a fetch."""
+        return [
+            scope for scope, entry in self._entries(among) if entry.fetched_at is None
+        ]
+
     def _entries(self, among: Iterable[Scope]) -> Iterator[tuple[Scope, Entry]]:
         """Each scope's ledger entry, read from whichever store holds it."""
         with self._db.connect() as cached, self._previews.connect() as previews:
