@@ -23,8 +23,9 @@ from __future__ import annotations
 from typing import ClassVar
 
 from rich.text import Text
+from tcoda.widgets import DataTable
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from nivaria.format import format_date
 from nivaria.models import ObjectType, Scope

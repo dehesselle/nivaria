@@ -36,9 +36,9 @@ import json
 from typing import Any, ClassVar
 
 from rich.text import Text
-from tcoda.widgets import TabbedContent, TabPane
+from tcoda.widgets import DataTable, TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from nivaria.format import (
     format_bytes,
@@ -89,11 +89,18 @@ _ACTIVITY_COLUMNS = (
 )
 
 
-#: Which merged-row field a tooltip-bearing column's full value comes
-#: from, keyed by that column's header, one map per tab. Every other column
-#: has no tooltip.
-_TOOLTIP_FIELDS = {"Loaded": "LAST_LOAD_TIME"}
-_STATUS_TOOLTIP_FIELDS = {"Created": "created_on"}
+#: Which merged-row field holds the raw value behind a shortened column,
+#: keyed by that column's header, one map per tab. Every other column has no
+#: tooltip.
+_TOOLTIP_FIELDS = {
+    "Rows": "ROW_COUNT",
+    "Size": "FILE_SIZE",
+    "Loaded": "LAST_LOAD_TIME",
+}
+_STATUS_TOOLTIP_FIELDS = {
+    "Created": "created_on",
+    "Pending Files": "pendingFileCount",
+}
 
 
 @register_category_view
@@ -142,6 +149,13 @@ class PipeListView(CategoryView):
         if self._status_wanted():
             scopes.append(self.status_scope())
         return scopes
+
+    def table_scopes(self) -> list[Scope]:
+        # Per tab, not `scopes()`: the Activity tab shows nothing of a status
+        # pass, which is only fetched while its own tab is up.
+        if self._tab_shown("tab-status"):
+            return [self.scope, self.status_scope()]
+        return [self.scope, self.activity_scope()]
 
     def update_content(self) -> None:
         activity_scope = self.activity_scope()
@@ -204,7 +218,11 @@ class PipeListView(CategoryView):
             for row in self.repo.raw_rows(self.scope):
                 name = row["name"]
                 status = status_by_name.get(name, {})
-                merged = {**row, **activity_by_name.get(name, {})}
+                merged = {
+                    **row,
+                    **activity_by_name.get(name, {}),
+                    "pendingFileCount": status.get("pendingFileCount"),
+                }
                 self._rows[name] = merged
                 row_count = merged.get("ROW_COUNT")
                 activity_table.add_row(

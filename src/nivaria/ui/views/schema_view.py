@@ -41,9 +41,9 @@ from abc import abstractmethod
 from typing import ClassVar
 
 from rich.text import Text
-from tcoda.widgets import TabbedContent, TabPane
+from tcoda.widgets import DataTable, TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from nivaria.cache.repository import Repository
 from nivaria.models import SchemaRef, Scope, grants_scope, tag_references_scope
@@ -72,7 +72,7 @@ class _GrantsTagsView(_ScopedView):
                 yield self.grants_panel
             with TabPane("Tags", mnemonic="t", id="tab-tags"):
                 yield Static("", id=TAGS_NOTE)
-                tags: DataTable[Text] = DataTable(id="detail-tags", cursor_type="row")
+                tags = DataTable(id="detail-tags", cursor_type="row")
                 tags.zebra_stripes = True
                 yield tags
 
@@ -87,6 +87,11 @@ class _GrantsTagsView(_ScopedView):
         if self._tab_shown("tab-tags"):
             scopes.append(self.tags_scope())
         return scopes
+
+    def table_scopes(self) -> list[Scope]:
+        return [
+            self.tags_scope() if self._tab_shown("tab-tags") else self.grants_scope()
+        ]
 
     def update_content(self) -> None:
         grants = self.grants_scope()
@@ -140,6 +145,9 @@ class SchemaView(_GrantsTagsView):
         if self.is_mounted:
             self.repaint()
 
+    def export_identity(self) -> tuple[str, str]:
+        return self.NOUN, f"{self.ref.database}.{self.ref.name}"
+
     def grants_scope(self) -> Scope:
         return grants_scope(self.ref.database, self.ref.name)
 
@@ -159,6 +167,9 @@ class DatabaseView(_GrantsTagsView):
         self.database = database
         if self.is_mounted:
             self.repaint()
+
+    def export_identity(self) -> tuple[str, str]:
+        return self.NOUN, self.database
 
     def grants_scope(self) -> Scope:
         return grants_scope(self.database, None)

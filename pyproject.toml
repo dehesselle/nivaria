@@ -17,7 +17,7 @@ dependencies = [
     # cursor.execute(timeout=), and caches tokens in Windows Credential
     # Manager with no fallback for OAuth tokens over its size limit.
     "snowflake-connector-python[secure-local-storage]>=4.7.3,<5",
-    "tcoda>=0.10.1,<0.11",
+    "tcoda>=0.11.0,<0.12",
     "textual>=8.2.8,<9",
 ]
 

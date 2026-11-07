@@ -986,7 +986,7 @@ dev = [
 requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "snowflake-connector-python", extras = ["secure-local-storage"], specifier = ">=4.7.3,<5" },
-    { name = "tcoda", specifier = ">=0.10.1,<0.11" },
+    { name = "tcoda", specifier = ">=0.11.0,<0.12" },
     { name = "textual", specifier = ">=8.2.8,<9" },
 ]
 
@@ -1343,15 +1343,15 @@ wheels = [
 
 [[package]]
 name = "tcoda"
-version = "0.10.1"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "platformdirs" },
     { name = "textual" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/22/32/bd3597983b9f7b86841555a24629e95a473ba713b0e2d2878bc395de992a/tcoda-0.10.1.tar.gz", hash = "sha256:32c4535fb5db50c28dec7557a3c67380c6f4eab67289841f50e2bc747a800d60", size = 184997, upload-time = "2026-11-06T00:55:57.528Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/d2/60473946643fe87b53769fd09862028df0eaadce07fb6c0816c013298067/tcoda-0.11.0.tar.gz", hash = "sha256:33d4e844519413b60baef6f24fa640def791ac81ca2bf75fc737837b630a48ee", size = 195533, upload-time = "2026-11-07T14:02:49.108Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/32/f8/1e45df4ea96aac0eb3be28769e573bfcf2734665bb5ffaa8c6a7006ffe67/tcoda-0.10.1-py3-none-any.whl", hash = "sha256:9d4fcde6ea283363314010181b295473a7625398a9f473ff4e405aee5e7b61e6", size = 125068, upload-time = "2026-11-06T00:55:56.292Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/82/d506a9806f968b1c195b4a15edd4e16c583dbdc072223aeed6a7834b00f9/tcoda-0.11.0-py3-none-any.whl", hash = "sha256:2929f9b0e7a7f97b0a98a7812e27cf22b678364561f7e226224d334a23781a0d", size = 128714, upload-time = "2026-11-07T14:02:47.604Z" },
 ]
 
 [[package]]

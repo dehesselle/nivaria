@@ -112,6 +112,7 @@ other.
 | `, a i` | Info: the session's account, role and warehouse in full, and whether it uses PrivateLink |
 | `, w w` | Open Workspaces in Snowsight, to write SQL |
 | `, w o` | Open the object under the cursor in Snowsight |
+| `, e` | Export the table on screen as a CSV (see "Exporting a table") |
 | `, s` | Settings |
 | `, ?` | About |
 
@@ -242,6 +243,45 @@ looking, when there is nothing to show, or why they could not fetch.
 When a refresh fails, the rows already shown stay, and a note above the list,
 History or Data table says when they were fetched.
 
+Hovering a shortened cell in a list or a history shows its raw value: a timestamp
+in full, the exact row count or size in bytes.
+
+## Exporting a table
+
+`, e` saves the table the Detail pane shows as a CSV in your Downloads folder, and
+a message says where. It works wherever the focus is. There is nothing to export on
+a SQL tab or from an empty table, and nivaria says so instead of writing a file.
+
+**The Data tab is not exported.** Its rows can be personal data, and nivaria does
+not write them to disk.
+
+The file holds the rows nivaria has at that moment, in the order shown, and sends
+nothing to Snowflake. A cell shortened on screen is written with its raw value: a
+timestamp in full with its UTC offset, the exact row count, the size in bytes. A
+few columns are written as shown because they have no single raw value: a grantee's
+Privileges, the Tags count, and Materialized. What the panel below a table shows,
+such as a load's error, is not in the file.
+
+The filename says what the file is and when it was taken, so a later export never
+replaces an earlier one:
+
+```text
+partial_pipe_history_MYDB.PUBLIC.LOAD_ORDERS_20261107-143005.csv
+table_columns_MYDB.PUBLIC.ORDERS_20261107-143005.csv
+```
+
+**`partial_` means the file may not hold every row Snowflake has.** It is there
+unless everything the table is filled from has finished without hitting a row cap.
+A pipe's or task's history always has it, because a history only ever covers a time
+window. Any other table has it while one of its sources is still being fetched or
+after one failed, so exporting again later can give a file without it.
+
+The file is UTF-8 with a byte order mark, so that Excel reads it correctly, and the
+**CSV delimiter** setting decides what separates its columns.
+
+Values are written as they are. A spreadsheet evaluates a cell starting with `=`,
+and object names, comments and file names can start with one.
+
 ## Session labels
 
 - **Role** (top of the Object tree's border): the session's current role.
@@ -288,6 +328,7 @@ restart.
 | max pages per refresh | 50 | Pages one refresh may fetch before it gives up with an error. |
 | result row ceiling | 200000 | Most rows read from any single statement before it is abandoned with an error. `0` disables it. |
 | prime chunk threshold | 10000 | Result size above which a whole-database fetch is redone per schema. |
+| CSV delimiter | operating system | What separates the columns of an export: `comma`, `semicolon`, or `operating system`, which is what Excel follows when it opens a CSV. That is the list separator in Windows' region settings. macOS and Linux have no such setting, so there it is a semicolon where the locale's decimal point is a comma, otherwise a comma. |
 
 Settings live in `settings.json` (see
 [OPERATIONS.md](OPERATIONS.md#files-on-disk)); only values that differ from

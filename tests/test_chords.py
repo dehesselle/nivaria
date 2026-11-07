@@ -85,6 +85,7 @@ async def test_the_panel_offers_the_documented_commands_at_the_top(repo) -> None
         assert entries(app) == [
             ("?", "About"),
             ("a", "+Account"),
+            ("e", "Export"),
             ("s", "Settings"),
             ("w", "+Web"),
         ]

@@ -11,7 +11,9 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
+import io
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from importlib.resources import files
 from math import ceil
 from typing import ClassVar
@@ -25,6 +27,7 @@ from textual.content import Content
 from textual.screen import Screen
 
 from nivaria.cache.repository import Repository
+from nivaria.export import EXPORT_DELIVERY, csv_delimiter, export_filename
 from nivaria.models import (
     CacheState,
     ObjectRef,
@@ -76,6 +79,7 @@ from nivaria.ui.views import (  # noqa: F401 -- registers views
     view_list_view,
     view_view,
 )
+from nivaria.ui.views.table_view import DATA_TABLE
 from nivaria.ui.widgets.detail_pane import DetailPane
 from nivaria.ui.widgets.object_tree import TREE_TYPES, NodeType, ObjectTree
 from nivaria.ui.widgets.status_bar import PoolGauge
@@ -124,6 +128,7 @@ class MainScreen(Screen):
         Binding("comma a i", "show_info", "Info", show=False),
         Binding("comma w w", "open_workspaces", "Workspaces", show=False),
         Binding("comma w o", "open_in_snowsight", "Object under cursor", show=False),
+        Binding("comma e", "export_table", "Export", show=False),
         Binding("comma s", "settings", "Settings", show=False),
         Binding("comma ?", "about", "About", show=False),
         Binding("slash", "search", "Search"),
@@ -742,6 +747,38 @@ class MainScreen(Screen):
                 continue
             self.repo.forget_coverage(scope)
             self._request(scope, Priority.INTERACTIVE)
+
+    def action_export_table(self) -> None:
+        """Save the table on screen as a CSV in the Downloads folder.
+
+        `NivariaApp` reports how it went, since Textual delivers on a thread
+        and tells only the app.
+        """
+        view = self.detail.view
+        table = view.shown_table() if view is not None else None
+        if table is not None and table.id == DATA_TABLE:
+            # docs/DESIGN.md "Table data never reaches the disk": these rows can
+            # be personal data.
+            self.notify(
+                "The Data tab's rows are not exported: table data stays off the disk.",
+                severity="warning",
+                timeout=5,
+            )
+            return
+        if table is None or not table.row_count:
+            self.notify("No rows here to export.", severity="warning", timeout=3)
+            return
+        self.app.deliver_text(
+            io.StringIO(table.to_csv(delimiter=csv_delimiter(), tooltips=True)),
+            save_filename=export_filename(
+                view.export_subject(),
+                complete=view.holds_full_result(),
+                now=datetime.now().astimezone(),
+            ),
+            # Excel only detects UTF-8 with a BOM.
+            encoding="utf-8-sig",
+            name=EXPORT_DELIVERY,
+        )
 
     def _snowsight_base(self) -> str | None:
         """The account's Snowsight URL, or None after saying how to set one."""

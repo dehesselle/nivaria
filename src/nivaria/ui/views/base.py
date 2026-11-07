@@ -27,11 +27,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, ClassVar
 
-from tcoda.widgets import TabbedContent, TabPane
+from tcoda.widgets import DataTable, TabbedContent, TabPane
 from textual.app import ComposeResult
 from textual.coordinate import Coordinate
 from textual.widget import Widget
-from textual.widgets import DataTable, TextArea
+from textual.widgets import TextArea
 from textual.widgets.data_table import CellDoesNotExist
 
 from nivaria.cache.repository import Repository
@@ -109,6 +109,49 @@ class _ScopedView(Widget):
     def _tab_shown(self, tab: str) -> bool:
         """Whether `tab` is up, for a scope fetched only while its tab is."""
         return self.is_mounted and self.query_one(TabbedContent).active == tab
+
+    # --------------------------------------------------------------- export
+
+    def shown_table(self) -> DataTable | None:
+        """The table on screen, or None on a tab without one.
+
+        Asked of the view rather than of the focus: only one table is on screen
+        at a time, so an export works from the tree cursor just the same.
+        """
+        tabs = self.query(TabbedContent)
+        root = tabs.first().active_pane if tabs else self
+        tables = root.query(DataTable) if root is not None else None
+        return tables.first() if tables else None
+
+    @abstractmethod
+    def export_identity(self) -> tuple[str, str]:
+        """What an export calls this view's kind and its target."""
+
+    def export_subject(self) -> str:
+        """What an export of the shown table is about, e.g.
+        `pipe_history_DB.SCHEMA.MY_PIPE`."""
+        noun, identity = self.export_identity()
+        tabs = self.query(TabbedContent)
+        tab = tabs.first().active.removeprefix("tab-") if tabs else None
+        return "_".join(part for part in (noun, tab, identity) if part)
+
+    def table_scopes(self) -> list[Scope]:
+        """The scopes filling the shown table. Empty says its rows are never
+        known to be the whole result, such as a history, which only ever
+        covers a time window."""
+        return []
+
+    def holds_full_result(self) -> bool:
+        """Whether the shown table is known to hold every row Snowflake has.
+
+        A failed or still running pass, or one that hit its row cap, leaves
+        that unknown, so the file admits it: `export.export_filename`.
+        """
+        scopes = self.table_scopes()
+        return bool(scopes) and all(
+            entry.state is CacheState.COMPLETE and not entry.truncated
+            for entry in map(self.repo.entry, scopes)
+        )
 
     @contextmanager
     def keeping_cursor(self, table: DataTable) -> Iterator[None]:
@@ -190,6 +233,9 @@ class ObjectView(_ScopedView):
         super().__init__(repo)
         self.ref = ref
 
+    def export_identity(self) -> tuple[str, str]:
+        return self.ref.type.value.lower(), self.ref.fqn
+
     def listing_scope(self) -> Scope:
         """The list holding this object's SHOW row, for a view that reads it."""
         return objects_scope(self.ref.type, self.ref.database, self.ref.schema)
@@ -247,6 +293,12 @@ class CategoryView(_ScopedView):
 
     def row_for(self, key: str) -> dict[str, Any] | None:
         return self._rows.get(key)
+
+    def export_identity(self) -> tuple[str, str]:
+        return self.OBJECT_TYPE.plural, f"{self.scope.database}.{self.scope.schema}"
+
+    def table_scopes(self) -> list[Scope]:
+        return self.scopes()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Enter on a row opens that object's detail view, revealed in the tree.

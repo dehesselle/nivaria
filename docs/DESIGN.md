@@ -385,7 +385,8 @@ in-memory sqlite database (`MemoryDatabase`), one per `Repository`, never in
 the cache file. `Repository` picks the database by scope type, so no caller
 knows the difference. The memory database has its own `cache_entry`, so a
 preview's freshness lives and dies with its rows. Previews are gone when the
-app exits, and a reconnect or role switch starts without them.
+app exits, and a reconnect or role switch starts without them. For the same reason
+an export refuses the Data tab (see "Exporting a table").
 
 Keeping previews in the file and deleting them is not enough. SQLite leaves
 deleted content in free pages and in the `-wal` file until something
@@ -1616,9 +1617,10 @@ gates the user-facing toggle).
 `ui/views/tables.py` holds what the views above have in common, and each
 piece is there because duplicated versions drift:
 
-- **`HoverTooltipTable`** — shows a cell's full-precision timestamp on
-  hover, for the five list views whose columns are too narrow for one. It
-  maps a **column header** to the field holding the untruncated value, not a
+- **`HoverTooltipTable`** — holds the raw value behind a shortened cell in its
+  tooltip, for the list and history views: a full-precision timestamp, an exact
+  count or size. An export reads the same tooltips (see "Exporting a table"). It
+  maps a **column header** to the field holding the raw value, not a
   *column index*, so reordering a view's columns cannot silently aim its
   tooltips at the wrong one.
 - **`_ScopedView.keeping_cursor`** — wraps a table's clear-and-repopulate
@@ -1653,6 +1655,47 @@ table, detail panel or SQL pane applies to every other view's too. The panel
 is the exception, because one view can hold two: it is styled by the class
 `detail-item`, and each panel's id is its table's plus `-item`
 (`detail-columns-item`, `detail-grants-item`).
+
+### Exporting a table
+
+`, e` hands the table on screen to tcoda's `DataTable.to_csv` and the result to
+`App.deliver_text`, which saves to the Downloads folder. Every table is tcoda's for
+this reason. Only one table is on screen at a time, so the view finds it
+(`_ScopedView.shown_table`) rather than the focus deciding, and the chord works from
+the tree too. An export runs no statement; like everything else on screen, it reads
+what is cached.
+
+- **`partial_` unless the rows are known to be whole.** A CSV keeps no note above
+  it, so a capped file reads as a complete one wherever it ends up, which is the
+  partial answer presented as a whole one that the freshness ledger's `truncated`
+  exists to prevent. Each view lists the scopes filling the shown table
+  (`table_scopes`), and the prefix goes only when all of them are `COMPLETE` and not
+  `truncated`. Per table rather than the view's `scopes()`: tags failing without a
+  warehouse says nothing about a table's grants, which need none. A history lists
+  none and always keeps the prefix, because it only ever covers a time window, even
+  when no cap was hit. The prefix is about rows, not about cell contents.
+- **Raw values come through the tooltips.** A cell holds `1.2M` or a timestamp cut
+  to the minute, and `to_csv(tooltips=True)` writes the tooltip instead wherever
+  there is one. So a column that shortens its value must tooltip the raw one, and a
+  new column doing that belongs in its view's map. Hover and export read the same
+  `HoverTooltipTable` lookup, so they cannot disagree.
+- **The Data tab is refused**, by the screen rather than by leaving its grid out of
+  tcoda's `DataTable`, so that the user is told why. Principle 8 is about rows that
+  can be personal data, and a keystroke does not change what they are. Its cells are
+  also cut for display and hold no raw value to fall back on.
+- **A timestamp in every name.** `deliver_text` opens the path with mode `w`, so a
+  repeated name would silently replace an earlier export. It also records what the
+  file is: what nivaria held at that moment.
+- **The toasts are on `NivariaApp`.** Textual delivers on a thread and reports the
+  outcome in events sent to the app, which do not bubble, and only toasts for its own
+  screenshots. The screen cannot hear them, and saying "saved" when asking would be
+  saying so before it is true.
+- **The delimiter follows the operating system by default**, because that is what
+  Excel does when opening a file: a comma file lands in one column on a machine whose
+  list separator is a semicolon, so no fixed choice suits everyone.
+
+Formulas are not escaped. That would change the data, and would have to tell a
+negative number from an expression, so the manual warns instead.
 
 ### Column headers mirror Snowflake
 

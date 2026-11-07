@@ -61,9 +61,9 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from rich.text import Text
-from tcoda.widgets import TabbedContent, TabPane
+from tcoda.widgets import DataTable, TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from nivaria.format import format_bytes, format_timestamp_minutes
 from nivaria.models import (
@@ -102,6 +102,11 @@ def _merge_key(row: dict[str, Any]) -> tuple[Any, Any]:
 @register_view
 class PipeView(HistoryView):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.PIPE
+    HISTORY_TOOLTIPS: ClassVar[dict[str, str]] = {
+        "Rows": "ROW_COUNT",
+        "Size": "FILE_SIZE",
+        "Loaded": "LAST_LOAD_TIME",
+    }
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tab-history"):

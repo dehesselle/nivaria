@@ -23,6 +23,7 @@ configure(APP_NAME)
 
 __all__ = [
     "CACHE_TTL",
+    "CSV_DELIMITER",
     "CURSOR_SETTLE_MS",
     "DATA_PREVIEW_ROWS",
     "DATA_PREVIEW_TIMEOUT",
@@ -256,4 +257,18 @@ PRIME_CHUNK_THRESHOLD = Setting(
     ),
     group="Cache",
     default=10_000,
+)
+
+CSV_DELIMITER = Setting(
+    key="csv_delimiter",
+    label="CSV delimiter",
+    description=(
+        "What separates the columns of an exported table. Excel opens a CSV by "
+        "the operating system's list separator, so the default follows it: "
+        "Windows' own setting, or on macOS and Linux a semicolon where the "
+        "decimal point is a comma."
+    ),
+    group="Export",
+    default="operating system",
+    choices=("operating system", "comma", "semicolon"),
 )

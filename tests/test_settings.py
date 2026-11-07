@@ -17,6 +17,7 @@ from tcoda.settings import all_settings, config, configure
 from nivaria.paths import APP_NAME
 from nivaria.settings import (
     CACHE_TTL,
+    CSV_DELIMITER,
     PAGE_SIZE,
     PIPE_HISTORY_FETCH_DAYS,
     PIPE_HISTORY_SHOW_DAYS,
@@ -51,6 +52,12 @@ def test_their_defaults_are_the_documented_ones() -> None:
     assert PAGE_SIZE.default == 1000
     assert PIPE_HISTORY_FETCH_DAYS.default == 90
     assert PIPE_HISTORY_SHOW_DAYS.default == 90
+
+
+def test_the_csv_delimiter_follows_the_operating_system_unless_told_otherwise() -> None:
+    assert CSV_DELIMITER.group == "Export"
+    assert CSV_DELIMITER.default == "operating system"
+    assert CSV_DELIMITER.choices == ("operating system", "comma", "semicolon")
 
 
 def test_pool_size_is_limited_to_a_fixed_set_of_choices() -> None:

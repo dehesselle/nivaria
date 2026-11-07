@@ -34,8 +34,9 @@ from __future__ import annotations
 from typing import ClassVar
 
 from rich.text import Text
+from tcoda.widgets import DataTable
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from nivaria.format import (
     format_bytes,
@@ -70,10 +71,12 @@ _COLUMNS = (
     "Comment",
 )
 
-#: Which merged-row field a tooltip-bearing column's full value comes
-#: from, keyed by that column's header. Every other column has no tooltip. See
+#: Which merged-row field holds the raw value behind a shortened column, keyed
+#: by that column's header. Every other column has no tooltip. See
 #: table_list_view.py's identical map for the same reasoning.
 _TOOLTIP_FIELDS = {
+    "Rows": "rows",
+    "Size": "bytes",
     "Created": "created_on",
     "Last DDL": "LAST_DDL",
     "Last Altered": "LAST_ALTERED",

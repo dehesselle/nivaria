@@ -203,6 +203,11 @@ version is deleted and rebuilt automatically.
 Data tab rows are never written to disk: they are held in memory and gone when
 nivaria exits, reconnects or switches role.
 
+An export (`, e`, see [MANUAL.md](MANUAL.md#exporting-a-table)) is written to the
+user's Downloads folder, and from then on is yours: nivaria never reads or removes
+it. If that folder does not exist or cannot be written to, the export fails with an
+error message and nothing else happens.
+
 On macOS the driver keeps login tokens in the Keychain, on Linux in a file
 under `~/.cache/snowflake/`.
 

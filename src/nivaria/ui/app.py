@@ -9,12 +9,13 @@ from time import monotonic
 
 from tcoda.chords import ChordMixin
 from tcoda.terminal_title import TerminalTitleMixin
-from textual import work
+from textual import events, work
 from textual.app import App
 
 from nivaria import paths
 from nivaria.cache.db import Database, MemoryDatabase
 from nivaria.cache.repository import Repository
+from nivaria.export import EXPORT_DELIVERY
 from nivaria.models import ScopeType
 from nivaria.profiles import ProfileStore
 from nivaria.service.fetch import FetchService
@@ -260,6 +261,22 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             return
         self._notices[text] = now
         self.notify(text, severity="warning", timeout=timeout)
+
+    # Here rather than on the screen that asks for the export: these events go
+    # to the app and do not bubble. `markup=False`, because a path can hold `[`.
+    def on_delivery_complete(self, event: events.DeliveryComplete) -> None:
+        if event.name == EXPORT_DELIVERY:
+            self.notify(f"Saved {event.path}", title="Export", timeout=8, markup=False)
+
+    def on_delivery_failed(self, event: events.DeliveryFailed) -> None:
+        if event.name == EXPORT_DELIVERY:
+            self.notify(
+                f"Could not save: {event.exception}",
+                title="Export",
+                severity="error",
+                timeout=8,
+                markup=False,
+            )
 
     async def action_quit(self) -> None:
         """Wait for statements in flight before exiting; quit again to stop

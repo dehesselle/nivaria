@@ -27,7 +27,6 @@ from typing import Any, ClassVar
 from rich.text import Text
 from tcoda.widgets import DataTable, TabbedContent, TabPane
 from textual.app import ComposeResult
-from textual.widgets import DataTable as TextualDataTable
 from textual.widgets import Static
 
 from nivaria.cache.repository import Repository
@@ -125,9 +124,7 @@ class ColumnsView(ObjectView):
                 yield self.columns_panel
             with TabPane("Data", mnemonic="d", id="tab-data"):
                 yield Static("", id=DATA_NOTE)
-                data: TextualDataTable[Text] = TextualDataTable(
-                    id=DATA_TABLE, cursor_type="row"
-                )
+                data = DataTable(id=DATA_TABLE, cursor_type="row")
                 data.zebra_stripes = True
                 yield data
             with TabPane("Grants", mnemonic="g", id="tab-grants"):
@@ -171,6 +168,13 @@ class ColumnsView(ObjectView):
         if self._tab_shown("tab-data"):
             scopes.append(self.data_scope())
         return scopes
+
+    def table_scopes(self) -> list[Scope]:
+        if self._tab_shown("tab-columns"):
+            return [self.columns_scope(), self.column_tags_scope()]
+        if self._tab_shown("tab-grants"):
+            return [self.grants_scope()]
+        return []
 
     def _rank(self, field: str, default: Any) -> Callable[[Any], Any]:
         """Rank a row by one of the values stashed in the panel's rows."""
@@ -321,7 +325,7 @@ class ColumnsView(ObjectView):
     def _update_data(self) -> None:
         scope = self.data_scope()
         rows = [json.loads(r["_values"]) for r in self.repo.raw_rows(scope)]
-        table = self.query_one(f"#{DATA_TABLE}", TextualDataTable)
+        table = self.query_one(f"#{DATA_TABLE}", DataTable)
         with self.keeping_cursor(table):
             # Columns too, not only rows: the next table has its own.
             table.clear(columns=True)

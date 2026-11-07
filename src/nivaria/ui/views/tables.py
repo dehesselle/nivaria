@@ -4,10 +4,11 @@
 
 """Shared building blocks for the detail views.
 
-* **`HoverTooltipTable`** -- a `DataTable` that shows a cell's full-precision
-  value on hover. It maps *column headers* to fields and resolves the index
-  from the live table, so a view can reorder its `_COLUMNS` without aiming its
-  tooltips at the wrong column.
+* **`HoverTooltipTable`** -- a `DataTable` that keeps the raw value behind a
+  shortened cell in its tooltip, for a hover and for a CSV export. It maps
+  *column headers* to fields and resolves the index from the live table, so a
+  view can reorder its `_COLUMNS` without aiming its tooltips at the wrong
+  column.
 * **`PanelledTable`** -- a table plus the panel below it that describes
   whichever row is highlighted, hidden when that row has nothing to say.
   Used for `PipeView`/`TaskView`'s load/run errors, a column's tags
@@ -31,14 +32,13 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from rich.text import Text
 from tcoda.widgets import DataTable
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.coordinate import Coordinate
-from textual.widgets import DataTable as TextualDataTable
 from textual.widgets import Static
 from textual.widgets.data_table import CellDoesNotExist, ColumnKey, RowKey
 
@@ -189,7 +189,9 @@ class RowSource(Protocol):
 
 
 class HoverTooltipTable(DataTable):
-    """Tooltips a cell's full-precision timestamp on hover.
+    """Tooltips the raw value behind a shortened cell: a full-precision
+    timestamp, an exact count or size. An export reads the same tooltips, so a
+    CSV holds these values rather than `1.2M` or `2026-03-01 08:15`.
 
     Takes the owning view directly, the same pattern snakecam's
     PipelinesTable/JobsTable use (../snakecam/src/snakecam/screens/widgets.py)
@@ -222,7 +224,15 @@ class HoverTooltipTable(DataTable):
         if field is None:
             return None
         row = self._view.row_for(row_key.value) if row_key.value is not None else None
-        return (format_timestamp_full(row.get(field)) or None) if row else None
+        if not row:
+            return None
+        value = row.get(field)
+        # By the value rather than a second map from the view: a field holds
+        # either a number or a timestamp, and a view stating which again could
+        # only disagree.
+        if isinstance(value, int | float):
+            return str(value)
+        return format_timestamp_full(value) or None
 
 
 class PanelledTable(Vertical):
@@ -239,7 +249,7 @@ class PanelledTable(Vertical):
 
     def __init__(
         self,
-        table: TextualDataTable,
+        table: DataTable,
         describe: Callable[[dict[str, Any]], str | None],
         *,
         error: bool = False,
@@ -261,9 +271,7 @@ class PanelledTable(Vertical):
         yield self.table
         yield self.panel
 
-    def on_data_table_row_highlighted(
-        self, event: TextualDataTable.RowHighlighted
-    ) -> None:
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table is not self.table:
             return
         self._sync_from_key(event.row_key.value if event.row_key is not None else None)
@@ -303,8 +311,15 @@ class HistoryView(ObjectView):
     `detail_text` differs.
     """
 
+    #: Which history row field holds the raw value behind a shortened column,
+    #: keyed by that column's header -- see `HoverTooltipTable`.
+    HISTORY_TOOLTIPS: ClassVar[dict[str, str]]
+
     #: Built in `compose_history`, repainted by the subclass.
     history_panel: PanelledTable
+
+    def row_for(self, key: str) -> dict[str, Any] | None:
+        return self.history_panel.rows.get(key)
 
     def merged_rows(
         self,
@@ -342,10 +357,7 @@ class HistoryView(ObjectView):
     def compose_history(self) -> ComposeResult:
         """The note, the history table and the panel describing its row."""
         yield Static("", id=HISTORY_NOTE)
-        history: TextualDataTable[Text] = TextualDataTable(
-            id=HISTORY_TABLE, cursor_type="row"
-        )
-        history.zebra_stripes = True
+        history = HoverTooltipTable(self, self.HISTORY_TOOLTIPS, id=HISTORY_TABLE)
         self.history_panel = PanelledTable(history, self.detail_text, error=True)
         yield self.history_panel
 
