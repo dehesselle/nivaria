@@ -13,6 +13,7 @@ import pytest
 
 from nivaria.snowflake import queries
 from nivaria.snowflake.pool import (
+    ACCOUNT_LABEL_ENV,
     CONNECT_TIMEOUT_SECONDS,
     EXTERNAL_BROWSER,
     LOGIN_TIMED_OUT,
@@ -219,6 +220,25 @@ def test_without_reported_names_the_account_name_is_the_identifier_before_its_do
     )
     pool.connect_all()
     assert pool.account_name == expected
+
+
+def test_the_environment_variable_replaces_only_the_displayed_account_name(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(ACCOUNT_LABEL_ENV, "SHOWN")
+    pool, connector = make_pool(size=1)
+    pool.connect_all()
+    assert pool.account_name == "SHOWN"
+    assert pool.account_names == AccountNames("MYORG", "MYACCT")
+    assert pool.params.account == "acct"
+    assert connector.calls[0]["account"] == "acct"
+
+
+def test_an_empty_environment_variable_is_ignored(monkeypatch) -> None:
+    monkeypatch.setenv(ACCOUNT_LABEL_ENV, "")
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    assert pool.account_name == "MYACCT"
 
 
 def test_a_privatelink_identifier_is_recognised() -> None:

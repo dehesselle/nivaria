@@ -17,7 +17,7 @@ from textual.widgets import Button
 import nivaria.ui.app as app_module
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
-from nivaria.snowflake.pool import ConnectionPool, ConnectParams
+from nivaria.snowflake.pool import ACCOUNT_LABEL_ENV, ConnectionPool, ConnectParams
 from nivaria.ui.screens.info import InfoDialog
 from nivaria.ui.screens.main import MainScreen
 from tests.fakes import FakeConnector
@@ -86,6 +86,16 @@ async def test_privatelink_reads_yes_for_a_privatelink_identifier(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await open_info(pilot)
         assert shown_values(app.screen) == ["MYACCT", "SYSADMIN", "COMPUTE_WH", "Yes"]
+
+
+async def test_the_environment_variable_keeps_the_real_name_off_the_dialog(
+    repo, monkeypatch
+) -> None:
+    monkeypatch.setenv(ACCOUNT_LABEL_ENV, "SHOWN")
+    app = Harness(repo, session_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await open_info(pilot)
+        assert shown_values(app.screen)[0] == "SHOWN"
 
 
 async def test_a_session_without_a_warehouse_reads_none(repo) -> None:

@@ -22,7 +22,7 @@ from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
 from nivaria.models import ObjectType, objects_scope, schemas_scope
 from nivaria.settings import CACHE_TTL, config
-from nivaria.snowflake.pool import ConnectionPool, ConnectParams
+from nivaria.snowflake.pool import ACCOUNT_LABEL_ENV, ConnectionPool, ConnectParams
 from nivaria.ui.screens.main import MainScreen
 from nivaria.ui.widgets.object_tree import ObjectTree
 from nivaria.ui.widgets.status_bar import PoolGauge
@@ -222,6 +222,19 @@ async def test_the_detail_subtitle_labels_the_warehouse(
         await pilot.pause()
         detail = app.screen.detail
         assert expected in border_row(detail, detail.outer_size.height - 1)
+
+
+async def test_the_environment_variable_keeps_the_real_name_off_the_border(
+    repo, monkeypatch
+) -> None:
+    monkeypatch.setenv(ACCOUNT_LABEL_ENV, "SHOWN")
+    app = Harness(repo, RecordingFetch(), session_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.screen.tree
+        bottom = border_row(tree, tree.outer_size.height - 1)
+    assert "SHOWN" in bottom
+    assert "MYACCT" not in bottom
 
 
 async def test_a_role_name_with_a_bracket_shows_literally(repo) -> None:

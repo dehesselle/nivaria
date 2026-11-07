@@ -138,6 +138,20 @@ seam to Snowflake) are core principles in
 - Comments explain why the obvious alternative was rejected.
 - Test names are sentences describing the behaviour they protect.
 
+## Screenshots
+
+The documentation's screenshots are SVGs, whose text cannot be blurred and stays
+searchable. Keep the account name out of them by replacing it for the run:
+
+```sh
+NIVARIA_ACCOUNT_LABEL=MYACCT .venv/Scripts/python -m nivaria
+```
+
+This changes the name on the Object tree's border and in the Info dialog, and
+nothing else. The connect dialog, the Snowsight URL in Settings and login errors
+still show the real identifier. Search a finished SVG for the account name before
+committing it.
+
 ## Tools
 
 The scripts in `tools/` import nothing from nivaria, so they can be copied to

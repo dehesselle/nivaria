@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import queue
 import threading
 from collections.abc import Callable, Iterator
@@ -27,6 +28,11 @@ from typing import Any, Protocol
 from nivaria.snowflake import queries, sql_log
 
 _log = logging.getLogger(__name__)
+
+#: Replaces the displayed account name, for screenshots: an SVG's text cannot be
+#: blurred. An environment variable rather than a setting, so that it cannot
+#: outlive the run and leave a real account showing a made-up name.
+ACCOUNT_LABEL_ENV = "NIVARIA_ACCOUNT_LABEL"
 
 EXTERNAL_BROWSER = "externalbrowser"
 USERNAME_PASSWORD_MFA = "username_password_mfa"
@@ -234,7 +240,13 @@ class ConnectionPool:
         typed and whether it routes through PrivateLink. Without that answer,
         the identifier up to its first dot is still short and recognisable,
         though it may keep an organization prefix.
+
+        For display only: connecting, the cache file and Snowsight links use
+        the real values, so `ACCOUNT_LABEL_ENV` changes nothing but this name.
         """
+        label = os.environ.get(ACCOUNT_LABEL_ENV)
+        if label:
+            return label
         if self.account_names is not None:
             return self.account_names.account
         return self.params.account.partition(".")[0]

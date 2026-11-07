@@ -1874,7 +1874,10 @@ The account label takes the name Snowflake reports, because that does not vary
 with how the identifier was typed or whether it routes through PrivateLink. Without
 one it falls back to the identifier up to its first dot
 (`ConnectionPool.account_name`), which can keep an organization prefix but never
-shows routing or a host.
+shows routing or a host. `NIVARIA_ACCOUNT_LABEL` replaces the displayed name for
+screenshots. It is an environment variable rather than a setting so that it
+cannot outlive the run, and it changes only what is displayed: connecting, the
+cache file and Snowsight links keep the real values.
 
 The names only build the public Snowsight address: a PrivateLink account's
 Snowsight host depends on its network's DNS, which the client cannot see, so it
