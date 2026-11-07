@@ -14,8 +14,9 @@ Every statement is built in `snowflake/queries.py`, and every one is read-only:
 `SHOW` commands, `SELECT`s from `INFORMATION_SCHEMA` and
 `SNOWFLAKE.ACCOUNT_USAGE`, the Data tab's `SELECT * ... LIMIT n`, and `USE
 ROLE` / `USE WAREHOUSE` when you switch. Once per connect, `SELECT
-CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()` reads the names Snowsight
-links need; it uses no warehouse. At level Debug, the Log panel (`F1`) shows
+CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()` reads the names that
+Snowsight links and the account label need; it uses no warehouse. At level
+Debug, the Log panel (`F1`) shows
 each statement as it is sent, and [data-retrieval.md](data-retrieval.md) lists
 what each screen sends.
 

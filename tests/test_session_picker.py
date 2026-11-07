@@ -22,7 +22,6 @@ from nivaria.cache.repository import Repository
 from nivaria.models import databases_scope, roles_scope, warehouses_scope
 from nivaria.ui.screens.main import MainScreen
 from nivaria.ui.screens.picker import PickerDialog
-from nivaria.ui.widgets.status_bar import RoleLabel, WarehouseLabel
 from tests.fakes import make_pool
 from tests.test_main_screen import RecordingFetch, load, settle
 
@@ -289,10 +288,10 @@ async def test_reselecting_the_current_warehouse_does_nothing(repo) -> None:
     assert uses == ['USE WAREHOUSE "COMPUTE_WH"']
 
 
-# -------------------------------------------------------------------- footer
+# -------------------------------------------------------------------- borders
 
 
-async def test_the_footer_shows_none_before_anything_is_picked(repo) -> None:
+async def test_the_borders_show_none_before_anything_is_picked(repo) -> None:
     pool, _ = make_pool(size=1)
     pool.connect_all()
     app = Harness(repo, RecordingFetch(), pool)
@@ -300,11 +299,11 @@ async def test_the_footer_shows_none_before_anything_is_picked(repo) -> None:
         await pilot.pause()
         app.screen._tick()
         await pilot.pause()
-        assert app.screen.query_one(WarehouseLabel).warehouse is None
-        assert app.screen.query_one(RoleLabel).role is None
+        assert app.screen.detail.border_subtitle == "WH: none"
+        assert app.screen.tree.border_title == "none"
 
 
-async def test_the_footer_reflects_a_completed_switch(repo) -> None:
+async def test_the_detail_border_reflects_a_completed_warehouse_switch(repo) -> None:
     put_warehouses(repo, "COMPUTE_WH")
     pool, _ = make_pool(size=1)
     pool.connect_all()
@@ -319,5 +318,26 @@ async def test_the_footer_reflects_a_completed_switch(repo) -> None:
             await pilot.pause()
             if pool.params.warehouse == "COMPUTE_WH":
                 break
-        warehouse = app.screen.query_one(WarehouseLabel).warehouse
-    assert warehouse == "COMPUTE_WH"
+        app.screen._tick()
+        subtitle = app.screen.detail.border_subtitle
+    assert subtitle == "WH: COMPUTE_WH"
+
+
+async def test_the_tree_border_reflects_a_completed_role_switch(repo) -> None:
+    put_roles(repo, "SYSADMIN")
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    app = Harness(repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await open_via_chord(pilot, "r")
+        await pilot.press("enter")
+        await settle(pilot)
+        for _ in range(20):
+            app.screen._tick()
+            await pilot.pause()
+            if pool.params.role == "SYSADMIN":
+                break
+        app.screen._tick()
+        title = app.screen.tree.border_title
+    assert title == "SYSADMIN"

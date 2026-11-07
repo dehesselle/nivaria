@@ -226,6 +226,19 @@ class ConnectionPool:
         with self._lock:
             return self._in_use
 
+    @property
+    def account_name(self) -> str:
+        """The account's name for display, without any host or routing part.
+
+        What Snowflake reports, because the identifier varies with how it was
+        typed and whether it routes through PrivateLink. Without that answer,
+        the identifier up to its first dot is still short and recognisable,
+        though it may keep an organization prefix.
+        """
+        if self.account_names is not None:
+            return self.account_names.account
+        return self.params.account.partition(".")[0]
+
     def connect_all(self, progress: Callable[[int, int], None] | None = None) -> None:
         """Open every connection, one at a time, reporting (attempting, total).
 
@@ -269,9 +282,9 @@ class ConnectionPool:
                 row = cursor.fetchone()
             finally:
                 cursor.close()
-        # Swallowed, not raised: the names only feed a convenience link, and
-        # a session that connected fine is worth more than that link. The
-        # driver raises many unrelated types, as in connect_all.
+        # Swallowed, not raised: the names feed a convenience link and a label
+        # with a fallback, and a session that connected fine is worth more than
+        # either. The driver raises many unrelated types, as in connect_all.
         except Exception:  # noqa: BLE001
             return
         if row and row[0] and row[1]:

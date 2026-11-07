@@ -21,6 +21,7 @@ from tcoda.widgets import ChordViewer, Countdown, Footer, LogViewer
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.content import Content
 from textual.screen import Screen
 
 from nivaria.cache.repository import Repository
@@ -60,6 +61,7 @@ from nivaria.ui.messages import (
     SchemaSelected,
     ScopeNeeded,
 )
+from nivaria.ui.screens.info import InfoDialog
 from nivaria.ui.screens.multipicker import MultiPickerDialog
 from nivaria.ui.screens.picker import PickerDialog
 from nivaria.ui.screens.search import SearchDialog
@@ -76,7 +78,7 @@ from nivaria.ui.views import (  # noqa: F401 -- registers views
 )
 from nivaria.ui.widgets.detail_pane import DetailPane
 from nivaria.ui.widgets.object_tree import TREE_TYPES, NodeType, ObjectTree
-from nivaria.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
+from nivaria.ui.widgets.status_bar import PoolGauge
 from nivaria.version import __version__
 
 #: How often the status indicators are recomputed. Fast enough that a burst of
@@ -119,6 +121,7 @@ class MainScreen(Screen):
         Binding("comma a w", "pick_warehouse", "Warehouse selection", show=False),
         Binding("comma a r", "pick_role", "Role selection", show=False),
         Binding("comma a d", "pick_databases", "Database selection", show=False),
+        Binding("comma a i", "show_info", "Info", show=False),
         Binding("comma w w", "open_workspaces", "Workspaces", show=False),
         Binding("comma w o", "open_in_snowsight", "Object under cursor", show=False),
         Binding("comma s", "settings", "Settings", show=False),
@@ -144,19 +147,16 @@ class MainScreen(Screen):
         self.pool = pool
         self.profiles = profiles or ProfileStore()
         self.databases: list[str] = []
+        self._session_shown: tuple[str, str, str] | None = None
 
     def compose(self) -> ComposeResult:
         yield LogViewer(show_key=False)
-        tree = ObjectTree(self.repo, id="tree")
-        tree.border_title = "Databases"
-        yield tree
+        yield ObjectTree(self.repo, id="tree")
         yield DetailPane(self.repo, id="detail")
         # The chord key is pinned, so it holds the left corner
         # whatever the focus chain is doing. Textual declares Ctrl+Q `show=False`,
         # and pinning it is what shows it: no other part of the UI says how to quit.
         with Footer(pinned=("comma", "ctrl+q")):
-            yield RoleLabel(id="footer-role")
-            yield WarehouseLabel(id="footer-warehouse")
             yield Countdown(id="footer-countdown")
             yield PoolGauge(id="footer-pool")
         yield ChordViewer()
@@ -200,6 +200,32 @@ class MainScreen(Screen):
         # anywhere.
         return databases_scope()
 
+    def _show_session(self) -> None:
+        """Put the session's role, account and warehouse on the pane borders.
+
+        Only when one changed, because a border setter repaints its whole
+        widget and this runs on every tick.
+        """
+        assert self.pool is not None
+        params = self.pool.params
+        session = (
+            params.role or "none",
+            self.pool.account_name,
+            params.warehouse or "none",
+        )
+        if session == self._session_shown:
+            return
+        self._session_shown = session
+        role, account, warehouse = session
+        # Content, not strings: a string is parsed as markup, and a quoted
+        # Snowflake name can contain `[`.
+        self.tree.border_title = Content(role)
+        self.tree.border_subtitle = Content(account)
+        # Keep the label. A bare name on this border reads as a property of the
+        # object shown, such as a task's own warehouse, and a bare "none" says
+        # nothing at all.
+        self.detail.border_subtitle = Content(f"WH: {warehouse}")
+
     def _tick(self) -> None:
         countdown = self.countdown
 
@@ -207,8 +233,7 @@ class MainScreen(Screen):
             gauge = self.query_one(PoolGauge)
             gauge.in_use = self.pool.in_use
             gauge.pool_size = self.pool.size
-            self.query_one(WarehouseLabel).warehouse = self.pool.params.warehouse
-            self.query_one(RoleLabel).role = self.pool.params.role
+            self._show_session()
 
         # focused_scope() is kept in the mix so the spinner still reflects
         # activity before anything is materialised in the tree or detail pane
@@ -349,6 +374,19 @@ class MainScreen(Screen):
 
     def action_settings(self) -> None:
         self.app.push_screen(SettingsDialog())
+
+    def action_show_info(self) -> None:
+        if self.pool is None:
+            return
+        params = self.pool.params
+        self.app.push_screen(
+            InfoDialog(
+                account=self.pool.account_name,
+                role=params.role or "none",
+                warehouse=params.warehouse or "none",
+                privatelink=params.uses_privatelink,
+            )
+        )
 
     # --------------------------------------------------------------- routing
 

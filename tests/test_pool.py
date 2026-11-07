@@ -188,6 +188,39 @@ def test_a_failed_account_name_query_still_connects() -> None:
         assert connection is pool._all[0]
 
 
+@pytest.mark.parametrize(
+    "identifier", ["MYORG-MYACCT", "MYORG-MYACCT.privatelink", "xy12345.eu-central-1"]
+)
+def test_the_account_name_is_what_snowflake_reports_however_it_was_typed(
+    identifier: str,
+) -> None:
+    pool = ConnectionPool(
+        ConnectParams(account=identifier, user="u"), 1, connector=FakeConnector()
+    )
+    pool.connect_all()
+    assert pool.account_name == "MYACCT"
+
+
+@pytest.mark.parametrize(
+    ("identifier", "expected"),
+    [
+        ("MYORG-MYACCT", "MYORG-MYACCT"),
+        ("MYORG-MYACCT.privatelink", "MYORG-MYACCT"),
+        ("xy12345.eu-central-1.privatelink", "xy12345"),
+    ],
+)
+def test_without_reported_names_the_account_name_is_the_identifier_before_its_dot(
+    identifier: str, expected: str
+) -> None:
+    pool = ConnectionPool(
+        ConnectParams(account=identifier, user="u"),
+        1,
+        connector=FakeConnector(account_names=None),
+    )
+    pool.connect_all()
+    assert pool.account_name == expected
+
+
 def test_a_privatelink_identifier_is_recognised() -> None:
     assert ConnectParams(account="MYORG-MYACCT.PRIVATELINK", user="u").uses_privatelink
     assert not ConnectParams(account="MYORG-MYACCT", user="u").uses_privatelink

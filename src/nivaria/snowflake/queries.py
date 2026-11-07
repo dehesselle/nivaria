@@ -158,7 +158,8 @@ def use_warehouse(warehouse: str) -> str:
 
 
 def current_account_names() -> str:
-    """The session's organization and account name, for Snowsight links.
+    """The session's organization and account name, for Snowsight links and
+    for showing the account.
 
     Asked once per connect (see `ConnectionPool._read_account_names`): the
     login response carries the resolved role and warehouse but not these.

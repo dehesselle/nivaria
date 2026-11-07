@@ -37,7 +37,7 @@ Other columns:
 
 | Screen | Data source | Scope | Reach | Needs | First | Refresh | When | Feeds |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Connect | `SELECT CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()` | none | session | none | ? | n/a | always, once per connect | Snowsight links |
+| Connect | `SELECT CURRENT_ORGANIZATION_NAME(), CURRENT_ACCOUNT_NAME()` | none | session | none | ? | n/a | always, once per connect | Snowsight links, account label, Info dialog |
 | Startup | `SHOW DATABASES` | `DATABASES` | account | none | ~0.2 s | n/a | always, also after a role switch or reconnect | database dialog |
 | Startup | `SHOW WAREHOUSES` | `WAREHOUSES` | account | none | ~0.2 s | n/a | always, also after a role switch or reconnect | warehouse dialog |
 | Startup | `SHOW ROLES` | `ROLES` | account | none | ~0.2 s | n/a | always, also after a role switch or reconnect | role dialog |

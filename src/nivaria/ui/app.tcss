@@ -134,6 +134,28 @@ MultiPickerDialog #buttons Button {
     min-width: 12;
 }
 
+/* ---- info modal ------------------------------------------------------- */
+
+InfoDialog > #dialog {
+    width: 60;
+    max-width: 100%;
+}
+
+/* The 1fr column is what keeps a long name wrapping beside its own label
+   instead of running off the dialog. */
+#info-rows {
+    grid-size: 2;
+    grid-columns: auto 1fr;
+    grid-rows: auto;
+    grid-gutter: 0 2;
+    height: auto;
+    margin: 1 0;
+}
+
+.info-value {
+    height: auto;
+}
+
 /* ---- connecting modal --------------------------------------------------- */
 
 ConnectingDialog > #dialog {

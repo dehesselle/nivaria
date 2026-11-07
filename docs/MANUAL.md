@@ -24,7 +24,7 @@ on the right.
 
 - **account** and **user** are required. **role** and **warehouse** are
   optional; left blank, Snowflake's defaults for the user apply, and the
-  footer shows what the session actually resolved.
+  pane borders show what the session actually resolved.
 - **Authenticator**: OAuth (the default, Snowflake's own authorization-code
   flow in a browser), browser SSO (`externalbrowser`), or password + MFA. The
   password field is enabled only for password + MFA.
@@ -48,17 +48,15 @@ These are the names used for the parts of the screen, here and in the other
 documents.
 
 ```text
-┌────────────────────┬─────────────────────────────────────────────────────┐
-│ ┌─────────────────┐│                                                     │
-│ │  MYDB (12)      ││                                                     │
-│ │  OTHERDB (5)    ││              Detail pane                            │
-│ │   Object tree   ││       (hosts exactly one detail view;               │
-│ │                 ││   drag this border to resize either pane)           │
-│ │                 ││                                                     │
-│ └─────────────────┘│                                                     │
-├────────────────────┴─────────────────────────────────────────────────────┤
-│ , Menu  / Search  F5 Refresh                       Role  Warehouse  (2/5)│
-└──────────────────────────── Status footer ───────────────────────────────┘
+╭─ Role ────────────╮╭─────────────────────────────────────────────────────╮
+│  MYDB (12)        ││                                                     │
+│  OTHERDB (5)      ││              Detail pane                            │
+│   Object tree     ││       (hosts exactly one detail view;               │
+│                   ││   drag this border to resize either pane)           │
+│                   ││                                                     │
+╰────── Account ────╯╰──────────────────────────────── WH: Warehouse ───────╯
+  , Menu  / Search  F5 Refresh                                  12  (2/5)
+                              Status footer
 ```
 
 `/` opens the **Search modal** over this screen, at roughly 90 % of the
@@ -79,11 +77,11 @@ terminal:
 
 | Name | What it is |
 | --- | --- |
-| **Object tree** | The browser. One top-level node per selected database, showing its schema count (`MYDB (12)`), expanding into schemas → `Tables (n)` / `Views (n)` / … → object. |
+| **Object tree** | The browser. One top-level node per selected database, showing its schema count (`MYDB (12)`), expanding into schemas → `Tables (n)` / `Views (n)` / … → object. Its border shows the **Role** at the top and the **Account** at the bottom. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database. |
-| **Detail pane** | Shows one detail view for whatever node the cursor is on. Its border with the Object tree can be dragged to resize both panes. |
+| **Detail pane** | Shows one detail view for whatever node the cursor is on. Its border with the Object tree can be dragged to resize both panes. Its bottom border shows the session's **Warehouse**. |
 | **Object view** | The detail view for one object (e.g. Table view, Pipe view). Category, schema and database nodes have views of their own (see "Detail views"). |
-| **Status footer** | Key bindings on the left, starting with `, Menu` and `^q Quit`; **Role**, **Warehouse**, **Countdown** and **Pool gauge** on the right. |
+| **Status footer** | Key bindings on the left, starting with `, Menu` and `^q Quit`; **Countdown** and **Pool gauge** on the right. |
 | **Chord panel** | Hidden until you pause partway through a chord, then covers the Status footer and lists what can come next (see "Chords"). |
 | **Log panel** | Hidden until `F1`, then slides down over the top third of the screen. `F1` hides it again. It has its own level and source filters. It starts at level Info; set it to Debug to see every statement nivaria sends from then on, live. |
 
@@ -111,6 +109,7 @@ other.
 | `, a w` | Warehouse selection |
 | `, a r` | Role selection |
 | `, a d` | Database selection |
+| `, a i` | Info: the session's account, role and warehouse in full, and whether it uses PrivateLink |
 | `, w w` | Open Workspaces in Snowsight, to write SQL |
 | `, w o` | Open the object under the cursor in Snowsight |
 | `, s` | Settings |
@@ -243,10 +242,21 @@ looking, when there is nothing to show, or why they could not fetch.
 When a refresh fails, the rows already shown stay, and a note above the list,
 History or Data table says when they were fetched.
 
+## Session labels
+
+- **Role** (top of the Object tree's border): the session's current role.
+- **Account** (bottom of the Object tree's border): the account's name, for
+  public and PrivateLink accounts alike. If Snowflake did not report the name
+  when connecting, it is the account identifier up to its first dot.
+- **Warehouse** (bottom of the Detail pane's border): `WH:` and the session's
+  current warehouse. It can read `WH: none`.
+
+A long name is cut off when the pane is too narrow. `, a i` opens **Info**, which
+shows all of them in full, plus whether the account identifier uses PrivateLink.
+**Ok**, `enter` or `escape` closes it.
+
 ## Status footer
 
-- **Role** / **Warehouse**: the session's current role and warehouse.
-  Warehouse can read `none`.
 - **Countdown**: seconds until the first thing on screen is due a refresh;
   nothing on screen goes stale before it reaches zero. It jumps as what is on
   screen changes, turns into a spinner while something on screen is being

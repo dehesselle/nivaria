@@ -113,6 +113,7 @@ async def test_the_panel_offers_the_documented_commands_under_account(repo) -> N
         assert entries(app) == [
             ("c", "Connect"),
             ("d", "Database selection"),
+            ("i", "Info"),
             ("r", "Role selection"),
             ("w", "Warehouse selection"),
         ]

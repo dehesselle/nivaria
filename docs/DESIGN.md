@@ -1366,8 +1366,9 @@ collapsed nodes (`Schemas (54)`, `Tables (383)`) come from the cache, so they
 are correct and instant without materialising anything beneath them.
 
 One top-level node per selected database. Several databases can be selected at
-once (the Databases picker, `MultiPickerDialog`), so the tree carries no border
-title naming one, and search runs across all of them.
+once (the Databases picker, `MultiPickerDialog`), so the tree's border names none
+of them (it carries the session, see "Session labels"), and search runs across
+all of them.
 
 ### The cursor must not move
 
@@ -1828,33 +1829,56 @@ also opens its Grants/Tags view, not just the tree navigation alone.
 
 ## Status footer
 
-The right corner carries four indicators: Role, Warehouse, Countdown and Pool
-gauge (what each shows is in the
-[manual](MANUAL.md#status-footer)). The footer is `tcoda`'s, which holds them in
-its status area and leaves them alone from then on, so key bindings keep working
-without being re-implemented here.
+The right corner carries two indicators: Countdown and Pool gauge (what each
+shows is in the [manual](MANUAL.md#status-footer)). The footer is `tcoda`'s,
+which holds them in its status area and leaves them alone from then on, so key
+bindings keep working without being re-implemented here.
 
-Role and Warehouse are read straight off the pool's connect params each tick.
+## Session labels
+
+Role and account sit on the Object tree's border, and the warehouse on the Detail
+pane's. Names can be long enough to crowd the keys out of a one-row footer; a
+border truncates a long name instead.
+
+The warehouse label reads `WH: <name>`, and the `WH:` must stay. A bare name on
+the Detail pane's border reads as a property of the object shown, such as a task's
+own warehouse, and a bare `none` says nothing at all.
+
+Full names live in the Info dialog (`, a i`), not in a tooltip. Textual has
+tooltips per widget, not per border label, and a hover is out of reach from the
+keyboard.
+
+`MainScreen._show_session` compares them against what is shown on each tick and
+writes only a change, because a border setter repaints its whole widget.
+
+Role and warehouse are read straight off the pool's connect params each tick.
 Leaving either field blank in the connect dialog does not mean "none" is shown
 forever: Snowflake always activates *some* role for a session (the user's
 default, or `PUBLIC`), and the driver already learns what it resolved from the
 login response (`sessionInfo.roleName` / `.warehouseName`, exposed as
 `connection.role` / `.warehouse`) — no extra query needed. `connect_all`
 adopts whichever of the two was left blank from that
-(`ConnectionPool._adopt_resolved_session`), so the footer shows the real
+(`ConnectionPool._adopt_resolved_session`), so the borders show the real
 session state rather than an unfilled form field. Warehouse can genuinely
 read `none` even after this — a session can have no active warehouse at all
 — but role never legitimately does.
 
 The login response has no organization or account name, which Snowsight links
-(the `, w` chords) need. `connect_all` asks for them once, on the first connection
-(`ConnectionPool._read_account_names`, context functions only, so no
-warehouse), and keeps them on the pool; a link is then an attribute read and
-never waits on Snowflake. A failure leaves them unset and does not fail the
-connect: the link is a convenience, the session is not. They only build the
-public address: a PrivateLink account's Snowsight host depends on its network's
-DNS, which the client cannot see, so it comes from the per-account Snowsight
-URL setting, which wins whenever it is set.
+(the `, w` chords) and the account label need. `connect_all` asks for them once,
+on the first connection (`ConnectionPool._read_account_names`, context functions
+only, so no warehouse), and keeps them on the pool; a link or a label is then an
+attribute read and never waits on Snowflake. A failure leaves them unset and does
+not fail the connect: the link is a convenience, the session is not.
+
+The account label takes the name Snowflake reports, because that does not vary
+with how the identifier was typed or whether it routes through PrivateLink. Without
+one it falls back to the identifier up to its first dot
+(`ConnectionPool.account_name`), which can keep an organization prefix but never
+shows routing or a host.
+
+The names only build the public Snowsight address: a PrivateLink account's
+Snowsight host depends on its network's DNS, which the client cannot see, so it
+comes from the per-account Snowsight URL setting, which wins whenever it is set.
 
 The Role and Warehouse pickers (`PickerDialog`, single-select; the database
 picker is the multi-select sibling, `MultiPickerDialog`) are backed by their

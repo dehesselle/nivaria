@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: 0BSD
 
-"""Nivaria's own footer status widgets: pool, warehouse, role.
+"""Nivaria's own footer status widget: the pool gauge.
 
-Plain `Static`s with reactives, mounted into `tcoda.widgets.Footer`'s status
-area and left alone from then on -- so the screen sets attributes on them
+A plain `Static` with reactives, mounted into `tcoda.widgets.Footer`'s status
+area and left alone from then on -- so the screen sets attributes on it
 directly. The countdown is `tcoda.widgets.Countdown`.
 """
 
@@ -25,25 +25,3 @@ class PoolGauge(Static):
         if self.pool_size == 0:
             return ""
         return f"({self.in_use}/{self.pool_size})"
-
-
-class WarehouseLabel(Static):
-    """The session's current warehouse, or "none" until one is set."""
-
-    # layout=True: this is width: auto, and a plain reactive only repaints in
-    # place -- a name longer or shorter than whatever was there before would
-    # render clipped or leave trailing space until something else (e.g. a
-    # terminal resize) happened to force a relayout.
-    warehouse: reactive[str | None] = reactive(None, layout=True)
-
-    def render(self) -> str:
-        return self.warehouse or "none"
-
-
-class RoleLabel(Static):
-    """The session's current role, or "none" until one is set."""
-
-    role: reactive[str | None] = reactive(None, layout=True)
-
-    def render(self) -> str:
-        return self.role or "none"

@@ -14,6 +14,7 @@ import pytest
 from tcoda.chords import ChordMixin
 from tcoda.widgets import Countdown, Footer, FooterBinding
 from textual.app import App
+from textual.geometry import Region
 
 import nivaria.cache.repository as repository_module
 import nivaria.ui.app as app_module
@@ -21,10 +22,11 @@ from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
 from nivaria.models import ObjectType, objects_scope, schemas_scope
 from nivaria.settings import CACHE_TTL, config
+from nivaria.snowflake.pool import ConnectionPool, ConnectParams
 from nivaria.ui.screens.main import MainScreen
 from nivaria.ui.widgets.object_tree import ObjectTree
-from nivaria.ui.widgets.status_bar import PoolGauge, RoleLabel, WarehouseLabel
-from tests.fakes import make_pool
+from nivaria.ui.widgets.status_bar import PoolGauge
+from tests.fakes import FakeConnector, make_pool
 from tests.test_main_screen import RecordingFetch, put_schemas, put_tables, settle
 
 
@@ -137,48 +139,109 @@ async def test_the_footer_carries_both_indicators(repo) -> None:
         assert footer.query_one("#footer-pool", PoolGauge)
 
 
-async def test_the_role_label_appears_before_the_warehouse_label(repo) -> None:
-    """Requested order: role, then warehouse, left of the countdown/gauge."""
+async def test_the_footer_status_holds_only_the_countdown_and_the_gauge(repo) -> None:
     app = Harness(repo, RecordingFetch())
     async with app.run_test(size=(120, 40)) as pilot:
         for _ in range(4):
             await pilot.pause()
         status = app.screen.query_one(Footer).status
-        ids = [child.id for child in status.children if child.id]
-    assert ids.index("footer-role") < ids.index("footer-warehouse")
+        ids = {child.id for child in status.children if child.id}
+    assert ids - {"footer-chord", "footer-status-text"} == {
+        "footer-countdown",
+        "footer-pool",
+    }
 
 
-async def test_the_warehouse_label_widens_for_a_longer_name(repo) -> None:
-    """Regression: these labels are width: auto, and a plain reactive only
-    repaints in place -- a longer value stayed clipped at whatever width the
-    first one happened to need until something unrelated forced a relayout."""
-    app = Harness(repo, RecordingFetch())
+# ----------------------------------------------------------------- pane borders
+
+
+def border_row(widget, row: int) -> str:
+    """The characters really drawn on one of a widget's border rows."""
+    width = widget.outer_size.width
+    return widget.render_lines(Region(0, row, width, 1))[0].text
+
+
+def session_pool(
+    account: str = "MYORG-MYACCT",
+    role: str | None = "SYSADMIN",
+    warehouse: str | None = "COMPUTE_WH",
+    names: tuple[str, str] | None = ("MYORG", "MYACCT"),
+) -> ConnectionPool:
+    pool = ConnectionPool(
+        ConnectParams(account=account, user="u", role=role, warehouse=warehouse),
+        1,
+        connector=FakeConnector(account_names=names),
+    )
+    pool.connect_all()
+    return pool
+
+
+async def test_the_tree_title_shows_the_role(repo) -> None:
+    app = Harness(repo, RecordingFetch(), session_pool())
     async with app.run_test(size=(120, 40)) as pilot:
-        label = app.screen.query_one(WarehouseLabel)
-        label.warehouse = "WH"
         await pilot.pause()
-        short_width = label.size.width
-
-        label.warehouse = "A_MUCH_LONGER_WAREHOUSE_NAME"
-        await pilot.pause()
-        long_width = label.size.width
-    assert long_width > short_width
+        assert "SYSADMIN" in border_row(app.screen.tree, 0)
 
 
-async def test_the_role_label_widens_for_a_longer_name(repo) -> None:
-    app = Harness(repo, RecordingFetch())
+@pytest.mark.parametrize("account", ["MYORG-MYACCT", "MYORG-MYACCT.privatelink"])
+async def test_the_tree_subtitle_shows_only_the_account_name(repo, account) -> None:
+    app = Harness(repo, RecordingFetch(), session_pool(account))
     async with app.run_test(size=(120, 40)) as pilot:
-        for _ in range(4):
-            await pilot.pause()
-        label = app.screen.query_one(RoleLabel)
-        label.role = "PUBLIC"
         await pilot.pause()
-        short_width = label.size.width
+        tree = app.screen.tree
+        bottom = border_row(tree, tree.outer_size.height - 1)
+    assert "MYACCT" in bottom
+    assert "MYORG" not in bottom
+    assert "privatelink" not in bottom
 
-        label.role = "A_MUCH_LONGER_ROLE_NAME"
+
+async def test_without_account_names_the_tree_subtitle_drops_the_routing_part(
+    repo,
+) -> None:
+    pool = session_pool("MYORG-MYACCT.privatelink", names=None)
+    app = Harness(repo, RecordingFetch(), pool)
+    async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        long_width = label.size.width
-    assert long_width > short_width
+        tree = app.screen.tree
+        bottom = border_row(tree, tree.outer_size.height - 1)
+    assert "MYORG-MYACCT" in bottom
+    assert "privatelink" not in bottom
+
+
+@pytest.mark.parametrize(
+    ("warehouse", "expected"),
+    [("COMPUTE_WH", "WH: COMPUTE_WH"), (None, "WH: none")],
+)
+async def test_the_detail_subtitle_labels_the_warehouse(
+    repo, warehouse, expected
+) -> None:
+    """The label is what stops the name reading as a property of the object
+    shown, such as a task's own warehouse."""
+    app = Harness(repo, RecordingFetch(), session_pool(warehouse=warehouse))
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        detail = app.screen.detail
+        assert expected in border_row(detail, detail.outer_size.height - 1)
+
+
+async def test_a_role_name_with_a_bracket_shows_literally(repo) -> None:
+    """A border label given a string parses it as markup, and a quoted
+    Snowflake name can contain `[`."""
+    app = Harness(repo, RecordingFetch(), session_pool(role="[bold]ROLE"))
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert "[bold]ROLE" in border_row(app.screen.tree, 0)
+
+
+async def test_an_unchanged_session_does_not_repaint_the_borders(repo) -> None:
+    """The tick runs every 0.3 s, and a border setter repaints the widget."""
+    app = Harness(repo, RecordingFetch(), session_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.screen.tree
+        first = tree._border_title
+        app.screen._tick()
+        assert tree._border_title is first
 
 
 async def test_the_command_palette_key_does_not_claim_the_corner(repo) -> None:
