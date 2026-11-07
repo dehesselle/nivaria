@@ -219,6 +219,17 @@ async def test_the_chords_are_hidden_from_the_footer_behind_one_hint(repo) -> No
     assert not [key for key in keys if " " in key]
 
 
+async def test_the_quit_key_is_shown_next_to_the_menu_key(repo) -> None:
+    """Textual hides Ctrl+Q by default, and nothing else in the UI says how to
+    quit."""
+    app = Harness(repo, RecordingFetch())
+    async with app.run_test(size=(120, 40)) as pilot:
+        for _ in range(4):
+            await pilot.pause()
+        keys = [key.key for key in app.screen.query(FooterBinding)]
+    assert keys[:2] == ["comma", "ctrl+q"]
+
+
 async def test_the_gauge_follows_the_pool(repo) -> None:
     pool, _ = make_pool(size=3)
     pool.connect_all()

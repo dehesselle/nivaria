@@ -83,7 +83,7 @@ terminal:
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database. |
 | **Detail pane** | Shows one detail view for whatever node the cursor is on. Its border with the Object tree can be dragged to resize both panes. |
 | **Object view** | The detail view for one object (e.g. Table view, Pipe view). Category, schema and database nodes have views of their own (see "Detail views"). |
-| **Status footer** | Key bindings on the left; **Role**, **Warehouse**, **Countdown** and **Pool gauge** on the right. |
+| **Status footer** | Key bindings on the left, starting with `, Menu` and `^q Quit`; **Role**, **Warehouse**, **Countdown** and **Pool gauge** on the right. |
 | **Chord panel** | Hidden until you pause partway through a chord, then covers the Status footer and lists what can come next (see "Chords"). |
 | **Log panel** | Hidden until `F1`, then slides down over the top third of the screen. `F1` hides it again. It has its own level and source filters. It starts at level Info; set it to Debug to see every statement nivaria sends from then on, live. |
 

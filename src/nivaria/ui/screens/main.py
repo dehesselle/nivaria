@@ -145,8 +145,9 @@ class MainScreen(Screen):
         yield tree
         yield DetailPane(self.repo, id="detail")
         # The chord key is pinned, so it holds the left corner
-        # whatever the focus chain is doing.
-        with Footer(pinned=("comma",)):
+        # whatever the focus chain is doing. Textual declares Ctrl+Q `show=False`,
+        # and pinning it is what shows it: no other part of the UI says how to quit.
+        with Footer(pinned=("comma", "ctrl+q")):
             yield RoleLabel(id="footer-role")
             yield WarehouseLabel(id="footer-warehouse")
             yield Countdown(id="footer-countdown")
