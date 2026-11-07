@@ -300,7 +300,7 @@ async def test_the_borders_show_none_before_anything_is_picked(repo) -> None:
         app.screen._tick()
         await pilot.pause()
         assert app.screen.detail.border_subtitle == "WH: none"
-        assert app.screen.tree.border_title == "none"
+        assert app.screen.tree.border_subtitle == "none"
 
 
 async def test_the_detail_border_reflects_a_completed_warehouse_switch(repo) -> None:
@@ -339,5 +339,5 @@ async def test_the_tree_border_reflects_a_completed_role_switch(repo) -> None:
             if pool.params.role == "SYSADMIN":
                 break
         app.screen._tick()
-        title = app.screen.tree.border_title
-    assert title == "SYSADMIN"
+        subtitle = app.screen.tree.border_subtitle
+    assert subtitle == "SYSADMIN"

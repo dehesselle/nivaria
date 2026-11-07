@@ -48,13 +48,13 @@ These are the names used for the parts of the screen, here and in the other
 documents.
 
 ```text
-╭─ Role ────────────╮╭─────────────────────────────────────────────────────╮
+╭─ Account ─────────╮╭─────────────────────────────────────────────────────╮
 │  MYDB (12)        ││                                                     │
 │  OTHERDB (5)      ││              Detail pane                            │
 │   Object tree     ││       (hosts exactly one detail view;               │
 │                   ││   drag this border to resize either pane)           │
 │                   ││                                                     │
-╰────── Account ────╯╰──────────────────────────────── WH: Warehouse ───────╯
+╰───────── Role ────╯╰──────────────────────────────── WH: Warehouse ───────╯
   , Menu  / Search  F5 Refresh                                  12  (2/5)
                               Status footer
 ```
@@ -77,7 +77,7 @@ terminal:
 
 | Name | What it is |
 | --- | --- |
-| **Object tree** | The browser. One top-level node per selected database, showing its schema count (`MYDB (12)`), expanding into schemas → `Tables (n)` / `Views (n)` / … → object. Its border shows the **Role** at the top and the **Account** at the bottom. |
+| **Object tree** | The browser. One top-level node per selected database, showing its schema count (`MYDB (12)`), expanding into schemas → `Tables (n)` / `Views (n)` / … → object. Its border shows the **Account** at the top and the **Role** at the bottom. |
 | **Search modal** | Find-as-you-type over every cached object and schema across every selected database. |
 | **Detail pane** | Shows one detail view for whatever node the cursor is on. Its border with the Object tree can be dragged to resize both panes. Its bottom border shows the session's **Warehouse**. |
 | **Object view** | The detail view for one object (e.g. Table view, Pipe view). Category, schema and database nodes have views of their own (see "Detail views"). |
@@ -284,10 +284,10 @@ and object names, comments and file names can start with one.
 
 ## Session labels
 
-- **Role** (top of the Object tree's border): the session's current role.
-- **Account** (bottom of the Object tree's border): the account's name, for
+- **Account** (top of the Object tree's border): the account's name, for
   public and PrivateLink accounts alike. If Snowflake did not report the name
   when connecting, it is the account identifier up to its first dot.
+- **Role** (bottom of the Object tree's border): the session's current role.
 - **Warehouse** (bottom of the Detail pane's border): `WH:` and the session's
   current warehouse. It can read `WH: none`.
 

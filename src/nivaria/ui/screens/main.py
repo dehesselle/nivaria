@@ -224,8 +224,8 @@ class MainScreen(Screen):
         role, account, warehouse = session
         # Content, not strings: a string is parsed as markup, and a quoted
         # Snowflake name can contain `[`.
-        self.tree.border_title = Content(role)
-        self.tree.border_subtitle = Content(account)
+        self.tree.border_title = Content(account)
+        self.tree.border_subtitle = Content(role)
         # Keep the label. A bare name on this border reads as a property of the
         # object shown, such as a task's own warehouse, and a bare "none" says
         # nothing at all.

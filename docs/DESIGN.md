@@ -1879,9 +1879,13 @@ bindings keep working without being re-implemented here.
 
 ## Session labels
 
-Role and account sit on the Object tree's border, and the warehouse on the Detail
+Account and role sit on the Object tree's border, and the warehouse on the Detail
 pane's. Names can be long enough to crowd the keys out of a one-row footer; a
 border truncates a long name instead.
+
+The account is the tree's title because it contains what the tree shows. The role
+is its subtitle, which puts it on the same row as the warehouse: those are the two
+values a session switches, while changing account means reconnecting.
 
 The warehouse label reads `WH: <name>`, and the `WH:` must stay. A bare name on
 the Detail pane's border reads as a property of the object shown, such as a task's

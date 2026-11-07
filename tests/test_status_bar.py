@@ -176,36 +176,35 @@ def session_pool(
     return pool
 
 
-async def test_the_tree_title_shows_the_role(repo) -> None:
+async def test_the_tree_subtitle_shows_the_role(repo) -> None:
     app = Harness(repo, RecordingFetch(), session_pool())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        assert "SYSADMIN" in border_row(app.screen.tree, 0)
+        tree = app.screen.tree
+        assert "SYSADMIN" in border_row(tree, tree.outer_size.height - 1)
 
 
 @pytest.mark.parametrize("account", ["MYORG-MYACCT", "MYORG-MYACCT.privatelink"])
-async def test_the_tree_subtitle_shows_only_the_account_name(repo, account) -> None:
+async def test_the_tree_title_shows_only_the_account_name(repo, account) -> None:
     app = Harness(repo, RecordingFetch(), session_pool(account))
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        tree = app.screen.tree
-        bottom = border_row(tree, tree.outer_size.height - 1)
-    assert "MYACCT" in bottom
-    assert "MYORG" not in bottom
-    assert "privatelink" not in bottom
+        top = border_row(app.screen.tree, 0)
+    assert "MYACCT" in top
+    assert "MYORG" not in top
+    assert "privatelink" not in top
 
 
-async def test_without_account_names_the_tree_subtitle_drops_the_routing_part(
+async def test_without_account_names_the_tree_title_drops_the_routing_part(
     repo,
 ) -> None:
     pool = session_pool("MYORG-MYACCT.privatelink", names=None)
     app = Harness(repo, RecordingFetch(), pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        tree = app.screen.tree
-        bottom = border_row(tree, tree.outer_size.height - 1)
-    assert "MYORG-MYACCT" in bottom
-    assert "privatelink" not in bottom
+        top = border_row(app.screen.tree, 0)
+    assert "MYORG-MYACCT" in top
+    assert "privatelink" not in top
 
 
 @pytest.mark.parametrize(
@@ -231,10 +230,9 @@ async def test_the_environment_variable_keeps_the_real_name_off_the_border(
     app = Harness(repo, RecordingFetch(), session_pool())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        tree = app.screen.tree
-        bottom = border_row(tree, tree.outer_size.height - 1)
-    assert "SHOWN" in bottom
-    assert "MYACCT" not in bottom
+        top = border_row(app.screen.tree, 0)
+    assert "SHOWN" in top
+    assert "MYACCT" not in top
 
 
 async def test_a_role_name_with_a_bracket_shows_literally(repo) -> None:
@@ -243,7 +241,8 @@ async def test_a_role_name_with_a_bracket_shows_literally(repo) -> None:
     app = Harness(repo, RecordingFetch(), session_pool(role="[bold]ROLE"))
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        assert "[bold]ROLE" in border_row(app.screen.tree, 0)
+        tree = app.screen.tree
+        assert "[bold]ROLE" in border_row(tree, tree.outer_size.height - 1)
 
 
 async def test_an_unchanged_session_does_not_repaint_the_borders(repo) -> None:
