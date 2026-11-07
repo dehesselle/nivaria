@@ -1489,8 +1489,8 @@ def snowsight_pool(
     return pool
 
 
-async def press_w_on(app, pilot, pick) -> list[str]:
-    """Move the tree cursor to `pick(tree, tables)`, press w, return what
+async def press_on(app, pilot, pick, *keys) -> list[str]:
+    """Move the tree cursor to `pick(tree, tables)`, press `keys`, return what
     would have been opened."""
     opened: list[str] = []
     app.open_url = lambda url, **_: opened.append(url)
@@ -1501,45 +1501,60 @@ async def press_w_on(app, pilot, pick) -> list[str]:
     tree.focus()
     tree.move_cursor(pick(tree, tables))
     await settle(pilot)
-    await pilot.press("w")
+    await pilot.press(*keys)
     await pilot.pause()
     return opened
 
 
-async def test_w_opens_the_highlighted_object_in_snowsight(repo) -> None:
+async def open_object_on(app, pilot, pick) -> list[str]:
+    return await press_on(app, pilot, pick, "comma", "w", "o")
+
+
+async def open_workspaces(app, pilot) -> list[str]:
+    """Press the chord on an empty tree: it needs no cursor."""
+    opened: list[str] = []
+    app.open_url = lambda url, **_: opened.append(url)
+    await pilot.press("comma", "w", "w")
+    await pilot.pause()
+    return opened
+
+
+async def test_the_object_chord_opens_the_highlighted_object_in_snowsight(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")
     app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        opened = await press_w_on(app, pilot, lambda tree, tables: tables.children[0])
+        opened = await open_object_on(
+            app, pilot, lambda tree, tables: tables.children[0]
+        )
     assert opened == [f"{SNOWSIGHT}#/data/databases/MYDB/schemas/AAA/table/ORDERS"]
 
 
-async def test_w_on_a_database_opens_the_database(repo) -> None:
+async def test_the_object_chord_on_a_database_opens_the_database(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")
     app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        opened = await press_w_on(
+        opened = await open_object_on(
             app, pilot, lambda tree, tables: tree.root.children[0]
         )
     assert opened == [f"{SNOWSIGHT}#/data/databases/MYDB"]
 
 
-async def test_w_on_a_category_opens_its_schema(repo) -> None:
+async def test_the_object_chord_on_a_category_opens_its_schema(repo) -> None:
     """Snowsight has no page for one kind of object in a schema."""
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")
     app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        opened = await press_w_on(app, pilot, lambda tree, tables: tables)
+        opened = await open_object_on(app, pilot, lambda tree, tables: tables)
     assert opened == [f"{SNOWSIGHT}#/data/databases/MYDB/schemas/AAA"]
 
 
-async def test_w_opens_the_accounts_snowsight_url_setting(repo) -> None:
+async def test_the_object_chord_opens_the_accounts_snowsight_url_setting(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     put_tables(repo, "MYDB", "AAA", "ORDERS")
     pool = snowsight_pool("MYORG-MYACCT.privatelink")
@@ -1547,7 +1562,7 @@ async def test_w_opens_the_accounts_snowsight_url_setting(repo) -> None:
     app = Harness(repo, RecordingFetch(), pool=pool)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        opened = await press_w_on(
+        opened = await open_object_on(
             app, pilot, lambda tree, tables: tree.root.children[0]
         )
     assert opened == ["https://snowsight.example/myorg/myacct/#/data/databases/MYDB"]
@@ -1563,7 +1578,7 @@ def capture_notices(app) -> list[str]:
     return notices
 
 
-async def test_w_on_a_privatelink_account_without_the_setting_asks_for_it(
+async def test_the_object_chord_on_a_privatelink_account_without_the_setting_asks_for_it(
     repo,
 ) -> None:
     """Guessing a private host opened a dead link on a real account."""
@@ -1575,14 +1590,63 @@ async def test_w_on_a_privatelink_account_without_the_setting_asks_for_it(
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         notices = capture_notices(app)
-        opened = await press_w_on(
+        opened = await open_object_on(
             app, pilot, lambda tree, tables: tree.root.children[0]
         )
     assert opened == []
     assert notices and "Settings" in notices[0]
 
 
-async def test_w_without_the_account_names_asks_for_the_setting(repo) -> None:
+async def test_a_plain_w_opens_nothing(repo) -> None:
+    """Opening an object moved under `, w`; `w` alone is not a shortcut for it."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        opened = await press_on(
+            app, pilot, lambda tree, tables: tree.root.children[0], "w"
+        )
+    assert opened == []
+
+
+async def test_the_workspaces_chord_opens_workspaces_with_no_tree_cursor(repo) -> None:
+    app = Harness(repo, RecordingFetch(), pool=snowsight_pool())
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        opened = await open_workspaces(app, pilot)
+    assert opened == [f"{SNOWSIGHT}#/workspaces"]
+
+
+async def test_the_workspaces_chord_opens_the_accounts_snowsight_url_setting(
+    repo,
+) -> None:
+    pool = snowsight_pool("MYORG-MYACCT.privatelink")
+    config.set(SNOWSIGHT_URL, "https://snowsight.example/myorg/myacct")
+    app = Harness(repo, RecordingFetch(), pool=pool)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        opened = await open_workspaces(app, pilot)
+    assert opened == ["https://snowsight.example/myorg/myacct/#/workspaces"]
+
+
+async def test_the_workspaces_chord_on_a_privatelink_account_without_the_setting_asks_for_it(
+    repo,
+) -> None:
+    app = Harness(
+        repo, RecordingFetch(), pool=snowsight_pool("MYORG-MYACCT.privatelink")
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        notices = capture_notices(app)
+        opened = await open_workspaces(app, pilot)
+    assert opened == []
+    assert notices and "Settings" in notices[0]
+
+
+async def test_the_object_chord_without_the_account_names_asks_for_the_setting(
+    repo,
+) -> None:
     """The names are read at connect, best effort; if that failed there is
     nothing to build a link from."""
     put_schemas(repo, "MYDB", "AAA")
@@ -1593,7 +1657,7 @@ async def test_w_without_the_account_names_asks_for_the_setting(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         notices = capture_notices(app)
-        opened = await press_w_on(
+        opened = await open_object_on(
             app, pilot, lambda tree, tables: tree.root.children[0]
         )
     assert opened == []

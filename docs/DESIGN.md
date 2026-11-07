@@ -1847,7 +1847,7 @@ read `none` even after this — a session can have no active warehouse at all
 — but role never legitimately does.
 
 The login response has no organization or account name, which Snowsight links
-(`w`) need. `connect_all` asks for them once, on the first connection
+(the `, w` chords) need. `connect_all` asks for them once, on the first connection
 (`ConnectionPool._read_account_names`, context functions only, so no
 warehouse), and keeps them on the pool; a link is then an attribute read and
 never waits on Snowflake. A failure leaves them unset and does not fail the

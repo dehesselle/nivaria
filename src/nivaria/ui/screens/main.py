@@ -44,7 +44,13 @@ from nivaria.service.fetch import FetchService
 from nivaria.service.jobs import Priority, log_policy
 from nivaria.settings import CACHE_TTL, SNOWSIGHT_URL, config
 from nivaria.snowflake.pool import ConnectionPool
-from nivaria.snowsight import base_url, database_url, object_url, schema_url
+from nivaria.snowsight import (
+    base_url,
+    database_url,
+    object_url,
+    schema_url,
+    workspaces_url,
+)
 from nivaria.ui.messages import (
     CacheUpdated,
     CategorySelected,
@@ -113,16 +119,17 @@ class MainScreen(Screen):
         Binding("comma a w", "pick_warehouse", "Warehouse selection", show=False),
         Binding("comma a r", "pick_role", "Role selection", show=False),
         Binding("comma a d", "pick_databases", "Database selection", show=False),
+        Binding("comma w w", "open_workspaces", "Workspaces", show=False),
+        Binding("comma w o", "open_in_snowsight", "Object under cursor", show=False),
         Binding("comma s", "settings", "Settings", show=False),
         Binding("comma ?", "about", "About", show=False),
         Binding("slash", "search", "Search"),
         Binding("f5", "refresh", "Refresh"),
-        # "Web", not "Snowsight": a label starts with its key's letter, and
-        # `s` is already the SQL tab's.
-        Binding("w", "open_in_snowsight", "Web"),
     ]
 
-    CHORD_GROUPS: ClassVar[dict[str, str]] = {"comma a": "Account"}
+    # "Web", not "Snowsight": a label starts with its key's letter, and `comma s`
+    # is already Settings.
+    CHORD_GROUPS: ClassVar[dict[str, str]] = {"comma a": "Account", "comma w": "Web"}
 
     def __init__(
         self,
@@ -698,11 +705,10 @@ class MainScreen(Screen):
             self.repo.forget_coverage(scope)
             self._request(scope, Priority.INTERACTIVE)
 
-    def action_open_in_snowsight(self) -> None:
-        """Open whatever the cursor is on in Snowsight."""
-        node = self.tree.cursor_node
-        if self.pool is None or node is None or node.data is None:
-            return
+    def _snowsight_base(self) -> str | None:
+        """The account's Snowsight URL, or None after saying how to set one."""
+        if self.pool is None:
+            return None
         base = base_url(
             self.pool.account_names,
             privatelink=self.pool.params.uses_privatelink,
@@ -717,6 +723,21 @@ class MainScreen(Screen):
                 severity="warning",
                 timeout=5,
             )
+        return base
+
+    def action_open_workspaces(self) -> None:
+        """Open Snowsight's Workspaces page, to write some SQL."""
+        base = self._snowsight_base()
+        if base is not None:
+            self.app.open_url(workspaces_url(base))
+
+    def action_open_in_snowsight(self) -> None:
+        """Open whatever the cursor is on in Snowsight."""
+        node = self.tree.cursor_node
+        if node is None or node.data is None:
+            return
+        base = self._snowsight_base()
+        if base is None:
             return
         data = node.data
         match data.type:

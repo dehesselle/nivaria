@@ -67,6 +67,16 @@ def object_url(base: str, ref: ObjectRef) -> str:
     )
 
 
+def workspaces_url(base: str) -> str:
+    """The Workspaces page, where SQL is written.
+
+    Unlike the object routes this one is documented, as the base of Snowflake's
+    deep link for creating a workspace from a Git repository. No documented
+    route creates a blank SQL file, or opens one in a private workspace.
+    """
+    return f"{base}#/workspaces"
+
+
 def _part(name: str) -> str:
     """One path segment: the name as Snowflake stores it, percent-encoded.
 

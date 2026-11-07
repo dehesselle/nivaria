@@ -98,7 +98,6 @@ across sessions.
 | `F1` | Show or hide the Log panel |
 | `/` | Open search |
 | `F5` | Refresh what the screen shows now, whatever its age: what the detail pane shows, and the list the cursor's node is in |
-| `w` | Open whatever the cursor is on in Snowsight |
 | `Ctrl+Q` | Quit; press again to quit without waiting for running statements |
 
 ## Chords
@@ -112,10 +111,12 @@ other.
 | `, a w` | Warehouse selection |
 | `, a r` | Role selection |
 | `, a d` | Database selection |
+| `, w w` | Open Workspaces in Snowsight, to write SQL |
+| `, w o` | Open the object under the cursor in Snowsight |
 | `, s` | Settings |
 | `, ?` | About |
 
-`a` is the **Account** group.
+`a` is the **Account** group and `w` the **Web** group.
 
 Pause after any key and the Chord panel lists what can come next, and waits for
 you. While it is up, `backspace` steps back and `escape` closes it. Clicking an
@@ -138,13 +139,17 @@ Moving the cursor shows the node in the Detail pane. `enter` on a row of a
 category list (for example `Tables (n)`) opens that object and moves the tree
 cursor to it.
 
-`w` opens the tree cursor's database, schema or object in Snowsight in the
-default browser; on a category such as `Pipes (n)` it opens the schema. The
-link uses the organization and account name nivaria reads from Snowflake when
-connecting, so any form of account identifier works, and opens the public
+`, w o` opens the tree cursor's database, schema or object in Snowsight in the
+default browser; on a category such as `Pipes (n)` it opens the schema. `, w w`
+opens Snowsight's Workspaces page, wherever the cursor is. Add or pick a SQL file
+there: Snowflake documents no link that creates one. Snowsight has its own
+session and role, so your role in nivaria does not carry over.
+
+Both links use the organization and account name nivaria reads from Snowflake
+when connecting, so any form of account identifier works, and open the public
 `app.snowflake.com`. A PrivateLink account (an identifier ending in
 `.privatelink`) reaches Snowsight through a private host that depends on its
-network setup, so `w` asks for **Snowsight URL** in Settings instead: enter the
+network setup, so both ask for **Snowsight URL** in Settings instead: enter the
 address Snowsight shows for the account up to and including the account name,
 for example
 `https://app.eu-central-1.privatelink.snowflakecomputing.com/myorg/myacct`.
@@ -260,7 +265,7 @@ restart.
 | cache age | 300 | Seconds cached metadata stays fresh before what is on screen is refreshed in the background. `0` disables background refreshing; `F5` still works. |
 | cursor settle delay (milliseconds) | 250 | How long the tree cursor has to rest on a node before what it shows is checked and fetched if needed. What is cached shows at once either way. `0` means no wait. |
 | connection pool size | 3 | Connections to keep open (1–5). Every connection may cost an MFA prompt. |
-| Snowsight URL | empty | Per account: the Snowsight address `w` opens, up to the account name. Empty uses the public address; a PrivateLink account needs it set. |
+| Snowsight URL | empty | Per account: the Snowsight address that `, w w` and `, w o` open, up to the account name. Empty uses the public address; a PrivateLink account needs it set. |
 | fetch page size | 1000 | Rows one fetch job asks for. Lowering it mainly makes fetching slower. |
 | pipe history fetch window (days) | 90 | Days of pipe load history fetched and cached. |
 | pipe history display window (days) | 90 | Days of it shown in the Pipe view. |

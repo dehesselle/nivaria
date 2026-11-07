@@ -451,8 +451,14 @@ https://app.snowflake.com/myorg/myacct/#/data/databases/DB/schemas/SC/task/PROBE
   and `SYSTEM$GET_PRIVATELINK_CONFIG()`, which reports both, needs
   `ACCOUNTADMIN`; hence the per-account Snowsight URL setting rather than a
   derived private host.
-- Not checked: whether a link opened while signed out reaches the object
-  after sign-in.
+- `#/workspaces` opens the Workspaces page. Unlike the object routes it is
+  documented, as the base of the deep link for creating a workspace from a Git
+  repository (`#/workspaces?action=create_workspace_from_git_repo`); that action
+  is the only one documented, and no documented route creates a blank SQL file.
+  **Copy URL** gives a file's link only in a shared workspace. Checked live on
+  2026-11-07: the route without the action lands on Workspaces.
+- A link opened while signed out survives sign-in: on 2026-11-07 a table's link
+  showed the login screen, then went straight to the table.
 
 ## externalbrowser login
 

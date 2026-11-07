@@ -87,7 +87,7 @@ SNOWSIGHT_URL = Setting(
     key="snowsight_url",
     label="Snowsight URL",
     description=(
-        "Where 'w' opens this account in Snowsight, up to and including the "
+        "Where links open this account in Snowsight, up to and including the "
         "account, e.g. https://app.eu-central-1.privatelink."
         "snowflakecomputing.com/myorg/myacct. Empty uses the public "
         "app.snowflake.com address. A PrivateLink account needs this: which "

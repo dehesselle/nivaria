@@ -86,6 +86,20 @@ async def test_the_panel_offers_the_documented_commands_at_the_top(repo) -> None
             ("?", "About"),
             ("a", "+Account"),
             ("s", "Settings"),
+            ("w", "+Web"),
+        ]
+
+
+async def test_the_panel_offers_the_documented_commands_under_web(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.query_one(ChordViewer).delay = 0
+        await pilot.press("comma", "w")
+        await settle(pilot)
+        assert entries(app) == [
+            ("o", "Object under cursor"),
+            ("w", "Workspaces"),
         ]
 
 
