@@ -191,18 +191,25 @@ ClosingDialog > #dialog {
 
 /* ---- detail pane and views -------------------------------------------- */
 
-#detail-columns {
-    height: 1fr;
-}
-
 .detail-placeholder {
     padding: 1 2;
     color: $text-muted;
 }
 
+/* Every detail table takes the height left to it. DataTable's own default,
+   height: auto with max-height: 100%, is not enough: in a tab, whose
+   TabbedContent and TabPane are height: auto too, the cap measures against
+   an auto parent and holds nothing, so the table grows to all of its rows
+   and the pane clips it, leaving nothing to scroll. Outside a tab, the cap
+   ignores the notes above the table, which push its last rows off the
+   bottom. */
+#detail-columns,
 #detail-history,
 #detail-grants,
-#detail-data {
+#detail-data,
+#detail-list,
+#detail-status,
+#detail-tags {
     height: 1fr;
 }
 
