@@ -37,7 +37,8 @@ browse everything. The Pipes list's Execution State is read with
 
 These need a running warehouse and stay blank without one:
 
-- Last DDL / Last Altered in the Tables and Views lists;
+- Last DDL / Last Altered in the Tables and Views lists, and Last Altered in
+  the Stages list;
 - pipe activity (Pipes list) and task activity (Tasks list);
 - pipe and task History;
 - Tags on schemas, databases and columns;

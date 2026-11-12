@@ -168,6 +168,27 @@ def test_table_stats_is_fetched_in_one_shot() -> None:
     assert page.cursor is None
 
 
+def test_stage_stats_is_fetched_in_one_shot() -> None:
+    """A schema's stage count is bounded, same reasoning as table_stats."""
+    from nivaria.models import stage_stats_scope
+
+    gateway = FakeGateway(
+        stage_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "STAGE_CATALOG": "MYDB",
+                    "STAGE_SCHEMA": "PUBLIC",
+                    "STAGE_NAME": "LANDING",
+                    "LAST_ALTERED": "2026-01-02",
+                }
+            ]
+        }
+    )
+    page = fetch_page(gateway, stage_stats_scope("MYDB", "PUBLIC"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
+
+
 def test_view_stats_is_fetched_in_one_shot() -> None:
     """A schema's view count is bounded, same reasoning as table_stats."""
     from nivaria.models import view_stats_scope
@@ -1547,6 +1568,32 @@ def test_table_stats_scope_reaches_the_right_gateway_call(repo) -> None:
         service.stop()
     assert [row["TABLE_NAME"] for row in repo.raw_rows(scope)] == ["ORDERS"]
     assert [c[0] for c in gateway.calls] == ["table_stats"]
+
+
+def test_stage_stats_scope_reaches_the_right_gateway_call(repo) -> None:
+    from nivaria.models import stage_stats_scope
+
+    gateway = FakeGateway(
+        stage_stats={
+            ("MYDB", "PUBLIC"): [
+                {
+                    "STAGE_CATALOG": "MYDB",
+                    "STAGE_SCHEMA": "PUBLIC",
+                    "STAGE_NAME": "LANDING",
+                    "LAST_ALTERED": "2026-01-02",
+                }
+            ]
+        }
+    )
+    scope = stage_stats_scope("MYDB", "PUBLIC")
+    service = make_service(gateway, repo)
+    try:
+        service.request(scope)
+        assert wait_until(lambda: repo.entry(scope).state is CacheState.COMPLETE)
+    finally:
+        service.stop()
+    assert [row["STAGE_NAME"] for row in repo.raw_rows(scope)] == ["LANDING"]
+    assert [c[0] for c in gateway.calls] == ["stage_stats"]
 
 
 def test_view_stats_scope_reaches_the_right_gateway_call(repo) -> None:

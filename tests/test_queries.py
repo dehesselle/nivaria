@@ -128,6 +128,13 @@ def test_view_stats_is_the_exact_same_statement_as_table_stats() -> None:
     assert queries.view_stats("MYDB") == queries.table_stats("MYDB")
 
 
+def test_stage_stats_targets_information_schema_stages_with_a_bound_schema() -> None:
+    assert queries.stage_stats("MYDB") == (
+        "SELECT STAGE_CATALOG, STAGE_SCHEMA, STAGE_NAME, LAST_ALTERED "
+        'FROM "MYDB".INFORMATION_SCHEMA.STAGES WHERE STAGE_SCHEMA = %s'
+    )
+
+
 def test_column_tag_references_excludes_tags_inherited_from_the_schema() -> None:
     """Without this WHERE clause, TAG_REFERENCES_ALL_COLUMNS reports a
     schema- or database-level tag against every column underneath it too --

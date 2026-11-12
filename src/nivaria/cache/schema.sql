@@ -152,6 +152,24 @@ CREATE TABLE IF NOT EXISTS show_stages (
 );
 CREATE INDEX IF NOT EXISTS show_stages_scope ON show_stages(_scope);
 
+-- LAST_ALTERED for the "Stages (n)" list, sourced via a real SELECT against
+-- INFORMATION_SCHEMA.STAGES (needs a running warehouse) because SHOW STAGES
+-- carries no such timestamp -- see ScopeType.STAGE_STATS. It moves when the
+-- stage's definition changes (ALTER STAGE ... SET), not when its files or
+-- grants do: verified live on 2026-11-12 (docs/snowflake-behavior.md). CREATED
+-- is left out, being exactly show_stages.created_on.
+CREATE TABLE IF NOT EXISTS information_schema_stages (
+    STAGE_CATALOG TEXT NOT NULL,
+    STAGE_SCHEMA  TEXT NOT NULL,
+    STAGE_NAME    TEXT NOT NULL,
+    LAST_ALTERED  TEXT,
+    _scope        TEXT    NOT NULL,
+    _generation   INTEGER NOT NULL,
+    PRIMARY KEY (STAGE_CATALOG, STAGE_SCHEMA, STAGE_NAME)
+);
+CREATE INDEX IF NOT EXISTS information_schema_stages_scope
+    ON information_schema_stages(_scope);
+
 CREATE TABLE IF NOT EXISTS show_tasks (
     database_name     TEXT NOT NULL,
     schema_name       TEXT NOT NULL,

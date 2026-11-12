@@ -462,6 +462,17 @@ def test_view_stats_binds_schema_and_view_table_type_as_parameters() -> None:
     assert rows[0]["TABLE_NAME"] == "ORDERS_V"
 
 
+def test_stage_stats_binds_the_schema_as_a_parameter() -> None:
+    gateway, connection, _ = make_gateway()
+    connection.columns = ["STAGE_CATALOG", "STAGE_SCHEMA", "STAGE_NAME", "LAST_ALTERED"]
+    connection.rows = [("MYDB", "PUBLIC", "LANDING", "2026-01-02")]
+    rows = gateway.stage_stats("MYDB", "PUBLIC")
+    statement, params = connection.executed[-1]
+    assert 'FROM "MYDB".INFORMATION_SCHEMA.STAGES' in statement
+    assert params == ("PUBLIC",)
+    assert rows[0]["STAGE_NAME"] == "LANDING"
+
+
 def test_materialized_view_stats_sends_the_unpaged_show_statement() -> None:
     """Metadata layer like every other SHOW builder -- no bound params, and
     no LIMIT/FROM paging tail issued, same as table_stats being unpaged."""

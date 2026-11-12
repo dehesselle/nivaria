@@ -230,9 +230,9 @@ A stage has no view of its own; the stage list shows everything about it.
   are read, 50 pipes at a time, only while this tab is open; a pipe whose
   state has not been read yet shows none.
 
-Columns sourced from something other than `SHOW` (Last DDL, pipe and task
-activity, tags, history, data) stay blank when the session has no warehouse
-or lacks the privilege; see
+Columns sourced from something other than `SHOW` (Last DDL, Last Altered,
+pipe and task activity, tags, history, data) stay blank when the session has
+no warehouse or lacks the privilege; see
 [OPERATIONS.md](OPERATIONS.md#warehouse-and-privileges). Picking a warehouse
 fills them in. A line above the list names such columns while they are first
 being fetched ("Last DDL, Last Altered: looking...") and says why they are

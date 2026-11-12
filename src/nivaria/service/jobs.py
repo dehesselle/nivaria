@@ -300,6 +300,16 @@ def fetch_page(
                     scope.database, scope.schema, allow_reconnect=allow_reconnect
                 ),
             )
+        case ScopeType.STAGE_STATS:
+            assert scope.database is not None
+            assert scope.schema is not None
+            # A schema's stage count is bounded, same reasoning as
+            # TABLE_STATS being deliberately unpaged.
+            return Page(
+                gateway.stage_stats(
+                    scope.database, scope.schema, allow_reconnect=allow_reconnect
+                ),
+            )
         case ScopeType.PIPE_ACTIVITY:
             assert scope.database is not None
             assert scope.schema is not None

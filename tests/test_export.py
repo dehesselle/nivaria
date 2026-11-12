@@ -66,6 +66,7 @@ from tests.views.harness import (
     put_pipe_history,
     put_pipe_status,
     put_stage,
+    put_stage_stats,
     put_table,
     put_table_stats,
     put_tag,
@@ -191,6 +192,11 @@ def _seed_views(repo: Repository) -> None:
     put_materialized_view_stats(repo, "REPORT")
 
 
+def _seed_stages(repo: Repository) -> None:
+    put_stage(repo, "RAW")
+    put_stage_stats(repo, "RAW")
+
+
 def _seed_tasks(repo: Repository) -> None:
     put_task(repo, "NIGHTLY")
     put_task_activity(repo, "NIGHTLY")
@@ -257,12 +263,20 @@ _CASES = {
         ],
     ),
     "stages": Case(
-        lambda repo: put_stage(repo, "RAW"),
+        _seed_stages,
         lambda pane: pane.show_category(
             objects_scope(ObjectType.STAGE, "MYDB", "PUBLIC")
         ),
         "stages_MYDB.PUBLIC",
-        ["Name", "Type", "Storage Integration", "URL", "Created", "Comment"],
+        [
+            "Name",
+            "Type",
+            "Storage Integration",
+            "URL",
+            "Created",
+            "Last Altered",
+            "Comment",
+        ],
     ),
     "tasks": Case(
         _seed_tasks,

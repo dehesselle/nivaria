@@ -216,6 +216,21 @@ def view_stats(database: str) -> str:
     return table_stats(database)
 
 
+def stage_stats(database: str) -> str:
+    """LAST_ALTERED for every stage in a schema.
+
+    SHOW STAGES has no such timestamp, so this is a second source like
+    `table_stats`: an ordinary SELECT that needs a warehouse, with the schema
+    bound as `%s`. It reflects the stage's definition, not its files (see
+    docs/snowflake-behavior.md).
+    """
+    target = f"{quote_identifier(database)}.INFORMATION_SCHEMA.STAGES"
+    return (
+        "SELECT STAGE_CATALOG, STAGE_SCHEMA, STAGE_NAME, LAST_ALTERED "
+        f"FROM {target} WHERE STAGE_SCHEMA = %s"
+    )
+
+
 def show_grants_on_schema(database: str, schema: str) -> str:
     """Every grant on one schema -- metadata layer, needs no warehouse.
 

@@ -185,6 +185,27 @@ database-level tag against every column of every table underneath it too,
 with `APPLY_METHOD = 'INHERITED'` (checked 2026-09-14). Without filtering
 those rows, every column shows its schema's tags as its own.
 
+## Stage last altered
+
+`SHOW STAGES` has no last-altered column; `INFORMATION_SCHEMA.STAGES` has
+`LAST_ALTERED`. On the sandbox (2026-11-12) an internal stage was put through
+one change at a time, with `LAST_ALTERED` read after each:
+
+| Change | `LAST_ALTERED` |
+| --- | --- |
+| `CREATE STAGE` | set, 55 ms after `CREATED` |
+| `ALTER STAGE ... SET COMMENT` | moves |
+| `ALTER STAGE ... SET DIRECTORY = (ENABLE = TRUE)` | moves |
+| `PUT` a file | unchanged |
+| `ALTER STAGE ... REFRESH` | unchanged |
+| `REMOVE` the files | unchanged |
+| `GRANT`/`REVOKE READ` | unchanged |
+
+It tracks the stage's definition, not its contents or grants. `CREATED` equals
+`SHOW STAGES`' `created_on` exactly, so `information_schema_stages` mirrors only
+`LAST_ALTERED`. Its four column names resolved through `PoolGateway.stage_stats`
+the same day.
+
 ## Copy history
 
 `ACCOUNT_USAGE.COPY_HISTORY` and `INFORMATION_SCHEMA.COPY_HISTORY` stamp

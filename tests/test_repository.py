@@ -515,6 +515,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
         _SCHEMAS,
+        _STAGE_STATS,
         _TABLE_STATS,
         _TAG_REFERENCES,
         _TASK_ACTIVITY,
@@ -530,6 +531,7 @@ def test_every_mirrored_column_exists_in_the_schema(repo) -> None:
         _TABLE_STATS,
         _VIEW_STATS,
         _MATERIALIZED_VIEW_STATS,
+        _STAGE_STATS,
         _PIPE_ACTIVITY,
         _PIPE_ACTIVITY_HISTORY,
         _PIPE_HISTORY,
@@ -673,6 +675,28 @@ def test_materialized_view_stats_columns_survive_a_round_trip(repo) -> None:
     stored = repo.raw_rows(scope)[0]
     assert stored["rows"] == 42
     assert stored["bytes"] == 8192
+
+
+def test_stage_stats_columns_survive_a_round_trip(repo) -> None:
+    """INFORMATION_SCHEMA.STAGES' LAST_ALTERED, under the names a live
+    account returned them on 2026-11-12 (docs/snowflake-behavior.md)."""
+    from nivaria.models import stage_stats_scope
+
+    scope = stage_stats_scope("MYDB", "PUBLIC")
+    load(
+        repo,
+        scope,
+        [
+            {
+                "STAGE_CATALOG": "MYDB",
+                "STAGE_SCHEMA": "PUBLIC",
+                "STAGE_NAME": "LANDING",
+                "LAST_ALTERED": "2026-01-02 00:00:00",
+            }
+        ],
+    )
+    stored = repo.raw_rows(scope)[0]
+    assert stored["LAST_ALTERED"] == "2026-01-02 00:00:00"
 
 
 def test_pipe_activity_columns_survive_a_round_trip(repo) -> None:

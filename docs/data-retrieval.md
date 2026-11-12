@@ -59,6 +59,7 @@ Other columns:
 | Pipes (n) selected | `ACCOUNT_USAGE.COPY_HISTORY`, latest row per pipe | `PIPE_ACTIVITY` | schema | WH, IP | 8-31 s | ~2 s | any tab | Activity tab, target table resolution |
 | Pipes (n) selected | `SYSTEM$PIPE_STATUS`, batches of 50 | `PIPE_STATUS` | schema | none | ~25 ms per pipe | ~25 ms per pipe | Status tab shown, pipe list fetched | Execution State, Pending Files |
 | Stages (n) selected | `SHOW STAGES IN DATABASE` | `DATABASE_PRIME` | database | none | ~1 s | ~1 s | | Stages list |
+| Stages (n) selected | `INFORMATION_SCHEMA.STAGES` | `STAGE_STATS` | schema | WH | ? | ? | | Last Altered |
 | Tasks (n) selected | `SHOW TASKS IN DATABASE` | `DATABASE_PRIME` | database | none | ~1 s | ~1 s | | Tasks list |
 | Tasks (n) selected | `ACCOUNT_USAGE.TASK_HISTORY`, latest row per task | `TASK_ACTIVITY` | schema | WH, IP | ? | ? | | Last Scheduled, Last Run State |
 | Table or view selected | `SHOW COLUMNS IN TABLE` | `COLUMNS` | one object | none | ~0.2 s | ~0.2 s | | Columns tab |

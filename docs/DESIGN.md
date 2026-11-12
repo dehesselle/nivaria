@@ -1604,8 +1604,10 @@ are). The SQL tab sorts after the others, so `ColumnsView.compose_extra_tabs`
 is all a subclass needs.
 
 A **stage** is the one type with a category view and no per-object view, and
-that is deliberate rather than a gap: a `SHOW STAGES` row is the whole
-picture, so `StageListView` is the only place a stage is shown at all.
+that is deliberate rather than a gap: a stage has no columns, history or
+definition to show, so its `SHOW STAGES` row plus `STAGE_STATS`' last-altered
+time fit on one list row, and `StageListView` is the only place a stage is
+shown at all.
 Opening one still lands on the generic placeholder. The node stays expandable
 anyway — nothing is saved by suppressing it, and `ObjectTree.reveal` would
 have to special-case a stage hit to avoid force-expanding to a leaf otherwise

@@ -202,6 +202,10 @@ class SnowflakeGateway(Protocol):
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
 
+    def stage_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
     def show_grants_on_schema(
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
@@ -557,6 +561,15 @@ class PoolGateway:
         return self._fetch(
             queries.view_stats(database),
             (schema, "VIEW"),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def stage_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.stage_stats(database),
+            (schema,),
             allow_reconnect=allow_reconnect,
         )
 

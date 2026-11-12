@@ -184,6 +184,7 @@ class FakeGateway:
         table_stats: dict[tuple[str, str], list[Row]] | None = None,
         view_stats: dict[tuple[str, str], list[Row]] | None = None,
         materialized_view_stats: dict[tuple[str, str], list[Row]] | None = None,
+        stage_stats: dict[tuple[str, str], list[Row]] | None = None,
         pipe_activity: dict[tuple[str, str], list[Row]] | None = None,
         pipe_activity_history: dict[tuple[str, str, str], list[Row]] | None = None,
         pipe_history: dict[tuple[str, str, str, str], list[Row]] | None = None,
@@ -211,6 +212,7 @@ class FakeGateway:
         self._table_stats = table_stats or {}
         self._view_stats = view_stats or {}
         self._materialized_view_stats = materialized_view_stats or {}
+        self._stage_stats = stage_stats or {}
         self._pipe_activity = pipe_activity or {}
         #: Keyed by (database, schema, pipe_name).
         self._pipe_activity_history = pipe_activity_history or {}
@@ -495,6 +497,12 @@ class FakeGateway:
     ) -> list[Row]:
         self.calls.append(("materialized_view_stats", (database, schema)))
         return list(self._materialized_view_stats.get((database, schema), []))
+
+    def stage_stats(
+        self, database: str, schema: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("stage_stats", (database, schema)))
+        return list(self._stage_stats.get((database, schema), []))
 
     def pipe_activity(
         self,

@@ -27,6 +27,7 @@ from nivaria.models import (
     prime_scope,
     roles_scope,
     schemas_scope,
+    stage_stats_scope,
     table_stats_scope,
     tag_references_scope,
     task_activity_history_scope,
@@ -108,6 +109,10 @@ def test_materialized_view_stats_scope_key() -> None:
     )
 
 
+def test_stage_stats_scope_key() -> None:
+    assert stage_stats_scope("MYDB", "PUBLIC").key == "stage_stats:MYDB.PUBLIC"
+
+
 def test_pipe_activity_scope_key() -> None:
     assert pipe_activity_scope("MYDB", "PUBLIC").key == "pipe_activity:MYDB.PUBLIC"
 
@@ -183,6 +188,7 @@ def test_a_schema_level_tag_references_scope_and_a_database_level_one_have_diffe
         table_stats_scope("MYDB", "PUBLIC"),
         view_stats_scope("MYDB", "PUBLIC"),
         materialized_view_stats_scope("MYDB", "PUBLIC"),
+        stage_stats_scope("MYDB", "PUBLIC"),
         pipe_activity_scope("MYDB", "PUBLIC"),
         pipe_activity_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
         pipe_history_scope("MYDB", "PUBLIC", "LOAD_ORDERS"),
@@ -216,6 +222,7 @@ def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
         (tag_references_scope("MYDB", "S"), [schemas_scope("MYDB")]),
         (objects_scope(ObjectType.PIPE, "MYDB", "S"), [schemas_scope("MYDB")]),
         (table_stats_scope("MYDB", "S"), [schemas_scope("MYDB")]),
+        (stage_stats_scope("MYDB", "S"), [schemas_scope("MYDB")]),
         (
             columns_scope("MYDB", "S", "T"),
             [

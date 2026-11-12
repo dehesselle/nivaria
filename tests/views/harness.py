@@ -26,6 +26,7 @@ from nivaria.models import (
     pipe_activity_scope,
     pipe_history_scope,
     pipe_status_scope,
+    stage_stats_scope,
     table_stats_scope,
     tag_references_scope,
     task_activity_history_scope,
@@ -314,6 +315,17 @@ def put_stage(repo: Repository, name: str, **extra) -> ObjectRef:
         ],
     )
     return ObjectRef(ObjectType.STAGE, "MYDB", "PUBLIC", name)
+
+
+def put_stage_stats(repo: Repository, stage: str, **extra) -> None:
+    row = {
+        "STAGE_CATALOG": "MYDB",
+        "STAGE_SCHEMA": "PUBLIC",
+        "STAGE_NAME": stage,
+        "LAST_ALTERED": "2026-01-02 00:00:00",
+    }
+    row.update(extra)
+    load(repo, stage_stats_scope("MYDB", "PUBLIC"), [row])
 
 
 def put_task(repo: Repository, name: str, **extra) -> ObjectRef:

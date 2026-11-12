@@ -298,6 +298,13 @@ _MATERIALIZED_VIEW_STATS = TableSpec(
     order_by=("name",),
 )
 
+_STAGE_STATS = TableSpec(
+    name="information_schema_stages",
+    columns=("STAGE_CATALOG", "STAGE_SCHEMA", "STAGE_NAME", "LAST_ALTERED"),
+    key=("STAGE_CATALOG", "STAGE_SCHEMA", "STAGE_NAME"),
+    order_by=("STAGE_NAME",),
+)
+
 _PIPE_ACTIVITY = TableSpec(
     name="account_usage_copy_history",
     columns=(
@@ -529,6 +536,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _VIEW_STATS
         case ScopeType.MATERIALIZED_VIEW_STATS:
             return _MATERIALIZED_VIEW_STATS
+        case ScopeType.STAGE_STATS:
+            return _STAGE_STATS
         case ScopeType.PIPE_ACTIVITY:
             return _PIPE_ACTIVITY
         case ScopeType.PIPE_ACTIVITY_HISTORY:

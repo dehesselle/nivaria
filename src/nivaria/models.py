@@ -88,6 +88,10 @@ class ScopeType(StrEnum):
     #: materialized views. Metadata layer like SHOW VIEWS, so -- unlike
     #: TABLE_STATS/VIEW_STATS -- this needs no warehouse.
     MATERIALIZED_VIEW_STATS = "materialized_view_stats"
+    #: A schema's stages' LAST_ALTERED, sourced by a real SELECT against
+    #: INFORMATION_SCHEMA.STAGES because SHOW STAGES has no such timestamp --
+    #: a second source like TABLE_STATS, needing a warehouse the same way.
+    STAGE_STATS = "stage_stats"
     #: A schema's pipes' *latest* load each (bounded by the "pipe history
     #: fetch window" setting), sourced by a real SELECT against
     #: SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY rather than SHOW -- a second source,
@@ -232,6 +236,8 @@ class Scope:
                 return f"view_stats:{self.database}.{self.schema}"
             case ScopeType.MATERIALIZED_VIEW_STATS:
                 return f"materialized_view_stats:{self.database}.{self.schema}"
+            case ScopeType.STAGE_STATS:
+                return f"stage_stats:{self.database}.{self.schema}"
             case ScopeType.PIPE_ACTIVITY:
                 return f"pipe_activity:{self.database}.{self.schema}"
             case ScopeType.PIPE_ACTIVITY_HISTORY:
@@ -327,6 +333,10 @@ def view_stats_scope(database: str, schema: str) -> Scope:
 
 def materialized_view_stats_scope(database: str, schema: str) -> Scope:
     return Scope(ScopeType.MATERIALIZED_VIEW_STATS, database=database, schema=schema)
+
+
+def stage_stats_scope(database: str, schema: str) -> Scope:
+    return Scope(ScopeType.STAGE_STATS, database=database, schema=schema)
 
 
 def pipe_activity_scope(database: str, schema: str) -> Scope:
@@ -437,6 +447,7 @@ def containing_scopes(scope: Scope) -> list[Scope]:
             | ScopeType.TABLE_STATS
             | ScopeType.VIEW_STATS
             | ScopeType.MATERIALIZED_VIEW_STATS
+            | ScopeType.STAGE_STATS
             | ScopeType.PIPE_ACTIVITY
             | ScopeType.TASK_ACTIVITY
             | ScopeType.GRANTS
