@@ -294,7 +294,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             journal.user("quit")
             self.exit()
             return
-        journal.user(f"quit, waiting for {fetch.running_count} statements")
+        journal.user("quit, waiting for {} statements", fetch.running_count)
         self._quitting = True
         self._wait_for_jobs_then_exit(fetch)
 
@@ -335,8 +335,12 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
 def _journal_session(what: str, pool: ConnectionPool) -> None:
     params = pool.params
     journal.connection(
-        f"{what}: account {pool.account_name}, role {params.role or 'none'}, "
-        f"warehouse {params.warehouse or 'none'}, {pool.size} connections"
+        "{}: account {}, role {}, warehouse {}, {} connections",
+        what,
+        journal.account(pool.account_name),
+        journal.role(params.role) if params.role else "none",
+        journal.warehouse(params.warehouse) if params.warehouse else "none",
+        pool.size,
     )
 
 

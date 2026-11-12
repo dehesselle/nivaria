@@ -69,7 +69,7 @@ LOGIN_TIMED_OUT = "the browser login did not finish in time"
 def _login_failure_text(error: Exception) -> str:
     """What to tell the user about a failed login. The log gets the driver's."""
     _log.warning("a login failed: %s", error)
-    journal.connection(f"login failed: {error}")
+    journal.connection("login failed: {}", journal.scrubbed(error))
     if getattr(error, "errno", None) == _LOGIN_TIMEOUT_ERRNO:
         return LOGIN_TIMED_OUT
     return str(error)
@@ -266,7 +266,7 @@ class ConnectionPool:
         for index in range(self.size):
             if progress is not None:
                 progress(index + 1, self.size)
-            journal.connection(f"login {index + 1} of {self.size}, may prompt")
+            journal.connection("login {} of {}, may prompt", index + 1, self.size)
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             # The driver raises many unrelated exception types; the caller
@@ -349,7 +349,7 @@ class ConnectionPool:
         for _ in range(additional):
             if progress is not None:
                 progress(self.size + 1, target)
-            journal.connection(f"login {self.size + 1} of {target}, may prompt")
+            journal.connection("login {} of {}, may prompt", self.size + 1, target)
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             except Exception as error:
@@ -537,7 +537,13 @@ class ConnectionPool:
         else:
             self._drop(connection)
 
-    def run_on_all(self, statement: str, *, timeout: float = 30.0) -> None:
+    def run_on_all(
+        self,
+        statement: str,
+        *,
+        timeout: float = 30.0,
+        journal_as: journal.Text | None = None,
+    ) -> None:
         """Run a session-scoped statement (USE ROLE / USE WAREHOUSE) against
         every pooled connection, so a later query cannot land on a connection
         that still carries the old session state.
@@ -557,11 +563,19 @@ class ConnectionPool:
         cooperation across sessions, which does not exist -- and the common
         failure here is "no such role", which the picker already guards
         against by only ever offering roles SHOW ROLES actually returned.
+
+        `journal_as` is the statement with its name passed as a name, so a
+        pseudonymized journal can replace it. Without one, the statement is
+        scrubbed like an error message.
         """
         with self._maintenance:
             with self._lock:
                 expected = self.size
-            journal.connection(f"{statement} on {expected} connections")
+            journal.connection(
+                "{} on {} connections",
+                journal_as or journal.scrubbed(statement),
+                expected,
+            )
             held: list[Any] = []
             try:
                 for _ in range(expected):
@@ -592,12 +606,18 @@ class ConnectionPool:
         has to agree -- otherwise which role served a given query would
         depend on which pool connection happened to be free.
         """
-        self.run_on_all(queries.use_role(role))
+        self.run_on_all(
+            queries.use_role(role),
+            journal_as=journal.text('USE ROLE "{}"', journal.role(role)),
+        )
         self.params = replace(self.params, role=role)
 
     def set_warehouse(self, warehouse: str) -> None:
         """Switch every pooled connection's warehouse. See `set_role`."""
-        self.run_on_all(queries.use_warehouse(warehouse))
+        self.run_on_all(
+            queries.use_warehouse(warehouse),
+            journal_as=journal.text('USE WAREHOUSE "{}"', journal.warehouse(warehouse)),
+        )
         self.params = replace(self.params, warehouse=warehouse)
 
     def close(self) -> None:

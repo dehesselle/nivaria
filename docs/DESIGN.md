@@ -2108,6 +2108,40 @@ rotation, whose renames Windows refuses on an open file. A file that cannot be
 written is given up for the session with one warning, because the handler's
 default `handleError` would print a traceback across the TUI.
 
+**A line is built from names, not finished text**, so the file can show
+placeholders instead. An emitter takes a `str.format` template and its
+arguments, and a name goes in as a `Name`, `Scope`, `ObjectRef` or `SchemaRef`.
+The record carries the unrendered `Text`: the Log panel and `getMessage()`
+render it with real names, and the file's formatter, while **pseudonymize the
+journal file** is on, renders a copy of the record through the placeholders. A
+scope's placeholder key comes from `Scope.key` on a copy of the scope with its
+names replaced, not from a second copy of the key logic. An f-string would have
+rendered the name already, so `tests/test_journal.py` fails on one in any call
+on `journal`, or in any `detail=`, which reaches the journal through `request`.
+
+**Placeholders are numbered, not hashed.** A plain hash of a guessable name
+(`RAW`, `PROD`) is found again by hashing a word list. A keyed hash is safe, but
+it is hex that is hard to tell apart when reading, and a lookup means hashing
+every name you know. A number belongs to the string and the prefix to its kind
+(`DB`, `SCH`, the object type, `OBJ` where a scope does not say table or view,
+`ROLE`, `WH`, `ACCT`), so two objects that share a name share a number.
+`journal/names.txt` keeps the numbers across sessions. It is only appended to,
+because a sweep can bring hundreds of new names and rewriting the file for each
+would grow with their square. Lines another nivaria appended are read before a
+number is handed out, which leaves only a narrow window for two processes to
+give out the same number. If the file can't be written, the journal file is
+given up rather than filled with placeholders that nothing explains. Snowflake's
+own names (`SNOWFLAKE`, `INFORMATION_SCHEMA`, `PUBLIC`, the system roles) stay
+as they are: they behave unlike the rest and say nothing about the account.
+
+**Error text has no structure, so it is scrubbed.** A `fail` line, a failed
+login and a drop's discarded error go in as `Scrubbed`. In the file, known names
+are replaced wherever they stand, ignoring case, and a quoted part still unknown
+becomes `?`. Snowflake quotes the names in its errors, and the object in one is
+usually the statement's own, already numbered by its `send` line. E-mail
+addresses and hosts are dropped, which covers a login's user and account
+identifier.
+
 **A journal line never breaks what it describes.** Each emitter is wrapped:
 whatever goes wrong while formatting or writing is reported to the `nivaria`
 logger and swallowed, as the SQL log does.

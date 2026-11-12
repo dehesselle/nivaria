@@ -13,8 +13,23 @@ import pytest
 
 from nivaria import journal, paths
 from nivaria.cache.repository import Entry, Window
-from nivaria.models import CacheState, ObjectType, Scope, ScopeType, pipe_activity_scope
-from nivaria.settings import JOURNAL_FILE, JOURNAL_VERBOSE, config
+from nivaria.models import (
+    CacheState,
+    ObjectRef,
+    ObjectType,
+    Scope,
+    ScopeType,
+    columns_scope,
+    object_grants_scope,
+    pipe_activity_scope,
+    pipe_history_scope,
+)
+from nivaria.settings import (
+    JOURNAL_FILE,
+    JOURNAL_PSEUDONYMIZE,
+    JOURNAL_VERBOSE,
+    config,
+)
 
 NOW = 1_000_000.0
 
@@ -228,6 +243,135 @@ def test_a_file_that_cannot_be_written_is_given_up_quietly(
     assert len(warnings) == 1
 
 
+# ----------------------------------------------------------- placeholders
+
+
+def _pseudonymized() -> list[str]:
+    """The message part of every line in this session's file."""
+    [file] = _files()
+    return [
+        line.split(" ", 2)[2] for line in file.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+def _names_file() -> Path:
+    return _journal_dir() / "names.txt"
+
+
+@pytest.fixture
+def pseudonymized() -> None:
+    config.set(JOURNAL_FILE, True)
+    config.set(JOURNAL_PSEUDONYMIZE, True)
+
+
+def test_the_file_shows_placeholders_and_the_panel_the_names(
+    pseudonymized: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    ref = ObjectRef(ObjectType.PIPE, "SALES", "RAW", "LOAD_ORDERS")
+    journal.user("cursor rested on {}", journal.subject(ref))
+    journal.sent(pipe_history_scope("SALES", "RAW", "LOAD_ORDERS"), journal.Reason.F5)
+
+    assert _lines(caplog)[0] == "user  cursor rested on pipe SALES.RAW.LOAD_ORDERS"
+    user, send = _pseudonymized()
+    assert user == "user  cursor rested on pipe DB_1.SCH_2.PIPE_3"
+    assert send.startswith("send  pipe_history:DB_1.SCH_2.PIPE_3  ")
+    text = "\n".join(_pseudonymized())
+    assert not any(name in text for name in ("SALES", "RAW", "LOAD_ORDERS"))
+
+
+def test_a_placeholder_number_belongs_to_the_string_whatever_its_kind(
+    pseudonymized: None,
+) -> None:
+    """A table and a pipe may share a name, and the journal has to show it."""
+    table = ObjectRef(ObjectType.TABLE, "DB", "S", "ORDERS")
+    pipe = ObjectRef(ObjectType.PIPE, "DB", "S", "ORDERS")
+    journal.queued(object_grants_scope(table), journal.Reason.TAB_OPENED, priority="x")
+    journal.queued(object_grants_scope(pipe), journal.Reason.TAB_OPENED, priority="x")
+
+    first, second = _pseudonymized()
+    assert first.startswith("queue grants:tables:DB_1.SCH_2.TABLE_3  ")
+    assert second.startswith("queue grants:pipes:DB_1.SCH_2.PIPE_3  ")
+
+
+def test_columns_name_their_object_without_saying_table_or_view(
+    pseudonymized: None,
+) -> None:
+    journal.done(columns_scope("DB", "S", "V"), 3, 0.25)
+    assert _pseudonymized() == ["done  columns:DB_1.SCH_2.OBJ_3  3 rows, 0.2 s"]
+
+
+def test_placeholders_hold_across_sessions(pseudonymized: None) -> None:
+    journal.user("role {} -> {}", journal.role("ANALYST"), journal.role("LOADER"))
+    journal.reset()
+    for file in _files():
+        file.unlink()
+    journal.user("role {} -> {}", journal.role("LOADER"), journal.role("AUDITOR"))
+
+    assert _pseudonymized() == ["user  role ROLE_2 -> ROLE_3"]
+    assert _names_file().read_text(encoding="utf-8").splitlines() == [
+        '1 ROLE "ANALYST"',
+        '2 ROLE "LOADER"',
+        '3 ROLE "AUDITOR"',
+    ]
+
+
+def test_snowflakes_own_names_are_left_as_they_are(pseudonymized: None) -> None:
+    journal.user("role {} -> {}", journal.role("SYSADMIN"), journal.role("ETL"))
+    journal.user(
+        "cursor rested on {}",
+        journal.subject(ObjectRef(ObjectType.VIEW, "SNOWFLAKE", "ACCOUNT", "PUBLIC")),
+    )
+    assert _pseudonymized() == [
+        "user  role SYSADMIN -> ROLE_1",
+        "user  cursor rested on view SNOWFLAKE.SCH_2.PUBLIC",
+    ]
+
+
+def test_an_error_keeps_its_wording_and_loses_its_names(pseudonymized: None) -> None:
+    scope = pipe_history_scope("SALES", "RAW", "LOAD_ORDERS")
+    journal.sent(scope, journal.Reason.F5)
+    journal.failed(
+        scope,
+        "SQL compilation error: Object 'SALES.RAW.LOAD_ORDERS' does not exist, "
+        "nor does 'SALES.RAW.SECRET_THING' or sales.raw",
+    )
+    journal.connection(
+        "login failed: {}",
+        journal.scrubbed(
+            "250001: Could not connect to myorg-acct.snowflakecomputing.com:443 "
+            "as jane.doe@example.com, see https://docs.example.com/x"
+        ),
+    )
+
+    _, fail, conn = _pseudonymized()
+    assert fail == (
+        "fail  pipe_history:DB_1.SCH_2.PIPE_3  SQL compilation error: Object "
+        "'DB_1.SCH_2.PIPE_3' does not exist, nor does 'DB_1.SCH_2.?' or DB_1.SCH_2"
+    )
+    assert conn == (
+        "conn  login failed: 250001: Could not connect to <host> as <email>, see <host>"
+    )
+
+
+def test_the_file_shows_names_with_the_setting_off() -> None:
+    config.set(JOURNAL_FILE, True)
+    journal.user("databases added: {}", journal.joined(map(journal.database, "AB")))
+    [file] = _files()
+    assert file.read_text(encoding="utf-8").endswith("user  databases added: A, B\n")
+    assert not _names_file().exists()
+
+
+def test_no_name_reaches_the_file_when_the_placeholders_cannot_be_kept(
+    pseudonymized: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    _names_file().mkdir(parents=True)  # a directory where the file should be
+    journal.user("expanded {}", journal.subject("SALES"))
+
+    assert _lines(caplog) == ["user  expanded database SALES"]
+    assert "SALES" not in "".join(p.read_text() for p in _files())
+    assert any("cannot be written" in r.getMessage() for r in caplog.records)
+
+
 # ----------------------------------------------------------- completeness
 
 
@@ -264,3 +408,38 @@ def _unreasoned_requests() -> list[str]:
 def test_every_request_in_the_code_names_its_trigger() -> None:
     """Reason.UNKNOWN in a journal means a call site was missed."""
     assert _unreasoned_requests() == []
+
+
+def _baked_in_names() -> list[str]:
+    """Every journal call in src/ that hands over finished text.
+
+    An f-string renders its names before the file's formatter can replace
+    them. That covers a call on `journal.` and any `detail=`, which reaches
+    the journal through `request`.
+    """
+    import ast
+
+    source = Path(journal.__file__).parent
+    found = []
+    for path in sorted(source.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            on_journal = (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "journal"
+            )
+            arguments = (
+                [*node.args, *(k.value for k in node.keywords)] if on_journal else []
+            )
+            arguments += [k.value for k in node.keywords if k.arg == "detail"]
+            if any(isinstance(argument, ast.JoinedStr) for argument in arguments):
+                found.append(f"{path.relative_to(source)}:{node.lineno}")
+    return found
+
+
+def test_no_journal_call_in_the_code_bakes_a_name_into_its_text() -> None:
+    assert _baked_in_names() == []

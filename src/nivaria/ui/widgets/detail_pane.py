@@ -70,7 +70,7 @@ class DetailPane(Vertical):
             return
         label = event.tab.label
         name = label.plain if isinstance(label, Content | Text) else str(label)
-        journal.user(f"tab {name} on {journal.subject(self._shown)}")
+        journal.user("tab {} on {}", name, journal.subject(self._shown))
 
     @property
     def ref(self) -> ObjectRef | None:
@@ -184,7 +184,7 @@ class DetailPane(Vertical):
         if not view.settled:
             self._settle_timer = self.set_timer(delay / 1000, self._cursor_rested)
         elif self._shown is not None:
-            journal.user(f"cursor rested on {journal.subject(self._shown)}")
+            journal.user("cursor rested on {}", journal.subject(self._shown))
 
     def _cursor_rested(self) -> None:
         """Ask what the view on screen needs, now that the cursor has stopped.
@@ -200,7 +200,7 @@ class DetailPane(Vertical):
             return
         view.settled = True
         if self._shown is not None:
-            journal.user(f"cursor rested on {journal.subject(self._shown)}")
+            journal.user("cursor rested on {}", journal.subject(self._shown))
         if view.is_mounted:
             view.call_later(view.ensure_all, Reason.CURSOR_SETTLED)
 

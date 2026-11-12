@@ -197,6 +197,7 @@ Cache directory (`user_cache_dir`):
 | --- | --- |
 | `cache-<account>-<role>.db` (plus `-wal`, `-shm`) | The sqlite cache for one account and role: Snowflake metadata only. |
 | `journal/journal-<date>-<time>-<pid>.log` | The journal of one session, only while **write the journal to a file** is on. The 20 newest are kept. |
+| `journal/names.txt` | Which name each placeholder of a pseudonymized journal stands for, one per line. Written only while **pseudonymize the journal file** is on. It undoes the placeholders, so don't share it. |
 
 The cache is safe to delete at any time while nivaria is not running; it
 refills on the next start. A cache written by a different nivaria schema
@@ -205,7 +206,13 @@ version is deleted and rebuilt automatically.
 The journal files are safe to delete too. Nothing is written to `journal/`
 unless you switch the file on, and nothing more once you switch it off. A
 journal file that can't be written is given up for the session with one
-warning in the Log panel, which keeps showing the journal either way.
+warning in the Log panel, which keeps showing the journal either way. So is a
+pseudonymized one whose `names.txt` can't be written, so no line reaches the
+file with a placeholder that nothing explains.
+
+`names.txt` is never pruned, since it is a few dozen bytes per name. Deleting
+it starts the numbering over, and older pseudonymized journals can then no
+longer be read back.
 
 Data tab rows are never written to disk: they are held in memory and gone when
 nivaria exits, reconnects or switches role.
@@ -230,6 +237,8 @@ under `~/.cache/snowflake/`.
   trigger as the Triggers table does, and a `queue` line the age that made the
   scope due. To keep the journal for later, switch on **write the journal to a
   file**; **verbose journal** adds what was asked for and not fetched, and why.
+  To share it, switch on **pseudonymize the journal file** as well (see
+  [MANUAL.md](MANUAL.md#sharing-a-journal)).
 - **Blank columns or tabs**: the session has no warehouse, or the role lacks
   `IMPORTED PRIVILEGES` on `SNOWFLAKE` (see "Warehouse and privileges").
   Everything from `SHOW` still shows.

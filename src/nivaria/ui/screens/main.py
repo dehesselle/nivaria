@@ -353,8 +353,10 @@ class MainScreen(Screen):
         watched = self._idle_watched()
         stale = self.repo.stale_scopes(ttl, watched)
         journal.note(
-            f"sweep: {len(stale)} stale of {len(watched)} watched, "
-            f"cache age {journal.span(ttl)}"
+            "sweep: {} stale of {} watched, cache age {}",
+            len(stale),
+            len(watched),
+            journal.span(ttl),
         )
         for scope in stale:
             self._request(
@@ -378,7 +380,7 @@ class MainScreen(Screen):
         hit = await self.app.push_screen_wait(SearchDialog(self.repo, self.databases))
         if hit is None:
             return
-        journal.user(f"search jumped to {journal.subject(hit)}")
+        journal.user("search jumped to {}", journal.subject(hit))
         if isinstance(hit, SchemaRef):
             # A schema has no detail view to open (see SchemaRef) -- reveal
             # and expand it in the tree, the same place _select leaves you
@@ -508,7 +510,7 @@ class MainScreen(Screen):
         scope: Scope,
         priority: Priority,
         reason: Reason,
-        detail: str = "",
+        detail: str | journal.Text = "",
         *,
         asked: Scope | None = None,
     ) -> None:
@@ -520,7 +522,11 @@ class MainScreen(Screen):
         if self.fetch is None:
             return
         if asked is not None and asked != scope:
-            detail = f"{detail} (for {asked})" if detail else f"for {asked}"
+            detail = (
+                journal.text("{} (for {})", detail, asked)
+                if detail
+                else journal.text("for {}", asked)
+            )
         self.fetch.request(scope, priority, reason=reason, detail=detail)
 
     # ----------------------------------------------------------------- repo
@@ -549,9 +555,14 @@ class MainScreen(Screen):
         removed = set(self.databases) - set(databases)
         added = [database for database in databases if database not in self.databases]
         if added:
-            journal.user(f"databases added: {', '.join(added)}")
+            journal.user(
+                "databases added: {}", journal.joined(map(journal.database, added))
+            )
         if removed:
-            journal.user(f"databases removed: {', '.join(sorted(removed))}")
+            journal.user(
+                "databases removed: {}",
+                journal.joined(map(journal.database, sorted(removed))),
+            )
         self.databases = databases
         if self.fetch is not None and removed:
             # Whatever was still queued for a removed database is work
@@ -640,7 +651,11 @@ class MainScreen(Screen):
             )
         )
         if chosen is not None and chosen != current:
-            journal.user(f"warehouse {current or 'none'} -> {chosen}")
+            journal.user(
+                "warehouse {} -> {}",
+                journal.warehouse(current) if current else "none",
+                journal.warehouse(chosen),
+            )
             self._switch_warehouse(chosen)
 
     @staticmethod
@@ -678,7 +693,11 @@ class MainScreen(Screen):
             )
         )
         if chosen is not None and chosen != current:
-            journal.user(f"role {current or 'none'} -> {chosen}")
+            journal.user(
+                "role {} -> {}",
+                journal.role(current) if current else "none",
+                journal.role(chosen),
+            )
             self._switch_role(chosen)
 
     @work(thread=True)

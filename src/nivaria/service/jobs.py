@@ -30,7 +30,7 @@ from typing import Any
 
 from nivaria import journal
 from nivaria.journal import Reason
-from nivaria.models import Scope, ScopeType
+from nivaria.models import Scope, ScopeType, pipe_status_scope
 from nivaria.settings import (
     DATA_PREVIEW_ROWS,
     DATA_PREVIEW_TIMEOUT,
@@ -561,8 +561,9 @@ def _pipe_status_page(
             raise
         # A burst of one statement per pipe, which nothing else would show.
         journal.note(
-            f"pipe_status:{database}.{schema}  a pipe of {len(batch)} is gone, "
-            "asking one pipe at a time"
+            "{}  a pipe of {} is gone, asking one pipe at a time",
+            pipe_status_scope(database, schema),
+            len(batch),
         )
         rows = []
         for name in batch:

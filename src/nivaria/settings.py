@@ -29,6 +29,7 @@ __all__ = [
     "DATA_PREVIEW_TIMEOUT",
     "HISTORY_MAX_ROWS",
     "JOURNAL_FILE",
+    "JOURNAL_PSEUDONYMIZE",
     "JOURNAL_VERBOSE",
     "LAG_MARGIN_FACTOR",
     "MAX_PAGES_PER_PASS",
@@ -283,6 +284,21 @@ JOURNAL_FILE = Setting(
         "it, and is always in the Log panel (F1), in memory only. With this "
         "on it is also written to a file in nivaria's cache directory, one "
         "per session, keeping the last 20."
+    ),
+    group="Diagnostics",
+    default=False,
+)
+
+JOURNAL_PSEUDONYMIZE = Setting(
+    key="journal_pseudonymize",
+    label="pseudonymize the journal file",
+    description=(
+        "Write placeholders such as DB_3.SCH_7.PIPE_12 to the journal file "
+        "instead of the names of databases, schemas, objects, roles, "
+        "warehouses and the account, so the file can be shared. Applies to "
+        "the lines written from then on. The Log panel keeps the real names. "
+        "Which name each placeholder stands for is kept in journal/names.txt "
+        "in nivaria's cache directory."
     ),
     group="Diagnostics",
     default=False,

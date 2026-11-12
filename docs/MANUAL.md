@@ -317,6 +317,34 @@ The panel keeps the journal in memory only, so it is gone when nivaria exits.
 **write the journal to a file** keeps it in nivaria's cache directory as well,
 one file per session (see [OPERATIONS.md](OPERATIONS.md#files-on-disk)).
 
+### Sharing a journal
+
+**pseudonymize the journal file** writes placeholders to the file instead of
+the names of databases, schemas, objects, roles, warehouses and the account,
+so you can share a journal from a production account:
+
+```text
+user  cursor rested on pipe DB_1.SCH_2.PIPE_3
+send  pipe_activity:DB_1.SCH_2  ACCOUNT_USAGE.COPY_HISTORY, latest row per pipe, window 4h12m [cursor settled, nivaria-fetch-0]
+```
+
+- **The same name always gets the same number**, in every file. The number
+  belongs to the name and the prefix to its kind, so a table and a pipe that
+  share a name read `TABLE_12` and `PIPE_12`. `OBJ` is a table or a view.
+- **Snowflake's own names stay**: `SNOWFLAKE`, `SNOWFLAKE_SAMPLE_DATA`,
+  `INFORMATION_SCHEMA`, `PUBLIC` and the system roles.
+- **Error messages are scrubbed**: known names are replaced, an unknown quoted
+  name becomes `?`, and e-mail addresses and hosts become `<email>` and
+  `<host>`. An unquoted name nivaria has not journalled before can still slip
+  through, so read the `fail` lines before you share a file.
+- **The setting applies to the lines written from then on.** Switch it on
+  before the session you want to share, or start a new one.
+- The Log panel keeps the real names.
+
+`journal/names.txt` in the cache directory says which name each number stands
+for, one `12 PIPE "LOAD_ORDERS"` per line. It stays on your machine (see
+[OPERATIONS.md](OPERATIONS.md#files-on-disk)).
+
 ## Session labels
 
 - **Account** (top of the Object tree's border): the account's name, for
@@ -365,6 +393,7 @@ restart.
 | prime chunk threshold | 10000 | Result size above which a whole-database fetch is redone per schema. |
 | CSV delimiter | operating system | What separates the columns of an export: `comma`, `semicolon`, or `operating system`, which is what Excel follows when it opens a CSV. That is the list separator in Windows' region settings. macOS and Linux have no such setting, so there it is a semicolon where the locale's decimal point is a comma, otherwise a comma. |
 | write the journal to a file | off | Also write the journal to a file, one per session (see "The journal"). |
+| pseudonymize the journal file | off | Write placeholders such as `DB_3.SCH_7.PIPE_12` to the journal file instead of names (see "Sharing a journal"). |
 | verbose journal | off | Also journal what was asked for and not fetched. The Log panel shows these lines at level Debug. |
 
 Settings live in `settings.json` (see

@@ -150,7 +150,7 @@ class FetchService:
         priority: Priority = Priority.INTERACTIVE,
         *,
         reason: Reason = Reason.UNKNOWN,
-        detail: str = "",
+        detail: str | journal.Text = "",
     ) -> bool:
         """Ask for a scope to be refreshed. Returns whether a job was queued.
 
@@ -209,9 +209,11 @@ class FetchService:
             running = [scope for scope in self._running if predicate(scope)]
             self._cancelled.update(running)
         for scope in queued:
-            journal.dropped(scope, f"{why}: taken off the queue")
+            journal.dropped(scope, journal.text("{}: taken off the queue", why))
         for scope in running:
-            journal.dropped(scope, f"{why}: still running, no further page")
+            journal.dropped(
+                scope, journal.text("{}: still running, no further page", why)
+            )
         return queued + running
 
     @property
@@ -494,7 +496,7 @@ class FetchService:
                 objects_scope(object_type, database, schema.name),
                 priority,
                 reason=Reason.PRIME_FAN_OUT,
-                detail=f"for {prime}",
+                detail=journal.text("for {}", prime),
             )
 
     def _fail(self, job: FetchJob, error: Exception, generation: int = 0) -> None:
@@ -512,7 +514,12 @@ class FetchService:
         scope = job.scope
         message = str(error) or error.__class__.__name__
         if self._stopped:
-            journal.dropped(scope, f"fetching was stopped, discarding: {message}")
+            journal.dropped(
+                scope,
+                journal.text(
+                    "fetching was stopped, discarding: {}", journal.scrubbed(message)
+                ),
+            )
             return
         journal.failed(scope, message)
         missing = is_missing_object(error)
@@ -529,7 +536,7 @@ class FetchService:
                     container,
                     job.priority,
                     reason=Reason.MISSING_OBJECT,
-                    detail=f"{scope} does not exist",
+                    detail=journal.text("{} does not exist", scope),
                 )
         self._release(job)
         self._report(scope, message, missing=missing)

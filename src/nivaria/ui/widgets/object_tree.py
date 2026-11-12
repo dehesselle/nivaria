@@ -298,7 +298,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
         data = node.data
         if data is None:
             return
-        journal.user(f"expanded {_subject(data)}")
+        journal.user("expanded {}", _subject(data))
         if data.scope is not None:
             self._ensure(data.scope, Priority.INTERACTIVE, reason=Reason.EXPANDED)
         # A schema's categories each have their own scope, and all of them are
@@ -652,7 +652,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
         return False
 
 
-def _subject(data: NodeData) -> str:
+def _subject(data: NodeData) -> journal.Text:
     """What the journal calls a node."""
     if data.ref is not None:
         return journal.subject(data.ref)
@@ -663,4 +663,4 @@ def _subject(data: NodeData) -> str:
             return journal.subject(SchemaRef(database=data.database, name=data.key))
         case NodeType.CATEGORY if data.scope is not None:
             return journal.subject(data.scope)
-    return f"{data.type} {data.key}"
+    return journal.text("{} {}", data.type, journal.Name("OBJ", data.key))

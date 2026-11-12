@@ -15,6 +15,13 @@ in memory only. It reaches a file only once the user has switched
 `JOURNAL_FILE` on: what someone did in nivaria is not written to disk
 unasked.
 
+A line is built from names, not from finished text: `Name`, `Scope`,
+`ObjectRef` and `SchemaRef` arguments to a `Text` template. The panel shows
+them as they are. With `JOURNAL_PSEUDONYMIZE` on, the file shows each as a
+numbered placeholder instead (`DB_3.SCH_7.PIPE_12`), so a journal from a real
+account can be shared. An f-string would bake the name in before the file's
+formatter could replace it, and `tests/test_journal.py` fails on one.
+
 Its level is set here, on the journal's own logger, not left to the root
 logger's: `LogViewer` moves root's level with its dropdown, and a record is
 checked against the level of the logger it was made on, so the file keeps
@@ -25,12 +32,17 @@ No Textual here: the fetch service and the pool write to the journal too.
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import functools
+import json
 import logging
 import os
+import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +51,7 @@ from nivaria import paths
 from nivaria.models import (
     CacheState,
     ObjectRef,
+    ObjectType,
     SchemaRef,
     Scope,
     ScopeType,
@@ -47,6 +60,7 @@ from nivaria.models import (
 from nivaria.settings import (
     DATA_PREVIEW_ROWS,
     JOURNAL_FILE,
+    JOURNAL_PSEUDONYMIZE,
     JOURNAL_VERBOSE,
     config,
 )
@@ -86,6 +100,303 @@ class Reason(StrEnum):
     #: No caller said. `tests/test_journal.py` fails on any call in `src/`
     #: that leaves it at this, so seeing it in a journal is a bug.
     UNKNOWN = "unknown"
+
+
+# -------------------------------------------------------------------- names
+
+
+@dataclass(frozen=True)
+class Name:
+    """A name a pseudonymized file must not show. `kind` is its placeholder's
+    prefix: `DB`, `SCH`, an object type, `OBJ`, `ROLE`, `WH` or `ACCT`."""
+
+    kind: str
+    value: str
+
+
+def database(name: str) -> Name:
+    return Name("DB", name)
+
+
+def role(name: str) -> Name:
+    return Name("ROLE", name)
+
+
+def warehouse(name: str) -> Name:
+    return Name("WH", name)
+
+
+def account(name: str) -> Name:
+    return Name("ACCT", name)
+
+
+@dataclass(frozen=True)
+class Scrubbed:
+    """Text that carries names with no structure to find them by, such as a
+    driver's error message. See `_Names.scrub`."""
+
+    text: str
+
+
+def scrubbed(text: object) -> Scrubbed:
+    return Scrubbed(str(text))
+
+
+@dataclass(frozen=True)
+class Text:
+    """A journal line, or part of one: a `str.format` template and its
+    arguments, kept apart until a handler renders them.
+
+    `str()` gives the real names, which is what the Log panel and
+    `record.getMessage()` show. The file's formatter renders through the
+    placeholders instead.
+    """
+
+    template: str
+    args: tuple[object, ...] = ()
+
+    def render(self, names: _Names | None) -> str:
+        return self.template.format(*(_render(arg, names) for arg in self.args))
+
+    def __str__(self) -> str:
+        return self.render(None)
+
+
+def text(template: str, *args: object) -> Text:
+    return Text(template, args)
+
+
+def joined(items: Iterable[object], separator: str = ", ") -> Text:
+    """`items` one after the other, each rendered like any argument."""
+    items = tuple(items)
+    return Text(separator.join(["{}"] * len(items)), items)
+
+
+def _render(arg: object, names: _Names | None) -> object:
+    """A name as itself or its placeholder. Anything else is left for the
+    template to format, so `{:.1f}` still works on a number."""
+    match arg:
+        case Text():
+            return arg.render(names)
+        case Name():
+            return arg.value if names is None else names.placeholder(arg)
+        case Scrubbed():
+            return arg.text if names is None else names.scrub(arg.text)
+        case Scope():
+            return arg.key if names is None else _scope_key(arg, names)
+        case ObjectRef():
+            return text(
+                "{}.{}.{}",
+                database(arg.database),
+                Name("SCH", arg.schema),
+                Name(arg.type.value, arg.name),
+            ).render(names)
+        case SchemaRef():
+            return text("{}.{}", database(arg.database), Name("SCH", arg.name)).render(
+                names
+            )
+    return arg
+
+
+def _scope_key(scope: Scope, names: _Names) -> str:
+    """The scope's key with its names replaced, built by `Scope.key` itself
+    rather than a copy of it."""
+
+    def replaced(kind: str, value: str | None) -> str | None:
+        return None if value is None else names.placeholder(Name(kind, value))
+
+    return dataclasses.replace(
+        scope,
+        database=replaced("DB", scope.database),
+        schema=replaced("SCH", scope.schema),
+        table=replaced(_table_kind(scope), scope.table),
+    ).key
+
+
+def _table_kind(scope: Scope) -> str:
+    """What a scope's `table` slot names. Columns, tags and a preview belong
+    to a table or a view, and the scope does not say which."""
+    if scope.object_type is not None and scope.type is ScopeType.GRANTS:
+        return scope.object_type.value
+    if scope.type in (
+        ScopeType.PIPE_HISTORY,
+        ScopeType.PIPE_ACTIVITY_HISTORY,
+    ):
+        return ObjectType.PIPE.value
+    if scope.type in (ScopeType.TASK_HISTORY, ScopeType.TASK_ACTIVITY_HISTORY):
+        return ObjectType.TASK.value
+    return "OBJ"
+
+
+#: Names Snowflake gives every account. They behave unlike the rest, which a
+#: journal has to show, and say nothing about whose account it is.
+BUILT_INS = frozenset(
+    {
+        "SNOWFLAKE",
+        "SNOWFLAKE_SAMPLE_DATA",
+        "INFORMATION_SCHEMA",
+        "PUBLIC",
+        "ACCOUNTADMIN",
+        "ORGADMIN",
+        "SECURITYADMIN",
+        "SYSADMIN",
+        "USERADMIN",
+    }
+)
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_HOST = re.compile(r"(?:https?://)?[\w.-]*snowflakecomputing\.com\S*|https?://\S+")
+_QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+
+class _Names:
+    """The placeholders: each name gets the next number the first time any
+    file renders it, and keeps it.
+
+    Numbered, not hashed: a hash of a guessable name (`RAW`, `PROD`) is found
+    again by hashing a word list, and a keyed one is hex that is hard to tell
+    apart when reading. The number belongs to the string, the prefix to its
+    kind, so a table and a pipe of the same name read `TABLE_12` and
+    `PIPE_12`.
+
+    Kept in `journal/names.txt`, one `12 PIPE "LOAD_ORDERS"` per line, so the
+    numbers hold across sessions and a placeholder is looked up by reading
+    the file. Appended to, never rewritten: a sweep can bring hundreds of new
+    names, and rewriting the whole file for each would grow with their
+    square. What another nivaria appended is read before a number is handed
+    out, which leaves two processes only a narrow window to give one number
+    twice.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._numbers: dict[str, int] = {}
+        self._kinds: dict[str, str] = {}
+        self._next = 1
+        self._read = 0
+        self._lock = threading.Lock()
+        self._pattern: re.Pattern[str] | None = None
+        self._patterned = 0
+        self._upper: dict[str, str] = {}
+
+    def placeholder(self, name: Name) -> str:
+        value = name.value
+        if value in BUILT_INS:
+            return value
+        with self._lock:
+            number = self._numbers.get(value)
+            if number is None:
+                number = self._add(name.kind, value)
+        return f"{name.kind}_{number}"
+
+    def _add(self, kind: str, value: str) -> int:
+        self._catch_up()
+        number = self._numbers.get(value)
+        if number is not None:
+            return number
+        number = self._next
+        line = f"{number} {kind} {json.dumps(value)}\n".encode()
+        # Raised, not swallowed: the file handler gives the journal file up,
+        # where a placeholder no file explains would be written otherwise.
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._path.open("ab") as file:
+            file.write(line)
+        self._learn(number, kind, value)
+        return number
+
+    def _catch_up(self) -> None:
+        try:
+            with self._path.open("rb") as file:
+                file.seek(self._read)
+                tail = file.read()
+        except FileNotFoundError:
+            return
+        complete = tail.rfind(b"\n") + 1
+        self._read += complete
+        for raw in tail[:complete].decode("utf-8", errors="replace").splitlines():
+            number, _, rest = raw.partition(" ")
+            kind, _, quoted = rest.partition(" ")
+            try:
+                self._learn(int(number), kind, json.loads(quoted))
+            except ValueError:
+                continue  # a line torn by a crash; its name is numbered anew
+
+    def _learn(self, number: int, kind: str, value: str) -> None:
+        if value in self._numbers:
+            return
+        self._numbers[value] = number
+        self._kinds[value] = kind
+        self._upper.setdefault(value.upper(), value)
+        self._next = max(self._next, number + 1)
+
+    def scrub(self, message: str) -> str:
+        """`message` with every name in it replaced, as well as it can be.
+
+        Known names are replaced wherever they stand, ignoring case, longest
+        first. A quoted part that is still unknown becomes `?`: Snowflake
+        quotes the names in its errors, and an object in one is usually that
+        statement's own, already numbered by its `send` line. E-mail
+        addresses and hosts are dropped, which covers a login's user and
+        account identifier.
+        """
+        message = _EMAIL.sub("<email>", message)
+        message = _HOST.sub("<host>", message)
+        with self._lock:
+            self._catch_up()
+            pattern = self._known()
+
+        def quoted(match: re.Match[str]) -> str:
+            mark, inner = match.group()[0], match.group()[1:-1]
+            parts = [self._known_part(part) for part in inner.split(".")]
+            return f"{mark}{'.'.join(parts)}{mark}"
+
+        def unquoted(segment: str) -> str:
+            if pattern is None:
+                return segment
+            return pattern.sub(lambda m: self._known_part(m.group()), segment)
+
+        out, at = [], 0
+        for match in _QUOTED.finditer(message):
+            out += [unquoted(message[at : match.start()]), quoted(match)]
+            at = match.end()
+        out.append(unquoted(message[at:]))
+        return "".join(out)
+
+    def _known_part(self, part: str) -> str:
+        if not part or part in BUILT_INS:
+            return part
+        value = part if part in self._numbers else self._upper.get(part.upper())
+        if value is None:
+            return "?"
+        return f"{self._kinds[value]}_{self._numbers[value]}"
+
+    def _known(self) -> re.Pattern[str] | None:
+        if self._patterned != len(self._numbers):
+            values = sorted(self._numbers, key=len, reverse=True)
+            self._pattern = (
+                re.compile(
+                    r"(?<![\w$])(?:"
+                    + "|".join(re.escape(value) for value in values)
+                    + r")(?![\w$])",
+                    re.IGNORECASE,
+                )
+                if values
+                else None
+            )
+            self._patterned = len(self._numbers)
+        return self._pattern
+
+
+_names: _Names | None = None
+_names_lock = threading.Lock()
+
+
+def _placeholders() -> _Names:
+    global _names
+    with _names_lock:
+        if _names is None:
+            _names = _Names(paths.cache_dir() / "journal" / "names.txt")
+        return _names
 
 
 # ------------------------------------------------------------------ wording
@@ -134,22 +445,27 @@ def staleness(entry: Entry, ttl: float, now: float | None = None) -> str:
     return f"{word}, age {span(age)}, cache age {span(ttl)}"
 
 
-def subject(target: ObjectRef | SchemaRef | Scope | str) -> str:
+def subject(target: ObjectRef | SchemaRef | Scope | str) -> Text:
     """What a user line calls the thing on screen: a detail pane's target,
     or a tree node's. A bare string is a database."""
     match target:
         case ObjectRef():
-            return f"{target.type.value.lower()} {target.fqn}"
+            return text("{} {}", target.type.value.lower(), target)
         case SchemaRef():
-            return f"schema {target.database}.{target.name}"
+            return text("schema {}", target)
         case Scope(type=ScopeType.OBJECTS, object_type=object_type) if (
             object_type is not None
         ):
-            return f"{object_type.plural} of {target.database}.{target.schema}"
+            assert target.database is not None and target.schema is not None
+            return text(
+                "{} of {}",
+                object_type.plural,
+                SchemaRef(target.database, target.schema),
+            )
         case Scope():
-            return str(target)
+            return text("{}", target)
         case _:
-            return f"database {target}"
+            return text("database {}", database(target))
 
 
 def _window(window: Window | None) -> str:
@@ -240,49 +556,49 @@ def _guarded[**P](emitter: Callable[P, None]) -> Callable[P, None]:
 
 
 @_guarded
-def user(text: str) -> None:
+def user(template: str, *args: object) -> None:
     """Something the user did."""
-    _emit(logging.INFO, "user", text)
+    _emit(logging.INFO, "user", text(template, *args))
 
 
 @_guarded
-def connection(text: str) -> None:
+def connection(template: str, *args: object) -> None:
     """Snowflake contact outside the fetch service: logins, USE ROLE/WAREHOUSE."""
-    _emit(logging.INFO, "conn", text)
+    _emit(logging.INFO, "conn", text(template, *args))
 
 
 @_guarded
-def note(text: str) -> None:
+def note(template: str, *args: object) -> None:
     """Anything else worth a line, such as a sweep's summary."""
-    _emit(logging.INFO, "note", text)
+    _emit(logging.INFO, "note", text(template, *args))
 
 
 @_guarded
 def queued(
     scope: Scope,
     reason: Reason,
-    detail: str = "",
+    detail: str | Text = "",
     *,
     priority: str,
     supersedes: Reason | None = None,
 ) -> None:
     """A request that queued a job."""
-    text = f"{scope}  {reason}{_detail(detail)} [{priority}]"
+    line = text("{}  {}{} [{}]", scope, reason, _detail(detail), priority)
     if supersedes is not None:
-        text += f", supersedes {supersedes}"
-    _emit(logging.INFO, "queue", text)
+        line = text("{}, supersedes {}", line, supersedes)
+    _emit(logging.INFO, "queue", line)
 
 
 @_guarded
-def skipped(scope: Scope, reason: Reason, why: str) -> None:
+def skipped(scope: Scope, reason: Reason, why: str | Text) -> None:
     """A request that queued nothing. Verbose only."""
-    _emit(logging.DEBUG, "skip", f"{scope}  {reason}: {why}")
+    _emit(logging.DEBUG, "skip", text("{}  {}: {}", scope, reason, why))
 
 
 @_guarded
-def dropped(scope: Scope, why: str) -> None:
+def dropped(scope: Scope, why: str | Text) -> None:
     """Queued or fetched work that was thrown away. Verbose only."""
-    _emit(logging.DEBUG, "drop", f"{scope}  {why}")
+    _emit(logging.DEBUG, "drop", text("{}  {}", scope, why))
 
 
 @_guarded
@@ -304,7 +620,7 @@ def sent(
     _emit(
         logging.INFO,
         "send",
-        f"{scope}  {describe(scope, window)} [{', '.join(where)}]",
+        text("{}  {} [{}]", scope, describe(scope, window), ", ".join(where)),
     )
 
 
@@ -314,7 +630,7 @@ def done(scope: Scope, rows: int, seconds: float, extra: str = "") -> None:
     _emit(
         logging.INFO,
         "done",
-        f"{scope}  {rows} rows, {seconds:.1f} s{_detail(extra)}",
+        text("{}  {} rows, {:.1f} s{}", scope, rows, seconds, _detail(extra)),
     )
 
 
@@ -322,11 +638,11 @@ def done(scope: Scope, rows: int, seconds: float, extra: str = "") -> None:
 def failed(scope: Scope, message: str) -> None:
     """A statement or its write that failed."""
     first = next((line for line in message.splitlines() if line.strip()), message)
-    _emit(logging.WARNING, "fail", f"{scope}  {first}")
+    _emit(logging.WARNING, "fail", text("{}  {}", scope, scrubbed(first)))
 
 
-def _detail(text: str) -> str:
-    return f": {text}" if text else ""
+def _detail(detail: str | Text) -> str | Text:
+    return text(": {}", detail) if detail else ""
 
 
 # --------------------------------------------------------------------- file
@@ -347,10 +663,26 @@ class _JournalFile(logging.FileHandler):
         _give_up(self.baseFilename)
 
 
-def _emit(level: int, kind: str, text: str) -> None:
+class _FileFormat(logging.Formatter):
+    """Renders a line's names as placeholders while `JOURNAL_PSEUDONYMIZE` is
+    on. The same record reaches the Log panel's handler too, so it is a copy
+    that is changed."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        if config.get(JOURNAL_PSEUDONYMIZE) and isinstance(record.args, tuple):
+            names = _placeholders()
+            record = copy.copy(record)
+            record.args = tuple(
+                arg.render(names) if isinstance(arg, Text) else arg
+                for arg in record.args
+            )
+        return super().format(record)
+
+
+def _emit(level: int, kind: str, line: Text) -> None:
     _sync()
     if _log.isEnabledFor(level):
-        _log.log(level, "%-5s %s", kind, text)
+        _log.log(level, "%-5s %s", kind, line)
 
 
 def _sync() -> None:
@@ -383,9 +715,7 @@ def _open() -> None:
         _give_up(str(directory))
         return
     handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s.%(msecs)03d %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        _FileFormat("%(asctime)s.%(msecs)03d %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     )
     _log.addHandler(handler)
     _handler = handler
@@ -430,9 +760,11 @@ def _give_up(where: str) -> None:
 def reset() -> None:
     """Close the file and forget this process's journal. For tests, which
     each point the cache directory somewhere else."""
-    global _path, _broken
+    global _path, _broken, _names
     with _lock:
         _close()
         _path = None
         _broken = False
+    with _names_lock:
+        _names = None
     _log.setLevel(logging.NOTSET)
