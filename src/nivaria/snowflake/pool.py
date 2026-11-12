@@ -25,6 +25,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
+from nivaria import journal
 from nivaria.snowflake import queries, sql_log
 
 _log = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ LOGIN_TIMED_OUT = "the browser login did not finish in time"
 def _login_failure_text(error: Exception) -> str:
     """What to tell the user about a failed login. The log gets the driver's."""
     _log.warning("a login failed: %s", error)
+    journal.connection(f"login failed: {error}")
     if getattr(error, "errno", None) == _LOGIN_TIMEOUT_ERRNO:
         return LOGIN_TIMED_OUT
     return str(error)
@@ -264,6 +266,7 @@ class ConnectionPool:
         for index in range(self.size):
             if progress is not None:
                 progress(index + 1, self.size)
+            journal.connection(f"login {index + 1} of {self.size}, may prompt")
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             # The driver raises many unrelated exception types; the caller
@@ -286,6 +289,7 @@ class ConnectionPool:
         if not self._all:
             return
         statement = queries.current_account_names()
+        journal.connection("reading the organization and account name")
         try:
             cursor = self._all[0].cursor()
             try:
@@ -345,6 +349,7 @@ class ConnectionPool:
         for _ in range(additional):
             if progress is not None:
                 progress(self.size + 1, target)
+            journal.connection(f"login {self.size + 1} of {target}, may prompt")
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             except Exception as error:
@@ -481,7 +486,9 @@ class ConnectionPool:
         failures = self._login_failures
         with self._login_lock:
             if self._login_failures != failures:
+                journal.connection("login not tried: the one just before failed")
                 raise ConnectionError_(self._login_error)
+            journal.connection("login to replace a lost connection, may prompt")
             try:
                 connection = self._connector(**self.params.to_connect_kwargs())
             # The driver raises many unrelated types, as in connect_all.
@@ -511,6 +518,9 @@ class ConnectionPool:
 
     def _drop(self, connection: Any) -> None:
         """Detach a bad connection and shrink `size` to match -- no replacement."""
+        journal.connection(
+            "a dead connection is dropped: background work never logs in"
+        )
         self._detach(connection)
         with self._lock:
             self.size -= 1
@@ -551,6 +561,7 @@ class ConnectionPool:
         with self._maintenance:
             with self._lock:
                 expected = self.size
+            journal.connection(f"{statement} on {expected} connections")
             held: list[Any] = []
             try:
                 for _ in range(expected):

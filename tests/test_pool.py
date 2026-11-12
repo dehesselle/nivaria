@@ -882,3 +882,58 @@ def test_run_on_all_times_out_rather_than_hanging_forever() -> None:
     pool.connect_all()
     with pool.acquire(), pytest.raises(ConnectionError_):
         pool.run_on_all('USE ROLE "X"', timeout=0.05)
+
+
+# ------------------------------------------------------------------ journal
+
+
+def journal_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "nivaria.journal"]
+
+
+def test_each_login_is_journalled_as_one_that_may_prompt(caplog) -> None:
+    """Each can be an MFA prompt, which nothing in the fetch lines would show."""
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    lines = journal_lines(caplog)
+    assert lines[:2] == [
+        "conn  login 1 of 2, may prompt",
+        "conn  login 2 of 2, may prompt",
+    ]
+    assert "conn  reading the organization and account name" in lines
+
+
+def test_a_replacement_login_is_journalled(caplog) -> None:
+    pool, _ = make_pool(size=1)
+    pool.connect_all()
+    caplog.clear()
+    with pool.acquire() as connection:
+        connection.closed = True
+    with pool.acquire():
+        pass
+    assert journal_lines(caplog) == [
+        "conn  login to replace a lost connection, may prompt"
+    ]
+
+
+def test_a_dead_connection_dropped_by_background_work_is_journalled(caplog) -> None:
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    with pool.acquire() as first:
+        first.closed = True
+    caplog.clear()
+    with pool.acquire(allow_reconnect=False):
+        pass
+    assert journal_lines(caplog) == [
+        "conn  a dead connection is dropped: background work never logs in"
+    ]
+
+
+def test_a_session_change_is_journalled_with_how_many_connections_it_runs_on(
+    caplog,
+) -> None:
+    pool, _ = make_pool(size=2)
+    pool.connect_all()
+    caplog.clear()
+    pool.set_role("SYSADMIN")
+    assert journal_lines(caplog) == ['conn  USE ROLE "SYSADMIN" on 2 connections']

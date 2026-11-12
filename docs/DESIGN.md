@@ -2071,6 +2071,12 @@ requests have reasons of their own: `missing object` for the listing a "does
 not exist" asks for, `prime fan-out` for the per-schema listings of a prime
 over the chunk threshold.
 
+**The pool writes what no fetch would show** as `conn` lines: each login,
+because each can be an MFA prompt, including one that replaces a lost
+connection; a dead connection that background work drops instead of logging
+in; the connect-time name query; and each `USE ROLE` or `USE WAREHOUSE`, with
+how many connections it runs on.
+
 **Its level is the journal's own.** It is an ordinary logger, so the Log panel
 shows it at level Info. `LogViewer` moves the root logger's level with its
 dropdown. A record is checked against the level of the logger it is made on,
