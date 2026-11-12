@@ -224,6 +224,10 @@ class SnowflakeGateway(Protocol):
         allow_reconnect: bool = True,
     ) -> list[Row]: ...
 
+    def show_database_roles(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]: ...
+
     def tag_references_schema(
         self, database: str, schema: str, *, allow_reconnect: bool = True
     ) -> list[Row]: ...
@@ -612,6 +616,14 @@ class PoolGateway:
     ) -> list[Row]:
         return self._fetch(
             queries.show_grants_on_object(object_type, database, schema, name),
+            allow_reconnect=allow_reconnect,
+        )
+
+    def show_database_roles(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        return self._fetch(
+            queries.show_database_roles(database),
             allow_reconnect=allow_reconnect,
         )
 

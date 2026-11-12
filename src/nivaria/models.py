@@ -160,6 +160,10 @@ class ScopeType(StrEnum):
     #: running warehouse; degrades blank without one, same as every SELECT-backed
     #: scope.
     TAG_REFERENCES = "tag_references"
+    #: Every database role in one database, sourced by SHOW DATABASE ROLES IN
+    #: DATABASE -- metadata layer, needs no warehouse, like GRANTS. Database
+    #: level only: a schema has no roles of its own.
+    DATABASE_ROLES = "database_roles"
     #: One table's (or view's) columns' tags, sourced by a real SELECT
     #: against INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS -- a different
     #: function from TAG_REFERENCES above, purpose-built to return every tag
@@ -272,6 +276,8 @@ class Scope:
                 if self.schema is None:
                     return f"tag_references:{self.database}"
                 return f"tag_references:{self.database}.{self.schema}"
+            case ScopeType.DATABASE_ROLES:
+                return f"database_roles:{self.database}"
             case ScopeType.COLUMN_TAG_REFERENCES:
                 return (
                     f"column_tag_references:{self.database}.{self.schema}.{self.table}"
@@ -402,6 +408,10 @@ def tag_references_scope(database: str, schema: str | None = None) -> Scope:
     return Scope(ScopeType.TAG_REFERENCES, database=database, schema=schema)
 
 
+def database_roles_scope(database: str) -> Scope:
+    return Scope(ScopeType.DATABASE_ROLES, database=database)
+
+
 def column_tag_references_scope(database: str, schema: str, table: str) -> Scope:
     return Scope(
         ScopeType.COLUMN_TAG_REFERENCES, database=database, schema=schema, table=table
@@ -433,7 +443,7 @@ def containing_scopes(scope: Scope) -> list[Scope]:
     match scope.type:
         case ScopeType.DATABASES | ScopeType.WAREHOUSES | ScopeType.ROLES:
             return []
-        case ScopeType.SCHEMAS | ScopeType.DATABASE_PRIME:
+        case ScopeType.SCHEMAS | ScopeType.DATABASE_PRIME | ScopeType.DATABASE_ROLES:
             return [databases_scope()]
         case ScopeType.GRANTS if scope.table is not None:
             assert scope.database is not None

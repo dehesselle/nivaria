@@ -2,14 +2,16 @@
 #
 # SPDX-License-Identifier: 0BSD
 
-"""SchemaView and DatabaseView: grants and tags."""
+"""SchemaView and DatabaseView: grants and tags, and a database's roles."""
 
 from __future__ import annotations
 
 from textual.widgets import DataTable, Static, TabbedContent
 
+from nivaria.cache.repository import Repository
 from nivaria.models import (
     SchemaRef,
+    database_roles_scope,
     grants_scope,
     tag_references_scope,
 )
@@ -17,6 +19,7 @@ from nivaria.ui.views.schema_view import DatabaseView, SchemaView
 from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import (
     Harness,
+    load,
     put_grant,
     put_tag,
 )
@@ -363,6 +366,8 @@ async def test_the_database_tab_mnemonics_switch_tabs(repo) -> None:
         pane.query_one("#detail-grants", DataTable).focus()
         await pilot.press("t")
         assert tabs.active == "tab-tags"
+        await pilot.press("r")
+        assert tabs.active == "tab-roles"
 
 
 async def test_a_repaint_keeps_the_highlighted_grantee(repo) -> None:
@@ -384,3 +389,139 @@ async def test_a_repaint_keeps_the_highlighted_grantee(repo) -> None:
         await pilot.pause()
 
         assert table.cursor_row == 2
+
+
+def put_roles(repo: Repository, database: str, *names: str, **extra) -> None:
+    load(
+        repo,
+        database_roles_scope(database),
+        [
+            {
+                "created_on": "2026-11-12 12:00:00+00:00",
+                "name": name,
+                "granted_to_roles": 0,
+                "granted_to_database_roles": 0,
+                "granted_database_roles": 0,
+                "owner": "SYSADMIN",
+                "comment": "",
+                "owner_role_type": "ROLE",
+                **extra,
+            }
+            for name in names
+        ],
+    )
+
+
+async def open_roles(pilot, view) -> None:
+    view.query_one(TabbedContent).active = "tab-roles"
+    await pilot.pause()
+
+
+async def test_the_database_tabs_are_grants_roles_and_tags_in_that_order(
+    repo,
+) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        view = app.query_one(DetailPane).show_database("MYDB")
+        await pilot.pause()
+        panes = [pane.id for pane in view.query_one(TabbedContent).query("TabPane")]
+        assert panes == ["tab-grants", "tab-roles", "tab-tags"]
+
+
+async def test_a_schema_view_has_no_roles_tab(repo) -> None:
+    """Database roles belong to a database; a schema has none of its own."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        view = app.query_one(DetailPane).show_schema(SchemaRef("MYDB", "PUBLIC"))
+        await pilot.pause()
+        assert not view.query("#tab-roles")
+
+
+async def test_database_roles_are_requested_only_once_their_tab_opens(repo) -> None:
+    """Selecting a database must not cost a statement for a tab nobody
+    opened."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        view = app.query_one(DetailPane).show_database("MYDB")
+        await pilot.pause()
+        assert database_roles_scope("MYDB").key not in app.needed
+        await open_roles(pilot, view)
+    assert database_roles_scope("MYDB").key in app.needed
+
+
+async def test_a_database_view_reads_its_roles_only_while_their_tab_is_shown(
+    repo,
+) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        view = app.query_one(DetailPane).show_database("MYDB")
+        await pilot.pause()
+        assert view.scopes() == [grants_scope("MYDB")]
+        await open_roles(pilot, view)
+        assert view.scopes() == [grants_scope("MYDB"), database_roles_scope("MYDB")]
+        assert view.table_scopes() == [database_roles_scope("MYDB")]
+
+
+async def test_the_roles_table_lists_each_database_role(repo) -> None:
+    put_roles(
+        repo,
+        "MYDB",
+        "ANALYST",
+        "LOADER",
+        granted_to_roles=2,
+        comment="probe",
+    )
+    app = Harness(repo)
+    async with app.run_test(size=(140, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_database("MYDB")
+        await pilot.pause()
+        await open_roles(pilot, view)
+        table = pane.query_one("#detail-roles", DataTable)
+        assert table.row_count == 2
+        row = [cell.plain for cell in table.get_row_at(0)]
+        assert row == ["ANALYST", "SYSADMIN", "2", "0", "0", "2026-11-12", "probe"]
+
+
+async def test_the_roles_created_cell_tooltips_the_full_timestamp(repo) -> None:
+    put_roles(repo, "MYDB", "ANALYST")
+    app = Harness(repo)
+    async with app.run_test(size=(140, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_database("MYDB")
+        await pilot.pause()
+        await open_roles(pilot, view)
+        table = pane.query_one("#detail-roles", DataTable)
+        row_key, column_key = table.coordinate_to_cell_key((0, 5))
+        assert table.get_cell_tooltip(row_key, column_key)
+
+
+async def test_a_cache_update_for_the_shown_databases_roles_repaints(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_database("MYDB")
+        await pilot.pause()
+        await open_roles(pilot, view)
+        assert pane.query_one("#detail-roles", DataTable).row_count == 0
+
+        put_roles(repo, "MYDB", "ANALYST")
+        pane.cache_updated(database_roles_scope("MYDB"))
+        await pilot.pause()
+        assert pane.query_one("#detail-roles", DataTable).row_count == 1
+
+
+async def test_moving_to_another_database_on_the_roles_tab_requests_its_roles(
+    repo,
+) -> None:
+    """The tab stays open across databases, so what it shows is the new
+    one's."""
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_database("MYDB")
+        await pilot.pause()
+        await open_roles(pilot, view)
+        pane.show_database("OTHERDB")
+        await pilot.pause()
+    assert database_roles_scope("OTHERDB").key in app.needed

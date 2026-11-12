@@ -67,9 +67,11 @@ LAG_NOTE = "detail-lag-note"
 #: The line above a list saying which of its columns, those another query
 #: fills, are still being fetched or could not be -- see `sync_source_note`.
 SOURCE_NOTE = "detail-source-note"
-#: The note above a Grants tab, and above a Tags tab -- see `sync_scope_note`.
+#: The note above a Grants tab, a Tags tab and the Database view's Roles tab
+#: -- see `sync_scope_note`.
 GRANTS_NOTE = "detail-grants-note"
 TAGS_NOTE = "detail-tags-note"
+ROLES_NOTE = "detail-roles-note"
 
 
 def lag_note(what: str, lag_seconds: int) -> Static:

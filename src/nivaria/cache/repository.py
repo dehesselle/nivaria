@@ -497,6 +497,24 @@ _TAG_REFERENCES = TableSpec(
     order_by=("TAG_NAME", "TAG_VALUE"),
 )
 
+_DATABASE_ROLES = TableSpec(
+    name="show_database_roles",
+    columns=(
+        "created_on",
+        "name",
+        "granted_to_roles",
+        "granted_to_database_roles",
+        "granted_database_roles",
+        "owner",
+        "comment",
+        "owner_role_type",
+    ),
+    # No database column in SHOW DATABASE ROLES -- _scope keeps one
+    # database's roles apart from another's, the same way show_grants does.
+    key=("_scope", "name"),
+    order_by=("name",),
+)
+
 _COLUMN_TAG_REFERENCES = TableSpec(
     name="information_schema_tag_references_all_columns",
     columns=("TAG_DATABASE", "TAG_SCHEMA", "TAG_NAME", "TAG_VALUE", "COLUMN_NAME"),
@@ -556,6 +574,8 @@ def spec_for(scope: Scope) -> TableSpec:
             return _GRANTS
         case ScopeType.TAG_REFERENCES:
             return _TAG_REFERENCES
+        case ScopeType.DATABASE_ROLES:
+            return _DATABASE_ROLES
         case ScopeType.COLUMN_TAG_REFERENCES:
             return _COLUMN_TAG_REFERENCES
         case ScopeType.DATA_PREVIEW:

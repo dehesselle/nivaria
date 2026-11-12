@@ -558,6 +558,28 @@ CREATE TABLE IF NOT EXISTS information_schema_tag_references (
 CREATE INDEX IF NOT EXISTS information_schema_tag_references_scope
     ON information_schema_tag_references(_scope);
 
+-- Every database role in one database (SHOW DATABASE ROLES IN DATABASE).
+-- Metadata layer, needs no warehouse. The output has no database column, so
+-- _scope keeps databases apart, as in show_grants. is_default, is_current and
+-- is_inherited are left out: they describe the session's roles, not the
+-- database role. The granted_* columns are counts. Column names verified
+-- live on 2026-11-12 (docs/snowflake-behavior.md).
+CREATE TABLE IF NOT EXISTS show_database_roles (
+    created_on                 TEXT,
+    name                       TEXT NOT NULL,
+    granted_to_roles           INTEGER,
+    granted_to_database_roles  INTEGER,
+    granted_database_roles     INTEGER,
+    owner                      TEXT,
+    comment                    TEXT,
+    owner_role_type            TEXT,
+    _scope                     TEXT    NOT NULL,
+    _generation                INTEGER NOT NULL,
+    PRIMARY KEY (_scope, name)
+);
+CREATE INDEX IF NOT EXISTS show_database_roles_scope
+    ON show_database_roles(_scope);
+
 -- Tags applied to every column of one table or view (one row per column per
 -- tag value -- see information_schema_tag_references for why), scoped per
 -- table like information_schema_columns. Sourced via

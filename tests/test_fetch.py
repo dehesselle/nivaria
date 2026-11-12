@@ -326,6 +326,16 @@ def test_database_level_tag_references_are_fetched_in_one_shot() -> None:
     assert [c[0] for c in gateway.calls] == ["tag_references_database"]
 
 
+def test_database_roles_are_fetched_in_one_shot() -> None:
+    from nivaria.models import database_roles_scope
+
+    gateway = FakeGateway(database_roles={"MYDB": [{"name": "ANALYST"}]})
+    page = fetch_page(gateway, database_roles_scope("MYDB"), None, limit=1)
+    assert len(page.rows) == 1
+    assert page.cursor is None
+    assert gateway.calls == [("show_database_roles", ("MYDB",))]
+
+
 def test_pipe_activity_is_fetched_in_one_shot() -> None:
     """A schema's pipe count is bounded, same reasoning as table_stats."""
     from nivaria.models import pipe_activity_scope

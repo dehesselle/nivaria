@@ -195,6 +195,7 @@ class FakeGateway:
         grants_schema: dict[tuple[str, str], list[Row]] | None = None,
         grants_database: dict[str, list[Row]] | None = None,
         grants_object: dict[tuple[ObjectType, str, str, str], list[Row]] | None = None,
+        database_roles: dict[str, list[Row]] | None = None,
         tag_references_schema: dict[tuple[str, str], list[Row]] | None = None,
         tag_references_database: dict[str, list[Row]] | None = None,
         tag_references_all_columns: dict[tuple[str, str, str], list[Row]] | None = None,
@@ -235,6 +236,7 @@ class FakeGateway:
         self._grants_database = grants_database or {}
         #: Keyed by (object_type, database, schema, name).
         self._grants_object = grants_object or {}
+        self._database_roles = database_roles or {}
         self._tag_references_schema = tag_references_schema or {}
         self._tag_references_database = tag_references_database or {}
         #: Keyed by (database, schema, table).
@@ -655,6 +657,12 @@ class FakeGateway:
         self.calls.append(("show_grants_on_object", key))
         self._check_schema(database, schema)
         return list(self._grants_object.get(key, []))
+
+    def show_database_roles(
+        self, database: str, *, allow_reconnect: bool = True
+    ) -> list[Row]:
+        self.calls.append(("show_database_roles", (database,)))
+        return list(self._database_roles.get(database, []))
 
     def tag_references_schema(
         self, database: str, schema: str, *, allow_reconnect: bool = True

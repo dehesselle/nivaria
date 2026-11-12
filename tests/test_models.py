@@ -14,6 +14,7 @@ from nivaria.models import (
     columns_scope,
     containing_scopes,
     data_preview_scope,
+    database_roles_scope,
     databases_scope,
     due_in,
     grants_scope,
@@ -172,6 +173,10 @@ def test_a_data_preview_scope_is_keyed_by_its_table() -> None:
     assert data_preview_scope("MYDB", "PUBLIC", "X").key == "data_preview:MYDB.PUBLIC.X"
 
 
+def test_a_database_roles_scope_is_keyed_by_its_database() -> None:
+    assert database_roles_scope("MYDB").key == "database_roles:MYDB"
+
+
 def test_a_schema_level_tag_references_scope_and_a_database_level_one_have_different_keys() -> (
     None
 ):
@@ -199,6 +204,7 @@ def test_a_schema_level_tag_references_scope_and_a_database_level_one_have_diffe
         grants_scope("MYDB"),
         tag_references_scope("MYDB", "PUBLIC"),
         tag_references_scope("MYDB"),
+        database_roles_scope("MYDB"),
     ],
     ids=lambda scope: scope.key,
 )
@@ -217,6 +223,7 @@ def test_only_an_objects_listing_carries_an_object_type(scope) -> None:
         (warehouses_scope(), []),
         (schemas_scope("MYDB"), [databases_scope()]),
         (grants_scope("MYDB"), [databases_scope()]),
+        (database_roles_scope("MYDB"), [databases_scope()]),
         (prime_scope(ObjectType.TABLE, "MYDB"), [databases_scope()]),
         (grants_scope("MYDB", "S"), [schemas_scope("MYDB")]),
         (tag_references_scope("MYDB", "S"), [schemas_scope("MYDB")]),

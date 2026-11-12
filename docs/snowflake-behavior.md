@@ -178,6 +178,19 @@ included. Granting it again `WITH GRANT OPTION` replaces the row, with
 `RENETEST1`–`3` and their schemas, the `show_grants` key in `schema.sql`
 was unique.
 
+## SHOW DATABASE ROLES
+
+`SHOW DATABASE ROLES IN DATABASE` was checked on 2026-11-12 against the
+sandbox as `SYSADMIN` with secondary roles `ALL`. It returns `created_on`,
+`name`, `is_default`, `is_current`, `is_inherited`, `granted_to_roles`,
+`granted_to_database_roles`, `granted_database_roles`, `owner`, `comment` and
+`owner_role_type`. The three `granted_*` columns are integers. A database
+without database roles returns no rows: every database on the sandbox except
+`SNOWFLAKE` did. `SNOWFLAKE`'s 43 system roles have an empty `owner` and
+`owner_role_type`. A role created for the check in `RENETEST1`, then dropped,
+read `owner = SYSADMIN` and `owner_role_type = ROLE`. Whether a lesser role
+sees fewer of a database's roles was not checked.
+
 ## Tag references
 
 `INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS` reports a schema- or

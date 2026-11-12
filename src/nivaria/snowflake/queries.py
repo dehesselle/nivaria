@@ -247,6 +247,12 @@ def show_grants_on_database(database: str) -> str:
     return f"SHOW GRANTS ON DATABASE {quote_identifier(database)}"
 
 
+def show_database_roles(database: str) -> str:
+    """Every database role in one database -- metadata layer, needs no
+    warehouse. Unpaged, see `show_grants_on_schema`."""
+    return f"SHOW DATABASE ROLES IN DATABASE {quote_identifier(database)}"
+
+
 def show_grants_on_object(
     object_type: ObjectType, database: str, schema: str, name: str
 ) -> str:

@@ -186,7 +186,7 @@ letter means the same tab everywhere.
 
 | Node | View | Tabs (key) |
 | --- | --- | --- |
-| Database | Database view | Grants (`g`), Tags (`t`) |
+| Database | Database view | Grants (`g`), Roles (`r`), Tags (`t`) |
 | Schema | Schema view | Grants (`g`), Tags (`t`) |
 | `Tables (n)` | Table list | — |
 | `Views (n)` | View list | — |
@@ -207,6 +207,10 @@ A stage has no view of its own; the stage list shows everything about it.
 - **Grants** has one row per grantee; the privileges marked `+` are held with
   grant option. The individual grants of the highlighted grantee are listed
   below the table. Only grants your role may see are shown.
+- **Roles** (Database view) lists the database's database roles: owner, how
+  many roles and database roles each is granted to, how many database roles
+  it holds itself, when it was created and its comment. They are read only
+  while this tab is open.
 - **History** merges a pipe's load or a task's run history from two Snowflake
   sources. A failed load or run shows its error below the table. A note above
   says when the history was capped. While the slower, older source is still
@@ -237,8 +241,8 @@ no warehouse or lacks the privilege; see
 fills them in. A line above the list names such columns while they are first
 being fetched ("Last DDL, Last Altered: looking...") and says why they are
 blank when that failed. The Status tab counts the pipes whose execution state
-has been read so far. The Grants, Tags and Data tabs say when they are still
-looking, when there is nothing to show, or why they could not fetch.
+has been read so far. The Grants, Roles, Tags and Data tabs say when they are
+still looking, when there is nothing to show, or why they could not fetch.
 
 When a refresh fails, the rows already shown stay, and a note above the list,
 History or Data table says when they were fetched.

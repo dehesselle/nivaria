@@ -12,7 +12,7 @@ import pytest
 from textual.widgets import DataTable, TabbedContent
 
 from nivaria.cache.repository import Repository
-from nivaria.models import ObjectType, SchemaRef, objects_scope
+from nivaria.models import ObjectType, SchemaRef, database_roles_scope, objects_scope
 from nivaria.ui.widgets.detail_pane import DetailPane
 from tests.views.harness import Harness, load, put_tag
 
@@ -45,6 +45,14 @@ def _tags(schema: str | None) -> Callable[[Repository], None]:
             put_tag(repo, "MYDB", schema, TAG_NAME=f"TAG_{i:03}")
 
     return seed
+
+
+def _roles(repo: Repository) -> None:
+    load(
+        repo,
+        database_roles_scope("MYDB"),
+        [{"name": f"ROLE_{i:03}"} for i in range(ROWS)],
+    )
 
 
 def _category(object_type: ObjectType) -> Callable[[DetailPane], None]:
@@ -81,6 +89,13 @@ def _category(object_type: ObjectType) -> Callable[[DetailPane], None]:
             "tab-tags",
             "detail-tags",
             id="database-tags",
+        ),
+        pytest.param(
+            _roles,
+            lambda pane: pane.show_database("MYDB"),
+            "tab-roles",
+            "detail-roles",
+            id="database-roles",
         ),
         pytest.param(
             _objects(ObjectType.TABLE),

@@ -425,6 +425,18 @@ def test_show_roles_sends_the_unpaged_statement() -> None:
     assert params is None
 
 
+def test_show_database_roles_sends_the_unpaged_statement() -> None:
+    gateway, connection, _ = make_gateway()
+    connection.columns = ["name", "owner"]
+    connection.rows = [("ANALYST", "SYSADMIN")]
+    assert gateway.show_database_roles("MYDB") == [
+        {"name": "ANALYST", "owner": "SYSADMIN"}
+    ]
+    statement, params = connection.executed[-1]
+    assert statement == 'SHOW DATABASE ROLES IN DATABASE "MYDB"'
+    assert params is None
+
+
 def test_table_stats_binds_schema_and_table_type_as_parameters() -> None:
     """The first gateway call that actually populates `params` -- unlike the
     SHOW builders, TABLE_SCHEMA/TABLE_TYPE are bound, not interpolated."""

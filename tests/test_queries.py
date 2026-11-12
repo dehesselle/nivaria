@@ -106,6 +106,12 @@ def test_show_warehouses_and_roles_are_unpaged() -> None:
     assert queries.show_roles() == "SHOW ROLES"
 
 
+def test_show_database_roles_is_unpaged_and_quotes_the_database() -> None:
+    assert queries.show_database_roles('my"db') == (
+        'SHOW DATABASE ROLES IN DATABASE "my""db"'
+    )
+
+
 def test_use_role_and_warehouse_quote_the_identifier() -> None:
     assert queries.use_role("SYSADMIN") == 'USE ROLE "SYSADMIN"'
     assert queries.use_warehouse("my_wh") == 'USE WAREHOUSE "my_wh"'

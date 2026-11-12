@@ -48,6 +48,7 @@ Other columns:
 | Category expanded | `SHOW <type> IN DATABASE` | `DATABASE_PRIME` | database | none | ~1 s | ~1 s | | tree, lists, search |
 | Database selected | `SHOW GRANTS ON DATABASE` | `GRANTS` | database | none | ~0.2 s | ~0.2 s | | Grants tab |
 | Database selected | `INFORMATION_SCHEMA.TAG_REFERENCES` | `TAG_REFERENCES` | database | WH | ? | ? | Tags tab shown | Tags tab |
+| Database selected | `SHOW DATABASE ROLES IN DATABASE` | `DATABASE_ROLES` | database | none | ? | ? | Roles tab shown | Roles tab |
 | Schema selected | `SHOW GRANTS ON SCHEMA` | `GRANTS` | schema | none | ~0.2 s | ~0.2 s | | Grants tab |
 | Schema selected | `INFORMATION_SCHEMA.TAG_REFERENCES` | `TAG_REFERENCES` | schema | WH | ? | ? | Tags tab shown | Tags tab |
 | Tables (n) selected | `SHOW TABLES IN DATABASE` | `DATABASE_PRIME` | database | none | ~1 s | ~1 s | | Tables list |

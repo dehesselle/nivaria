@@ -209,6 +209,8 @@ def describe(scope: Scope, window: Window | None = None) -> str:
             return "SHOW GRANTS ON DATABASE"
         case ScopeType.TAG_REFERENCES:
             return "INFORMATION_SCHEMA.TAG_REFERENCES"
+        case ScopeType.DATABASE_ROLES:
+            return "SHOW DATABASE ROLES"
         case ScopeType.COLUMN_TAG_REFERENCES:
             return "INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS"
         case ScopeType.DATA_PREVIEW:

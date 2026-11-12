@@ -17,6 +17,7 @@ from nivaria.models import (
     ObjectType,
     SchemaRef,
     column_tag_references_scope,
+    database_roles_scope,
     grants_scope,
     materialized_view_stats_scope,
     object_grants_scope,
@@ -298,3 +299,21 @@ async def test_a_databases_empty_tags_tab_says_there_are_none(repo) -> None:
         view.query_one(TabbedContent).active = "tab-tags"
         await pilot.pause()
         assert _text(pane, "detail-tags-note") == "No tags on this database."
+
+
+async def test_a_databases_roles_tab_says_what_it_knows(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(100, 30)) as pilot:
+        pane = app.query_one(DetailPane)
+        view = pane.show_database("MYDB")
+        await pilot.pause()
+        view.query_one(TabbedContent).active = "tab-roles"
+        await pilot.pause()
+        assert _text(pane, "detail-roles-note") == "Looking for database roles..."
+
+        load(repo, database_roles_scope("MYDB"), [])
+        pane.cache_updated(database_roles_scope("MYDB"))
+        await pilot.pause()
+        assert _text(pane, "detail-roles-note") == (
+            "No database roles in this database."
+        )

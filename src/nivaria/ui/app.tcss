@@ -209,7 +209,8 @@ ClosingDialog > #dialog {
 #detail-data,
 #detail-list,
 #detail-status,
-#detail-tags {
+#detail-tags,
+#detail-roles {
     height: 1fr;
 }
 
@@ -259,7 +260,8 @@ ClosingDialog > #dialog {
 #detail-source-note,
 #detail-status-source-note,
 #detail-grants-note,
-#detail-tags-note {
+#detail-tags-note,
+#detail-roles-note {
     height: auto;
     margin-bottom: 1;
     background: $foreground 8%;
@@ -278,7 +280,8 @@ ClosingDialog > #dialog {
 #detail-source-note.-error,
 #detail-status-source-note.-error,
 #detail-grants-note.-error,
-#detail-tags-note.-error {
+#detail-tags-note.-error,
+#detail-roles-note.-error {
     color: $text-error;
 }
 

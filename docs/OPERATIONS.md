@@ -56,8 +56,8 @@ The Grants tabs show only what the active role may see (what it owns, holds
 `MANAGE GRANTS` on, or reaches through `ACCOUNTADMIN`/`SECURITYADMIN`), and
 only direct grants. A short Grants tab under a lesser role is correct.
 
-Grants, Data and a schema's or database's Tags cost one query per object, so
-they are fetched only while their tab is shown. The Data tab uses the warehouse;
+Grants, Data, a schema's or database's Tags and a database's Roles cost one
+query per object, so they are fetched only while their tab is shown. The Data tab uses the warehouse;
 for a view, it runs the view's query. Resting the cursor on a table or view also
 uses the warehouse, for its column tags.
 

@@ -478,6 +478,14 @@ def fetch_page(
                     scope.database, allow_reconnect=allow_reconnect
                 ),
             )
+        case ScopeType.DATABASE_ROLES:
+            assert scope.database is not None
+            # Bounded like a database's grant list, so unpaged too.
+            return Page(
+                gateway.show_database_roles(
+                    scope.database, allow_reconnect=allow_reconnect
+                ),
+            )
         case ScopeType.COLUMN_TAG_REFERENCES:
             assert scope.database is not None
             assert scope.schema is not None

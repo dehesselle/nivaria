@@ -530,9 +530,10 @@ Each scope's source, what it feeds and what it needs are in
 The four `ACCOUNT_USAGE` scopes are log scopes, refreshed by window passes
 (see "Window passes").
 
-Two of them are second sources without being `SELECT`s:
-`MATERIALIZED_VIEW_STATS` and `GRANTS` are additional `SHOW` commands, so
-they need no warehouse and degrade the way any `SHOW` scope does. `SHOW
+Three of them are second sources without being `SELECT`s:
+`MATERIALIZED_VIEW_STATS`, `GRANTS` and `DATABASE_ROLES` are additional
+`SHOW` commands, so they need no warehouse and degrade the way any `SHOW`
+scope does. `SHOW
 MATERIALIZED VIEWS` is genuinely a different command from `SHOW VIEWS`, with
 its own column set carrying `rows`/`bytes` that `SHOW VIEWS` never returns —
 which is also why a regular view's Rows/Size are blank, and why the Views (n)
@@ -1548,9 +1549,14 @@ views existing.
 
 A schema and a database go through no registry because neither has an
 `ObjectType` and there is exactly one view for each — a lookup with a single
-possible answer is a lookup worth not having. They share their whole
-implementation (`_GrantsTagsView`) and differ only in which scopes they read,
-since a database has no schema dimension.
+possible answer is a lookup worth not having. They share tabs, not a base
+class: Grants and Tags are each a compose and a paint function, which both
+views call, and each view lists its own scopes. `DatabaseView` has a Roles
+tab as well, because database roles belong to a database and a schema has no
+counterpart. A shared base class would need a hook for every tab one view
+has and the other does not, and a subclass handling the same message as its
+base would have both handlers run, since Textual calls every class's
+handler in the MRO.
 
 ### What decides a view's shape
 
@@ -1564,7 +1570,7 @@ actually returns rather than a style choice:
   and the focus following into the tab just shown. `PipeView` and `TaskView`
   (history + SQL), `TableView` (columns + data + grants), `ViewView`
   (columns + data + grants + SQL), `PipeListView` (activity + status),
-  `SchemaView`/`DatabaseView` (grants + tags). Tabs are laid out in
+  `SchemaView` (grants + tags), `DatabaseView` (grants + roles + tags). Tabs are laid out in
   alphabetical order; which one opens first is set separately (`initial=`)
   and does not follow that order -- `PipeListView` opens on Status,
   `PipeView`/`TaskView` on History. A mnemonic means the same tab on every
@@ -1581,8 +1587,8 @@ actually returns rather than a style choice:
 
 A tab whose scope costs one round trip **per object**, and which is not the
 tab a view opens on, is fetched only while it is shown. Today that is the
-Table and View views' Grants and Data, and the Schema and Database views'
-Tags: the tree cursor rests on these nodes far more often than anyone opens
+Table and View views' Grants and Data, the Schema and Database views'
+Tags, and the Database view's Roles: the tree cursor rests on these nodes far more often than anyone opens
 such a tab, and each stop would otherwise cost another statement for a result
 nothing shows until the tab opens. For a view, Data would also run the view's
 whole query (see "Bounding a result"). The scope is
