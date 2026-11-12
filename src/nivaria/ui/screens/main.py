@@ -419,7 +419,7 @@ class MainScreen(Screen):
     def on_cache_updated(self, event: CacheUpdated) -> None:
         scope = event.scope
         self.tree.cache_updated(scope)
-        self.detail.cache_updated(scope)
+        self.detail.cache_updated(scope, event.priority)
         if (
             event.complete
             and scope.type is ScopeType.SCHEMAS
@@ -495,10 +495,9 @@ class MainScreen(Screen):
         # dropped this as a duplicate. Having failed since, it would run again.
         if event.from_update and self.repo.entry(event.scope).state is CacheState.ERROR:
             return
-        priority = Priority.INTERACTIVE if event.interactive else Priority.VISIBLE
         self._request(
             _requestable(event.scope),
-            priority,
+            event.priority,
             event.reason,
             event.detail,
             asked=event.scope,

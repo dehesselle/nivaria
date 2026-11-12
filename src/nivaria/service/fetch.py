@@ -54,7 +54,10 @@ from nivaria.snowflake.gateway import SnowflakeGateway, is_missing_object
 
 _log = logging.getLogger(__name__)
 
-Notify = Callable[[Scope, bool], None]
+#: (scope, complete, priority) -- `priority` is what the result answers: the
+#: job's own, or higher if someone asked for the scope while it ran. A view
+#: repainting on it asks for what else it needs at the same priority.
+Notify = Callable[[Scope, bool, Priority], None]
 #: (scope, message, missing) -- `missing` is set when the failure was the
 #: object itself being gone, which the UI reports more gently.
 OnError = Callable[[Scope, str, bool], None]
@@ -89,6 +92,11 @@ class FetchService:
         #: Scopes cancelled while a page was already in flight. Checked before
         #: a continuation is enqueued, since the running page cannot be stopped.
         self._cancelled: set[Scope] = set()
+        #: The highest priority a scope was asked for while it was running,
+        #: when that outranks the running job. The request itself is dropped
+        #: as a duplicate, but the result it waits for answers it, so it is
+        #: announced at this priority (`_answered`).
+        self._wanted: dict[Scope, Priority] = {}
         self._threads: list[threading.Thread] = []
         self._started = False
         #: Set by stop(), never cleared. stop() gives up on a worker still
@@ -162,6 +170,10 @@ class FetchService:
             existing = self._pending.get(scope)
             if running is not None:
                 skip = f"already running ({running.reason})"
+                if priority < running.priority:
+                    self._wanted[scope] = min(
+                        priority, self._wanted.get(scope, priority)
+                    )
             elif existing is not None and existing.priority <= priority:
                 skip = f"already queued ({existing.reason})"
             else:
@@ -375,7 +387,7 @@ class FetchService:
                 scope, generation, truncated=page.truncated, **finish
             )
             self._release(job)
-            self._announce(scope, complete=True)
+            self._announce(scope, complete=True, priority=self._answered(job))
             return
         if job.page + 1 >= config.get(MAX_PAGES_PER_PASS):
             # The cursor keeps moving but the result will not end. Fail
@@ -390,10 +402,10 @@ class FetchService:
             self._release(job)
             journal.failed(scope, message)
             self._report(scope, message)
-            self._announce(scope, complete=True)
+            self._announce(scope, complete=True, priority=self._answered(job))
             return
 
-        self._announce(scope, complete=False)
+        self._announce(scope, complete=False, priority=self._answered(job, final=False))
         with self._lock:
             if scope in self._cancelled:
                 self._cancelled.discard(scope)
@@ -449,7 +461,7 @@ class FetchService:
             # fall back to a job per schema. Slower, but correct.
             self._fan_out(object_type, database, job.priority, scope)
             self._release(job)
-            self._announce(scope, complete=True)
+            self._announce(scope, complete=True, priority=self._answered(job))
             return
 
         grouped: dict[Scope, list[dict[str, Any]]] = {}
@@ -468,9 +480,10 @@ class FetchService:
 
         self._repo.replace_grouped(grouped, started_at)
         self._release(job)
+        answered = self._answered(job)
         for filled in grouped:
-            self._announce(filled, complete=True)
-        self._announce(scope, complete=True)
+            self._announce(filled, complete=True, priority=answered)
+        self._announce(scope, complete=True, priority=answered)
 
     def _fan_out(
         self, object_type: ObjectType, database: str, priority: Priority, prime: Scope
@@ -520,15 +533,31 @@ class FetchService:
                 )
         self._release(job)
         self._report(scope, message, missing=missing)
-        self._announce(scope, complete=True)
+        self._announce(scope, complete=True, priority=self._answered(job))
 
-    def _announce(self, scope: Scope, *, complete: bool) -> None:
+    def _answered(self, job: FetchJob, *, final: bool = True) -> Priority:
+        """The priority `job`'s result answers: its own, or a higher one asked
+        for while it ran. `final` forgets the latter once the pass is over.
+
+        A sweep's result answers only the sweep, so what a view asks for on
+        repainting it stays background and never logs in. But someone who
+        rested on the scope while the sweep fetched it is waiting for it now.
+        """
+        with self._lock:
+            wanted = (
+                self._wanted.pop(job.scope, None)
+                if final
+                else self._wanted.get(job.scope)
+            )
+        return job.priority if wanted is None else min(job.priority, wanted)
+
+    def _announce(self, scope: Scope, *, complete: bool, priority: Priority) -> None:
         if self._notify is None or self._stopped:
             return
         # A listener raising here would kill the worker thread and silently
         # strand every later job, so it is contained.
         try:
-            self._notify(scope, complete)
+            self._notify(scope, complete, priority)
         except Exception:  # noqa: BLE001 -- see _execute
             _log.exception("cache-update listener failed for %s", scope)
 

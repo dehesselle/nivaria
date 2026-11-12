@@ -45,6 +45,7 @@ from nivaria.models import (
     is_stale,
     objects_scope,
 )
+from nivaria.service.jobs import Priority
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import ObjectOpened, ScopeNeeded
 
@@ -66,6 +67,9 @@ class _ScopedView(Widget):
 
     #: The scope whose cache update this repaint answers, while it runs.
     _announcing: Scope | None = None
+    #: The priority that update answers, while it runs: what this repaint
+    #: asks for anything else at.
+    _answering: Priority = Priority.INTERACTIVE
 
     #: Whether the cursor has rested here long enough for `ensure` to ask
     #: anything. `DetailPane` manages it; a view outside one is always settled.
@@ -78,18 +82,26 @@ class _ScopedView(Widget):
     def on_mount(self) -> None:
         self.repaint()
 
-    def cache_updated(self, scope: Scope) -> None:
+    def cache_updated(
+        self, scope: Scope, priority: Priority = Priority.INTERACTIVE
+    ) -> None:
         """Repaint if the scope that changed is one this view is showing.
 
         Not before it has mounted: its widgets do not exist yet, and the paint
         `on_mount` makes reads what this update announced anyway.
+
+        What the repaint asks for goes at `priority`, the one the fetch that
+        landed answered. Always interactive, a sweep's result would promote
+        the sweep's other requests, which may then log in with nobody there.
         """
         if self.is_mounted and scope in self.scopes():
             self._announcing = scope
+            self._answering = priority
             try:
                 self.repaint()
             finally:
                 self._announcing = None
+                self._answering = Priority.INTERACTIVE
 
     def repaint(self, reason: Reason = Reason.CURSOR_SETTLED) -> None:
         """Ask for whatever is missing or stale, and paint what is cached.
@@ -224,7 +236,7 @@ class _ScopedView(Widget):
             self.post_message(
                 ScopeNeeded(
                     scope,
-                    interactive=True,
+                    priority=self._answering,
                     from_update=from_update,
                     reason=reason,
                     detail=journal.staleness(entry, ttl),

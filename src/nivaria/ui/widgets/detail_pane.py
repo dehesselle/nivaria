@@ -32,6 +32,7 @@ from nivaria import journal
 from nivaria.cache.repository import Repository
 from nivaria.journal import Reason
 from nivaria.models import ObjectRef, SchemaRef, Scope
+from nivaria.service.jobs import Priority
 from nivaria.settings import CURSOR_SETTLE_MS, config
 from nivaria.ui.views.base import _ScopedView, category_view_for, view_for
 from nivaria.ui.views.schema_view import DatabaseView, SchemaView
@@ -154,9 +155,11 @@ class DetailPane(Vertical):
         self.repo = repo
         self.clear()
 
-    def cache_updated(self, scope: Scope) -> None:
+    def cache_updated(
+        self, scope: Scope, priority: Priority = Priority.INTERACTIVE
+    ) -> None:
         if self._view is not None:
-            self._view.cache_updated(scope)
+            self._view.cache_updated(scope, priority)
 
     def scopes(self) -> list[Scope]:
         """What the pane is reading."""

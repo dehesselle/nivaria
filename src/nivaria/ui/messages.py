@@ -16,14 +16,22 @@ from textual.message import Message
 
 from nivaria.journal import Reason
 from nivaria.models import ObjectRef, SchemaRef, Scope
+from nivaria.service.jobs import Priority
 
 
 class CacheUpdated(Message):
-    """One cache scope changed. Routed to what shows it, never broadcast."""
+    """One cache scope changed. Routed to what shows it, never broadcast.
 
-    def __init__(self, scope: Scope, complete: bool) -> None:
+    `priority` is what the fetch answered (`FetchService._answered`): a view
+    repainting on it asks for whatever else it now needs at that priority.
+    """
+
+    def __init__(
+        self, scope: Scope, complete: bool, priority: Priority = Priority.INTERACTIVE
+    ) -> None:
         self.scope = scope
         self.complete = complete
+        self.priority = priority
         super().__init__()
 
 
@@ -32,6 +40,10 @@ class ScopeNeeded(Message):
 
     Posted rather than calling the fetch service, so widgets stay ignorant of
     scheduling and a test can assert on intent instead of on side effects.
+
+    `priority` is what it is asked at: interactive for what the user just did,
+    and for a repaint the priority of the fetch it answers, so a sweep's
+    result never asks for more than the sweep would.
 
     `from_update` marks one asked from a repaint answering a cache update, which
     never asks for a scope that failed. It may have failed by the time this
@@ -45,13 +57,13 @@ class ScopeNeeded(Message):
         self,
         scope: Scope,
         *,
-        interactive: bool,
+        priority: Priority,
         from_update: bool = False,
         reason: Reason = Reason.UNKNOWN,
         detail: str = "",
     ) -> None:
         self.scope = scope
-        self.interactive = interactive
+        self.priority = priority
         self.from_update = from_update
         self.reason = reason
         self.detail = detail

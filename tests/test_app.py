@@ -21,6 +21,7 @@ from nivaria.models import (
     tag_references_scope,
     warehouses_scope,
 )
+from nivaria.service.jobs import Priority
 from nivaria.snowflake.pool import LOGIN_TIMED_OUT
 from nivaria.ui.app import NivariaApp
 from nivaria.ui.screens.closing import ClosingDialog
@@ -427,7 +428,9 @@ def test_a_cache_update_after_shutdown_does_not_crash_the_app() -> None:
     exit."""
     app = NivariaApp(connector=FakeConnector())
     assert app.screen_stack == []
-    app._post_cache_updated(databases_scope(), True)  # must not raise
+    app._post_cache_updated(  # must not raise
+        databases_scope(), True, Priority.INTERACTIVE
+    )
 
 
 async def test_the_cache_is_not_opened_until_an_identity_is_known() -> None:

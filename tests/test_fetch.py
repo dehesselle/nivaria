@@ -633,7 +633,7 @@ def test_a_large_scope_arrives_in_pages(repo) -> None:
         gateway,
         repo,
         page_size=10,
-        notify=lambda scope, complete: seen.append((scope.key, complete)),
+        notify=lambda scope, complete, priority: seen.append((scope.key, complete)),
     )
     try:
         service.request(databases_scope())
@@ -650,7 +650,7 @@ def test_every_page_is_readable_as_soon_as_it_lands(repo) -> None:
     counts: list[int] = []
     gateway = FakeGateway(databases=[f"DB_{i:03d}" for i in range(25)])
 
-    def on_page(scope, complete) -> None:
+    def on_page(scope, complete, priority) -> None:
         counts.append(len(repo.databases(scope)))
 
     service = make_service(gateway, repo, page_size=10, notify=on_page)
@@ -872,7 +872,7 @@ def test_a_scope_is_requestable_by_the_time_the_ui_hears_it_finished(repo) -> No
     scope = databases_scope()
     heard: list[tuple[bool, bool]] = []
 
-    def notify(_scope, complete: bool) -> None:
+    def notify(_scope, complete: bool, _priority) -> None:
         if complete and not heard:
             heard.append((service.is_busy(scope), service.request(scope)))
 
@@ -954,7 +954,7 @@ def test_a_listener_that_raises_does_not_strand_the_worker(repo) -> None:
     leave every later job unprocessed."""
     gateway = FakeGateway(databases=["ACME"], schemas={"MYDB": ["PUBLIC"]})
 
-    def explode(scope, complete) -> None:
+    def explode(scope, complete, priority) -> None:
         raise RuntimeError("listener bug")
 
     service = make_service(gateway, repo, notify=explode)
@@ -1044,7 +1044,10 @@ def test_interactive_work_is_dequeued_before_background_work(repo) -> None:
 
     gated = Gated(databases=gateway.databases, schemas=gateway.schemas)
     service = FetchService(
-        gated, repo, workers=1, notify=lambda scope, complete: order.append(scope.key)
+        gated,
+        repo,
+        workers=1,
+        notify=lambda scope, complete, priority: order.append(scope.key),
     )
     # Occupy the single worker so the rest of the queue has to sort itself out.
     service.request(databases_scope(), Priority.INTERACTIVE)
@@ -1115,7 +1118,7 @@ def test_a_cancelled_scope_stops_paging_after_the_current_page(repo) -> None:
     service = FetchService(
         gateway,
         repo,
-        notify=lambda scope, complete: pages.append(complete),
+        notify=lambda scope, complete, priority: pages.append(complete),
     )
     scope = databases_scope()
     service.request(scope)
@@ -1386,7 +1389,7 @@ def test_a_prime_announces_each_schema_it_filled(repo) -> None:
     load_schemas(repo, gateway)
     seen: list[str] = []
     service = make_service(
-        gateway, repo, notify=lambda scope, complete: seen.append(scope.key)
+        gateway, repo, notify=lambda scope, complete, priority: seen.append(scope.key)
     )
     try:
         service.request(prime_scope(ObjectType.TABLE, "MYDB"))
@@ -2675,3 +2678,80 @@ def test_cancelled_work_says_why_when_verbose(repo, caplog) -> None:
     assert "drop  schemas:OLD  database removed: taken off the queue" in journal_lines(
         caplog
     )
+
+
+# ------------------------------------------------------- answered priority
+
+
+def _announced(repo, *, asked_while_running=None) -> list:
+    """The priorities a background pass of `databases` was announced at, with
+    an optional request made while its statement ran."""
+    gateway = _StragglingGateway()
+    seen: list = []
+    service = make_service(
+        gateway,
+        repo,
+        notify=lambda scope, complete, priority: seen.append(priority),
+    )
+    try:
+        service.request(databases_scope(), Priority.BACKGROUND)
+        assert gateway.entered.wait(timeout=3.0)
+        if asked_while_running is not None:
+            service.request(databases_scope(), asked_while_running)
+        gateway.release.set()
+        assert wait_until(lambda: seen)
+    finally:
+        service.stop()
+    return seen
+
+
+def test_a_sweeps_result_is_announced_as_background(repo) -> None:
+    """What a view asks for on repainting it must not outrank the sweep."""
+    assert _announced(repo) == [Priority.BACKGROUND]
+
+
+def test_a_result_someone_asked_for_while_it_ran_answers_them(repo) -> None:
+    """Resting on a scope the sweep is fetching makes its result yours."""
+    assert _announced(repo, asked_while_running=Priority.INTERACTIVE) == [
+        Priority.INTERACTIVE
+    ]
+
+
+def test_a_lower_request_while_it_ran_changes_nothing(repo) -> None:
+    gateway = _StragglingGateway()
+    seen: list = []
+    service = make_service(
+        gateway, repo, notify=lambda scope, complete, priority: seen.append(priority)
+    )
+    try:
+        service.request(databases_scope(), Priority.VISIBLE)
+        assert gateway.entered.wait(timeout=3.0)
+        service.request(databases_scope(), Priority.BACKGROUND)
+        gateway.release.set()
+        assert wait_until(lambda: seen)
+    finally:
+        service.stop()
+    assert seen == [Priority.VISIBLE]
+
+
+def test_what_was_asked_while_a_pass_ran_is_forgotten_after_it(repo) -> None:
+    gateway = FakeGateway(databases=["ACME"])
+    seen: list = []
+    service = make_service(
+        gateway, repo, notify=lambda scope, complete, priority: seen.append(priority)
+    )
+    try:
+        service._wanted[databases_scope()] = Priority.INTERACTIVE
+        service.request(databases_scope(), Priority.BACKGROUND)
+        assert wait_until(lambda: len(seen) == 1)
+        _refetch_at(service, repo, Priority.BACKGROUND)
+        assert wait_until(lambda: len(seen) == 2)
+    finally:
+        service.stop()
+    assert seen == [Priority.INTERACTIVE, Priority.BACKGROUND]
+
+
+def _refetch_at(service, repo, priority) -> None:
+    scope = databases_scope()
+    assert wait_until(lambda: not service.is_busy(scope))
+    service.request(scope, priority)

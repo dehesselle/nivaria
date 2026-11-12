@@ -51,6 +51,7 @@ from nivaria.models import (
     objects_scope,
     schemas_scope,
 )
+from nivaria.service.jobs import Priority
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import (
     CategorySelected,
@@ -299,14 +300,14 @@ class ObjectTree(Resizable, Tree[NodeData]):
             return
         journal.user(f"expanded {_subject(data)}")
         if data.scope is not None:
-            self._ensure(data.scope, interactive=True, reason=Reason.EXPANDED)
+            self._ensure(data.scope, Priority.INTERACTIVE, reason=Reason.EXPANDED)
         # A schema's categories each have their own scope, and all of them are
         # about to be on screen, so their counts need to be right too.
         if data.type is NodeType.SCHEMA:
             for child in node.children:
                 if child.data is not None and child.data.scope is not None:
                     self._ensure(
-                        child.data.scope, interactive=False, reason=Reason.EXPANDED
+                        child.data.scope, Priority.VISIBLE, reason=Reason.EXPANDED
                     )
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[NodeData]) -> None:
@@ -341,7 +342,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
 
     # ------------------------------------------------------------ freshness
 
-    def _ensure(self, scope: Scope, *, interactive: bool, reason: Reason) -> None:
+    def _ensure(self, scope: Scope, priority: Priority, *, reason: Reason) -> None:
         """Ask for `scope` if it is missing or stale.
 
         The TTL is read at the point of use rather than snapshotted at
@@ -355,7 +356,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
             self.post_message(
                 ScopeNeeded(
                     scope,
-                    interactive=interactive,
+                    priority=priority,
                     reason=reason,
                     detail=journal.staleness(entry, ttl),
                 )
@@ -529,7 +530,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
             # root, unlike a collapsed schema's categories -- so its schema
             # list is requested right away rather than waiting for an expand.
             assert data.scope is not None
-            self._ensure(data.scope, interactive=True, reason=Reason.DATABASE_ADDED)
+            self._ensure(data.scope, Priority.INTERACTIVE, reason=Reason.DATABASE_ADDED)
 
     def _forget(self, node: TreeNode[NodeData]) -> None:
         """Drop a subtree from the scope index before it is removed."""

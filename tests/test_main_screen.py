@@ -231,7 +231,7 @@ async def test_tables_are_searchable_without_expanding_a_schema(tmp_path) -> Non
     fetch = FetchService(
         gateway,
         repo,
-        notify=lambda scope, complete: app.screen.post_message(
+        notify=lambda scope, complete, priority: app.screen.post_message(
             CacheUpdated(scope, complete)
         ),
     )
@@ -265,7 +265,7 @@ async def test_a_task_with_no_warehouse_sends_its_failing_statements_once(repo) 
     fetch = FetchService(
         gateway,
         repo,
-        notify=lambda scope, complete: app.screen.post_message(
+        notify=lambda scope, complete, priority: app.screen.post_message(
             CacheUpdated(scope, complete)
         ),
     )
@@ -452,7 +452,7 @@ async def test_only_an_objects_scope_is_upgraded_to_a_prime(repo) -> None:
             schema="AAA",
             object_type=ObjectType.TABLE,
         )
-        screen.on_scope_needed(ScopeNeeded(misshapen, interactive=True))
+        screen.on_scope_needed(ScopeNeeded(misshapen, priority=Priority.INTERACTIVE))
         await settle(pilot)
     assert misshapen.key in fetch.scopes
     assert "tables@MYDB" not in fetch.scopes
@@ -470,7 +470,7 @@ async def test_a_repaints_request_is_dropped_if_the_scope_has_failed_since(
         await pilot.pause()
         repo.fail_pass(scope, repo.begin_pass(scope), "No active warehouse selected")
         app.screen.on_scope_needed(
-            ScopeNeeded(scope, interactive=True, from_update=True)
+            ScopeNeeded(scope, priority=Priority.INTERACTIVE, from_update=True)
         )
         await settle(pilot)
     assert scope.key not in fetch.scopes
@@ -483,7 +483,7 @@ async def test_coming_back_to_a_failed_scope_still_requests_it(repo) -> None:
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         repo.fail_pass(scope, repo.begin_pass(scope), "No active warehouse selected")
-        app.screen.on_scope_needed(ScopeNeeded(scope, interactive=True))
+        app.screen.on_scope_needed(ScopeNeeded(scope, priority=Priority.INTERACTIVE))
         await settle(pilot)
     assert scope.key in fetch.scopes
 
@@ -1765,3 +1765,33 @@ async def test_a_sweep_says_how_much_was_stale_and_asks_as_sweep(repo, caplog) -
         line.startswith("note  sweep: ") and line.endswith("cache age 1m")
         for line in journal_lines(caplog)
     )
+
+
+async def test_a_sweeps_result_repaints_without_promoting_the_sweep(repo) -> None:
+    """A repaint answering a background fetch asks at background, so a sweep's
+    own result cannot make its other requests log in with nobody there."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        tree, tables = await drill_to_tables(app, pilot, screen)
+        tree.move_cursor(tables.children[0])
+        await settle(pilot)
+        fetch.requests.clear()
+        fetch.busy.clear()
+        load(repo, columns_scope("MYDB", "AAA", "ORDERS"), [])
+        screen.post_message(
+            CacheUpdated(
+                columns_scope("MYDB", "AAA", "ORDERS"), True, Priority.BACKGROUND
+            )
+        )
+        await settle(pilot)
+    assert (
+        "column_tag_references:MYDB.AAA.ORDERS",
+        int(Priority.BACKGROUND),
+    ) in fetch.requests

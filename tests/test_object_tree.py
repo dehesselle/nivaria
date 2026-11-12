@@ -18,6 +18,7 @@ from nivaria.models import (
     objects_scope,
     schemas_scope,
 )
+from nivaria.service.jobs import Priority
 from nivaria.settings import CACHE_TTL, config
 from nivaria.ui.messages import (
     CategorySelected,
@@ -39,7 +40,7 @@ class Harness(App[None]):
         yield ObjectTree(self.repo, id="tree")
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
-        self.needed.append((event.scope.key, event.interactive))
+        self.needed.append((event.scope.key, event.priority is Priority.INTERACTIVE))
 
 
 @pytest.fixture

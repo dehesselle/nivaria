@@ -48,6 +48,8 @@ class Harness(App[None]):
         self.needed: list[str] = []
         #: (scope key, reason, detail) of every ScopeNeeded, for the journal.
         self.asked: list[tuple[str, str, str]] = []
+        #: The priority of every ScopeNeeded, by scope key.
+        self.priorities: dict[str, object] = {}
         self.opened: list[ObjectRef] = []
 
     def compose(self) -> ComposeResult:
@@ -56,6 +58,7 @@ class Harness(App[None]):
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         self.needed.append(event.scope.key)
         self.asked.append((event.scope.key, str(event.reason), event.detail))
+        self.priorities[event.scope.key] = event.priority
 
     def on_object_opened(self, event: ObjectOpened) -> None:
         self.opened.append(event.ref)

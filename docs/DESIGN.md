@@ -97,8 +97,9 @@ that explains it in full.
     across schemas, so resuming after a name skips rows. See "Database
     priming".
 12. **Background work never opens a connection, and connections open one at a
-    time**, because each new connection can mean an MFA prompt. See "The
-    connection pool".
+    time**, because each new connection can mean an MFA prompt. What a
+    background result asks for on repainting is background too. See "The
+    connection pool" and "The fetch scheduler".
 13. **An update never moves the tree cursor, and a highlight only shows.**
     Revealing is for jumps from outside the tree. See "The cursor must not
     move" and "A highlight is not a jump".
@@ -1246,6 +1247,14 @@ worker writes into sqlite and then posts a message naming the scope it changed.
   database prime is the deliberate exception — see above.
 - **Three priorities**: interactive (the user just expanded something or
   pressed refresh) > visible > background (the staleness sweep).
+- **A result answers a priority**: its job's, or a higher one asked for while
+  it ran, a request that is otherwise dropped as a duplicate
+  (`FetchService._answered`). It travels with the cache update, and a view
+  repainting on it asks for anything else it now needs at that priority. A
+  repaint always asking at interactive let a sweep's result promote the
+  sweep's other requests, which could then log in with nobody there. Someone
+  resting on a scope the sweep is fetching is waiting for it, though, so their
+  request raises what the result answers.
 - **Deduplicated**: a scope already queued or running is not queued again. A
   higher-priority request for an already-queued scope supersedes it rather than
   duplicating it. This is what stops a burst of expand events queueing the same

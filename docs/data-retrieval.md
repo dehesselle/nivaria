@@ -95,7 +95,7 @@ journal can be read against this table and the one above.
 | Node expanded | `expanded` | The matching rows above that are never fetched or stale, at once | interactive; a schema's categories visible |
 | Database added | `database added` | The matching rows above that are never fetched or stale, at once | interactive, unless a row says otherwise |
 | Tab opened | `tab opened` | The rows that view now needs, at once | interactive |
-| A fetch lands and repaints | `repaint` | The rows that view now needs, at once | interactive |
+| A fetch lands and repaints | `repaint` | The rows that view now needs, at once | the landed fetch's: background for a sweep's, unless it was asked for at a higher priority while it ran |
 | Cursor moves on | `drop`, verbose only | Nothing. Queued work only the previous view was waiting on is dropped, except listings. A statement already running finishes. | n/a |
 | Sweep (countdown at zero) | `sweep` | Every stale scope in the tree, collapsed nodes included, plus the detail view's once the cursor has settled. A stale listing goes as its prime. Never opens a connection. | background |
 | `F5` | `f5` | Everything the screen shows now, whatever its age: the detail view's scopes and the tree node's listing, for an object its parent category's, for a schema its database's. A listing goes per schema (`SHOW <type> IN SCHEMA`), not as a prime. Log scopes stay window passes. | interactive |

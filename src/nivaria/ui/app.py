@@ -20,6 +20,7 @@ from nivaria.journal import Reason
 from nivaria.models import ScopeType
 from nivaria.profiles import ProfileStore
 from nivaria.service.fetch import FetchService
+from nivaria.service.jobs import Priority
 from nivaria.settings import POOL_SIZE, config
 from nivaria.snowflake.gateway import PoolGateway
 from nivaria.snowflake.pool import LOGIN_TIMED_OUT, ConnectionPool, Connector
@@ -204,15 +205,15 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             on_error=self._fetch_failed,
         )
 
-    def _cache_updated(self, scope, complete: bool) -> None:
+    def _cache_updated(self, scope, complete: bool, priority: Priority) -> None:
         """Called on a fetch worker thread; hop to the event loop.
 
         The message goes to the screen, which routes it to the one widget
         showing that scope. Nothing here touches a widget directly.
         """
-        self.call_from_thread(self._post_cache_updated, scope, complete)
+        self.call_from_thread(self._post_cache_updated, scope, complete, priority)
 
-    def _post_cache_updated(self, scope, complete: bool) -> None:
+    def _post_cache_updated(self, scope, complete: bool, priority: Priority) -> None:
         # A worker started before quit can still be mid-query when shutdown
         # pops every screen (Textual's own _close_all runs before this app's
         # on_unmount), so `self.screen` is not safe to touch unconditionally
@@ -222,7 +223,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             return
         screen = self.screen
         if isinstance(screen, MainScreen):
-            screen.post_message(CacheUpdated(scope, complete))
+            screen.post_message(CacheUpdated(scope, complete, priority))
 
     def _fetch_failed(self, scope, message: str, missing: bool) -> None:
         """Called on a fetch worker thread; hop to the event loop."""
