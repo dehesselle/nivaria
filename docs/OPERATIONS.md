@@ -196,10 +196,16 @@ Cache directory (`user_cache_dir`):
 | File | Content |
 | --- | --- |
 | `cache-<account>-<role>.db` (plus `-wal`, `-shm`) | The sqlite cache for one account and role: Snowflake metadata only. |
+| `journal/journal-<date>-<time>-<pid>.log` | The journal of one session, only while **write the journal to a file** is on. The 20 newest are kept. |
 
 The cache is safe to delete at any time while nivaria is not running; it
 refills on the next start. A cache written by a different nivaria schema
 version is deleted and rebuilt automatically.
+
+The journal files are safe to delete too. Nothing is written to `journal/`
+unless you switch the file on, and nothing more once you switch it off. A
+journal file that can't be written is given up for the session with one
+warning in the Log panel, which keeps showing the journal either way.
 
 Data tab rows are never written to disk: they are held in memory and gone when
 nivaria exits, reconnects or switches role.

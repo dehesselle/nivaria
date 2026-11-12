@@ -28,6 +28,8 @@ from decimal import Decimal
 from enum import IntEnum
 from typing import Any
 
+from nivaria import journal
+from nivaria.journal import Reason
 from nivaria.models import Scope, ScopeType
 from nivaria.settings import (
     DATA_PREVIEW_ROWS,
@@ -90,6 +92,9 @@ class FetchJob:
     #: Which page of this pass this job is, counted from 0. Only the
     #: scheduler's page budget reads it -- see FetchService._store.
     page: int = field(compare=False, default=0)
+    #: What asked for this scope, carried to every page so the journal can
+    #: say why a statement goes out when it does, long after the request.
+    reason: Reason = field(compare=False, default=Reason.UNKNOWN)
 
     def next_page(self, cursor: str, generation: int) -> FetchJob:
         return FetchJob(
@@ -99,6 +104,7 @@ class FetchJob:
             cursor=cursor,
             generation=generation,
             page=self.page + 1,
+            reason=self.reason,
         )
 
 
@@ -545,6 +551,11 @@ def _pipe_status_page(
     except Exception as error:
         if not is_missing_object(error):
             raise
+        # A burst of one statement per pipe, which nothing else would show.
+        journal.note(
+            f"pipe_status:{database}.{schema}  a pipe of {len(batch)} is gone, "
+            "asking one pipe at a time"
+        )
         rows = []
         for name in batch:
             try:

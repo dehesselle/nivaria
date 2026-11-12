@@ -28,6 +28,8 @@ __all__ = [
     "DATA_PREVIEW_ROWS",
     "DATA_PREVIEW_TIMEOUT",
     "HISTORY_MAX_ROWS",
+    "JOURNAL_FILE",
+    "JOURNAL_VERBOSE",
     "LAG_MARGIN_FACTOR",
     "MAX_PAGES_PER_PASS",
     "PAGE_SIZE",
@@ -271,4 +273,29 @@ CSV_DELIMITER = Setting(
     group="Export",
     default="operating system",
     choices=("operating system", "comma", "semicolon"),
+)
+
+JOURNAL_FILE = Setting(
+    key="journal_file",
+    label="write the journal to a file",
+    description=(
+        "The journal lists what you did and what nivaria fetched because of "
+        "it, and is always in the Log panel (F1), in memory only. With this "
+        "on it is also written to a file in nivaria's cache directory, one "
+        "per session, keeping the last 20."
+    ),
+    group="Diagnostics",
+    default=False,
+)
+
+JOURNAL_VERBOSE = Setting(
+    key="journal_verbose",
+    label="verbose journal",
+    description=(
+        "Also journal what was asked for and not fetched: already fresh, "
+        "already queued or running, or dropped because the cursor moved on. "
+        "The Log panel shows these at level Debug."
+    ),
+    group="Diagnostics",
+    default=False,
 )

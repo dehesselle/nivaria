@@ -329,6 +329,8 @@ restart.
 | result row ceiling | 200000 | Most rows read from any single statement before it is abandoned with an error. `0` disables it. |
 | prime chunk threshold | 10000 | Result size above which a whole-database fetch is redone per schema. |
 | CSV delimiter | operating system | What separates the columns of an export: `comma`, `semicolon`, or `operating system`, which is what Excel follows when it opens a CSV. That is the list separator in Windows' region settings. macOS and Linux have no such setting, so there it is a semicolon where the locale's decimal point is a comma, otherwise a comma. |
+| write the journal to a file | off | Also write the journal, which the Log panel shows at level Info, to a file, one per session (see [OPERATIONS.md](OPERATIONS.md#files-on-disk)). |
+| verbose journal | off | Also journal what was asked for and not fetched. The Log panel shows these lines at level Debug. |
 
 Settings live in `settings.json` (see
 [OPERATIONS.md](OPERATIONS.md#files-on-disk)); only values that differ from

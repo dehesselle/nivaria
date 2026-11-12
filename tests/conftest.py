@@ -51,6 +51,11 @@ def isolated_paths(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # as soon as it is shown. The tests of the wait itself set a real delay.
     config.set(CURSOR_SETTLE_MS, 0)
     yield
+    # The journal keeps its file open across calls, and the next test's
+    # cache directory is somewhere else.
+    from nivaria import journal
+
+    journal.reset()
     # Put the real app config back, so a later non-test import of
     # nivaria.settings is not left pointing at a deleted tmp_path.
     configure(paths.APP_NAME)

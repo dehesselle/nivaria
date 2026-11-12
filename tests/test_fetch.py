@@ -2560,3 +2560,118 @@ def _pipe_load(pipe: str) -> dict:
         "FILE_NAME": f"{pipe}.csv",
         "LAST_LOAD_TIME": str(datetime.now(UTC)),
     }
+
+
+# ------------------------------------------------------------------ journal
+
+
+def journal_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "nivaria.journal"]
+
+
+def test_a_reason_reaches_every_page_of_its_pass(repo, caplog) -> None:
+    """The point of carrying it: a send line says why, long after the request."""
+    from nivaria.journal import Reason
+
+    gateway = FakeGateway(databases=["ACME", "BETA", "GAMMA"])
+    service = make_service(gateway, repo, page_size=2)
+    try:
+        service.request(databases_scope(), reason=Reason.F5, detail="age 1m")
+        assert wait_until(
+            lambda: repo.entry(databases_scope()).state is CacheState.COMPLETE
+        )
+    finally:
+        service.stop()
+
+    lines = journal_lines(caplog)
+    assert lines[0] == "queue databases  f5: age 1m [interactive]"
+    sends = [line for line in lines if line.startswith("send")]
+    assert len(sends) == 2
+    assert sends[0].startswith("send  databases  SHOW DATABASES [f5, nivaria-fetch-")
+    assert sends[1].startswith("send  databases  SHOW DATABASES [f5, page 2, ")
+    dones = [line for line in lines if line.startswith("done")]
+    assert dones[0].startswith("done  databases  2 rows")
+    assert dones[0].endswith("more pages follow")
+    assert dones[1].startswith("done  databases  1 rows")
+
+
+def test_a_missing_object_says_which_listing_it_asks_for_and_why(repo, caplog) -> None:
+    from nivaria.journal import Reason
+
+    gateway = FakeGateway(schemas={"MYDB": ["AAA", "GONE"]})
+    cache_schemas(repo, "MYDB", "AAA", "GONE")
+    gateway.drop_schema("MYDB", "GONE")
+    service = make_service(gateway, repo)
+    try:
+        service.request(grants_scope("MYDB", "GONE"), reason=Reason.CURSOR_SETTLED)
+        assert wait_until(lambda: cached_schema_names(repo, "MYDB") == ["AAA"])
+    finally:
+        service.stop()
+
+    lines = journal_lines(caplog)
+    assert any(line.startswith("fail  grants:MYDB.GONE  ") for line in lines)
+    assert (
+        "queue schemas:MYDB  missing object: grants:MYDB.GONE does not exist "
+        "[interactive]"
+    ) in lines
+
+
+def test_a_prime_over_the_chunk_threshold_journals_its_fan_out(repo, caplog) -> None:
+    from nivaria.journal import Reason
+    from nivaria.settings import PRIME_CHUNK_THRESHOLD
+
+    config.set(PRIME_CHUNK_THRESHOLD, 2)
+    gateway = prime_gateway()
+    load_schemas(repo, gateway)
+    service = make_service(gateway, repo)
+    try:
+        service.request(prime_scope(ObjectType.TABLE, "MYDB"), reason=Reason.SWEEP)
+        assert wait_until(
+            lambda: (
+                repo.entry(objects_scope(ObjectType.TABLE, "MYDB", "BBB")).state
+                is CacheState.COMPLETE
+            )
+        )
+    finally:
+        service.stop()
+
+    lines = journal_lines(caplog)
+    assert any(
+        line.startswith("done  tables@MYDB  ")
+        and line.endswith("at the chunk threshold, fetching per schema")
+        for line in lines
+    )
+    assert (
+        "queue tables:MYDB.BBB  prime fan-out: for tables@MYDB [interactive]" in lines
+    )
+
+
+def test_a_request_that_queues_nothing_is_journalled_only_when_verbose(
+    repo, caplog
+) -> None:
+    from nivaria.journal import Reason
+    from nivaria.settings import JOURNAL_VERBOSE
+
+    service = FetchService(FakeGateway(), repo)
+    service.request(schemas_scope("DB"), Priority.VISIBLE, reason=Reason.EXPANDED)
+    service.request(schemas_scope("DB"), Priority.BACKGROUND, reason=Reason.SWEEP)
+    assert not any(line.startswith("skip") for line in journal_lines(caplog))
+
+    config.set(JOURNAL_VERBOSE, True)
+    service.request(schemas_scope("DB"), Priority.BACKGROUND, reason=Reason.SWEEP)
+    service.request(schemas_scope("DB"), Priority.INTERACTIVE, reason=Reason.F5)
+    lines = journal_lines(caplog)
+    assert "skip  schemas:DB  sweep: already queued (expanded)" in lines
+    assert "queue schemas:DB  f5 [interactive], supersedes expanded" in lines
+
+
+def test_cancelled_work_says_why_when_verbose(repo, caplog) -> None:
+    from nivaria.settings import JOURNAL_VERBOSE
+
+    config.set(JOURNAL_VERBOSE, True)
+    service = FetchService(FakeGateway(), repo)
+    service.request(schemas_scope("OLD"), Priority.BACKGROUND)
+    service.cancel_where(lambda scope: scope.database == "OLD", "database removed")
+    assert "drop  schemas:OLD  database removed: taken off the queue" in journal_lines(
+        caplog
+    )

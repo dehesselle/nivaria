@@ -18,6 +18,8 @@ from nivaria.paths import APP_NAME
 from nivaria.settings import (
     CACHE_TTL,
     CSV_DELIMITER,
+    JOURNAL_FILE,
+    JOURNAL_VERBOSE,
     PAGE_SIZE,
     PIPE_HISTORY_FETCH_DAYS,
     PIPE_HISTORY_SHOW_DAYS,
@@ -58,6 +60,13 @@ def test_the_csv_delimiter_follows_the_operating_system_unless_told_otherwise() 
     assert CSV_DELIMITER.group == "Export"
     assert CSV_DELIMITER.default == "operating system"
     assert CSV_DELIMITER.choices == ("operating system", "comma", "semicolon")
+
+
+def test_nothing_about_what_the_user_did_reaches_the_disk_unasked() -> None:
+    """The journal is always in the Log panel, in memory; its file is opt-in."""
+    assert (JOURNAL_FILE.group, JOURNAL_VERBOSE.group) == ("Diagnostics", "Diagnostics")
+    assert JOURNAL_FILE.default is False
+    assert JOURNAL_VERBOSE.default is False
 
 
 def test_pool_size_is_limited_to_a_fixed_set_of_choices() -> None:

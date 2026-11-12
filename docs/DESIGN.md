@@ -2025,6 +2025,51 @@ anywhere above Debug the whole path costs one level check per statement.
 
 ---
 
+## The journal
+
+The SQL log says exactly what went out and nothing about why. The journal
+(`journal.py`) says why, in a line or two per event: what the user did, each
+request and the trigger behind it, each statement as it is sent and how it
+ended. It is worded like [data-retrieval.md](data-retrieval.md), so a line can
+be checked against the row of the spec it should match.
+
+**The reason travels with the job.** A request is made on the event loop, but
+its statement runs later on a worker, after deduplication and maybe a priority
+upgrade. Matching a "user did X" line to a "sent Y" line by time would be
+guesswork with several workers. So `FetchService.request` takes a `Reason` and
+`FetchJob` carries it to every page, and the queue, send and done lines of one
+pass share it. The scope key ties them together: at most one job per scope is
+queued or running.
+
+**The fetch service writes the statement lines, not the gateway.** Only the
+service knows the reason, the page, and whether a log scope's pass is a window
+or a full one (`journal.describe`). The fetch service's own follow-up
+requests have reasons of their own: `missing object` for the listing a "does
+not exist" asks for, `prime fan-out` for the per-schema listings of a prime
+over the chunk threshold.
+
+**Its level is the journal's own.** It is an ordinary logger, so the Log panel
+shows it at level Info. `LogViewer` moves the root logger's level with its
+dropdown. A record is checked against the level of the logger it is made on,
+so the journal sets its own: Info, or Debug with **verbose journal**, which
+adds the requests that queued nothing and the work that was thrown away.
+
+**Nothing about what the user did reaches the disk unasked.** The panel keeps
+the journal in memory. A `FileHandler` is attached to the journal's logger only
+while **write the journal to a file** is on, so the file holds journal lines
+and nothing else. Both settings are read on every line, like every setting at
+its point of use, so switching either takes effect at once. There is one file
+per process, which keeps two running nivarias from interleaving and needs no
+rotation, whose renames Windows refuses on an open file. A file that cannot be
+written is given up for the session with one warning, because the handler's
+default `handleError` would print a traceback across the TUI.
+
+**A journal line never breaks what it describes.** Each emitter is wrapped:
+whatever goes wrong while formatting or writing is reported to the `nivaria`
+logger and swallowed, as the SQL log does.
+
+---
+
 ## Settings
 
 Settings are declared once and self-register, so a settings UI can enumerate

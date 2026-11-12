@@ -194,7 +194,7 @@ a machine that reaches the account.
 
 ## Adding a scope
 
-A new scope touches ten places:
+A new scope touches eleven places:
 
 1. a `ScopeType` member;
 2. a `*_scope()` constructor;
@@ -205,7 +205,8 @@ A new scope touches ten places:
 7. a builder in `snowflake/queries.py`;
 8. a method on the `SnowflakeGateway` protocol;
 9. the same on `PoolGateway`;
-10. a case in `jobs.fetch_page`.
+10. a case in `jobs.fetch_page`;
+11. a case in `journal.describe`, worded like its data-retrieval.md row.
 
 Every new scope also needs its rows in
 [data-retrieval.md](data-retrieval.md#screens).
