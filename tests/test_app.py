@@ -168,11 +168,11 @@ class RecordingFetch:
         #: Statements "in flight"; quitting waits for this to reach 0.
         self.running_count = 0
 
-    def request(self, scope, priority) -> bool:
+    def request(self, scope, priority, *, reason, detail="") -> bool:
         self.requested.append(scope)
         return True
 
-    def cancel_where(self, predicate) -> list:
+    def cancel_where(self, predicate, why="cancelled") -> list:
         return []
 
     def is_busy(self, scope) -> bool:

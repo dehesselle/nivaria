@@ -220,10 +220,16 @@ under `~/.cache/snowflake/`.
 
 ## Troubleshooting
 
-- **See what nivaria is doing**: `F1` opens the Log panel. Set its level to
-  Debug. Every statement from then on appears as it is sent, before Snowflake
-  answers, so a hung statement is visible too. One sent before you lowered the
-  level isn't kept.
+- **See what nivaria is doing**: `F1` opens the Log panel. At level Info it
+  shows the journal: what you did, what that asked for and why, and each
+  statement as it goes out. Set it to Debug and every statement's full SQL
+  appears as well, as it is sent, before Snowflake answers, so a hung statement
+  is visible too. A statement sent before you lowered the level isn't kept.
+- **Is this expected?**: compare the journal with
+  [data-retrieval.md](data-retrieval.md). Each `queue` and `send` line names its
+  trigger as the Triggers table does, and a `queue` line the age that made the
+  scope due. To keep the journal for later, switch on **write the journal to a
+  file**; **verbose journal** adds what was asked for and not fetched, and why.
 - **Blank columns or tabs**: the session has no warehouse, or the role lacks
   `IMPORTED PRIVILEGES` on `SNOWFLAKE` (see "Warehouse and privileges").
   Everything from `SHOW` still shows.

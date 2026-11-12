@@ -83,7 +83,7 @@ terminal:
 | **Object view** | The detail view for one object (e.g. Table view, Pipe view). Category, schema and database nodes have views of their own (see "Detail views"). |
 | **Status footer** | Key bindings on the left, starting with `, Menu` and `^q Quit`; **Countdown** and **Pool gauge** on the right. |
 | **Chord panel** | Hidden until you pause partway through a chord, then covers the Status footer and lists what can come next (see "Chords"). |
-| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen. `F1` hides it again. It has its own level and source filters. It starts at level Info; set it to Debug to see every statement nivaria sends from then on, live. |
+| **Log panel** | Hidden until `F1`, then slides down over the top third of the screen. `F1` hides it again. It has its own level and source filters. It starts at level Info, where it shows the journal (see "The journal"); set it to Debug to see every statement nivaria sends from then on, live. |
 
 The tree takes a quarter of the width at start. A dragged width is not kept
 across sessions.
@@ -282,6 +282,37 @@ The file is UTF-8 with a byte order mark, so that Excel reads it correctly, and 
 Values are written as they are. A spreadsheet evaluates a cell starting with `=`,
 and object names, comments and file names can start with one.
 
+## The journal
+
+The journal is a short, timestamped account of what you did and what nivaria
+fetched because of it. It appears in the Log panel (`F1`) as the source
+`nivaria > journal`, which the panel's source filter can hide:
+
+```text
+user  cursor rested on pipe DB.S.LOAD_ORDERS
+queue pipe_activity:DB.S  cursor settled: stale, age 6m12s, cache age 5m [interactive]
+send  pipe_activity:DB.S  ACCOUNT_USAGE.COPY_HISTORY, latest row per pipe, window 4h12m [cursor settled, nivaria-fetch-0]
+done  pipe_activity:DB.S  12 rows, 2.2 s
+```
+
+| Line | Means |
+| --- | --- |
+| `user` | Something you did. |
+| `queue` | A fetch was asked for: the trigger, why the scope was due, and at which priority. |
+| `send` | A statement goes to Snowflake now, and the trigger that asked for it. |
+| `done` / `fail` | How it ended. |
+| `conn` | A login, or a `USE ROLE` / `USE WAREHOUSE`. |
+| `note` | Anything else, such as a sweep starting. |
+| `skip` / `drop` | Verbose only: asked for and not fetched, and why, or thrown away. |
+
+The trigger is a word from the Journal column of
+[data-retrieval.md](data-retrieval.md#triggers), so a line can be checked
+against what that document says should happen.
+
+The panel keeps the journal in memory only, so it is gone when nivaria exits.
+**write the journal to a file** keeps it in nivaria's cache directory as well,
+one file per session (see [OPERATIONS.md](OPERATIONS.md#files-on-disk)).
+
 ## Session labels
 
 - **Account** (top of the Object tree's border): the account's name, for
@@ -329,7 +360,7 @@ restart.
 | result row ceiling | 200000 | Most rows read from any single statement before it is abandoned with an error. `0` disables it. |
 | prime chunk threshold | 10000 | Result size above which a whole-database fetch is redone per schema. |
 | CSV delimiter | operating system | What separates the columns of an export: `comma`, `semicolon`, or `operating system`, which is what Excel follows when it opens a CSV. That is the list separator in Windows' region settings. macOS and Linux have no such setting, so there it is a semicolon where the locale's decimal point is a comma, otherwise a comma. |
-| write the journal to a file | off | Also write the journal, which the Log panel shows at level Info, to a file, one per session (see [OPERATIONS.md](OPERATIONS.md#files-on-disk)). |
+| write the journal to a file | off | Also write the journal to a file, one per session (see "The journal"). |
 | verbose journal | off | Also journal what was asked for and not fetched. The Log panel shows these lines at level Debug. |
 
 Settings live in `settings.json` (see

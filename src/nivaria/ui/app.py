@@ -12,10 +12,11 @@ from tcoda.terminal_title import TerminalTitleMixin
 from textual import events, work
 from textual.app import App
 
-from nivaria import paths
+from nivaria import journal, paths
 from nivaria.cache.db import Database, MemoryDatabase
 from nivaria.cache.repository import Repository
 from nivaria.export import EXPORT_DELIVERY
+from nivaria.journal import Reason
 from nivaria.models import ScopeType
 from nivaria.profiles import ProfileStore
 from nivaria.service.fetch import FetchService
@@ -71,6 +72,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             self.exit()
             return
         self.pool = pool
+        _journal_session("connected", pool)
         self.switch_repo(pool)
         # push, not switch: push_screen_wait has already popped the connect
         # screen, so the stack top here is the default screen and switching
@@ -117,6 +119,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             await asyncio.to_thread(old_pool.close)
         closing.dismiss()
         self.pool = pool
+        _journal_session("reconnected", pool)
         self.switch_repo(pool)
         if isinstance(self.screen, MainScreen):
             self.screen.pool = pool
@@ -126,7 +129,7 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             # same reset applies: whatever was on screen belonged to the old
             # identity's cache.
             self.screen.set_repo(self.repo)
-            self.screen.prefetch_session_lists()
+            self.screen.prefetch_session_lists(Reason.RECONNECT)
             self._restore_databases(self.screen, pool)
 
     def _connect_dialog(self) -> ConnectScreen:
@@ -287,8 +290,10 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
         """
         fetch = self.fetch
         if self._quitting or fetch is None or not fetch.running_count:
+            journal.user("quit")
             self.exit()
             return
+        journal.user(f"quit, waiting for {fetch.running_count} statements")
         self._quitting = True
         self._wait_for_jobs_then_exit(fetch)
 
@@ -324,6 +329,14 @@ class NivariaApp(ChordMixin, TerminalTitleMixin, App[None]):
             self.fetch.stop()
         if self.pool is not None:
             self.pool.close()
+
+
+def _journal_session(what: str, pool: ConnectionPool) -> None:
+    params = pool.params
+    journal.connection(
+        f"{what}: account {pool.account_name}, role {params.role or 'none'}, "
+        f"warehouse {params.warehouse or 'none'}, {pool.size} connections"
+    )
 
 
 def run_app() -> None:

@@ -36,7 +36,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nivaria import paths
-from nivaria.models import CacheState, Scope, ScopeType, is_stale
+from nivaria.models import (
+    CacheState,
+    ObjectRef,
+    SchemaRef,
+    Scope,
+    ScopeType,
+    is_stale,
+)
 from nivaria.settings import (
     DATA_PREVIEW_ROWS,
     JOURNAL_FILE,
@@ -125,6 +132,24 @@ def staleness(entry: Entry, ttl: float, now: float | None = None) -> str:
         return f"fresh, age {span(age)}, refreshing off"
     word = "stale" if is_stale(age, ttl) else "fresh"
     return f"{word}, age {span(age)}, cache age {span(ttl)}"
+
+
+def subject(target: ObjectRef | SchemaRef | Scope | str) -> str:
+    """What a user line calls the thing on screen: a detail pane's target,
+    or a tree node's. A bare string is a database."""
+    match target:
+        case ObjectRef():
+            return f"{target.type.value.lower()} {target.fqn}"
+        case SchemaRef():
+            return f"schema {target.database}.{target.name}"
+        case Scope(type=ScopeType.OBJECTS, object_type=object_type) if (
+            object_type is not None
+        ):
+            return f"{object_type.plural} of {target.database}.{target.schema}"
+        case Scope():
+            return str(target)
+        case _:
+            return f"database {target}"
 
 
 def _window(window: Window | None) -> str:

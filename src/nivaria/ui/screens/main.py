@@ -26,8 +26,10 @@ from textual.binding import Binding
 from textual.content import Content
 from textual.screen import Screen
 
+from nivaria import journal
 from nivaria.cache.repository import Repository
 from nivaria.export import EXPORT_DELIVERY, csv_delimiter, export_filename
+from nivaria.journal import Reason
 from nivaria.models import (
     CacheState,
     ObjectRef,
@@ -167,11 +169,11 @@ class MainScreen(Screen):
         yield ChordViewer()
 
     def on_mount(self) -> None:
-        self.prefetch_session_lists()
+        self.prefetch_session_lists(Reason.STARTUP)
         self.set_interval(TICK, self._tick)
         self._tick()
 
-    def prefetch_session_lists(self) -> None:
+    def prefetch_session_lists(self, reason: Reason) -> None:
         """Ask for what the database, warehouse and role pickers offer.
 
         Warehouses and roles too, not just databases: both are cheap, unpaged
@@ -179,9 +181,9 @@ class MainScreen(Screen):
         the dialog didn't have anything to show yet -- one keypress to request
         the list, a second to actually get the picker.
         """
-        self._request(databases_scope(), Priority.INTERACTIVE)
-        self._request(warehouses_scope(), Priority.INTERACTIVE)
-        self._request(roles_scope(), Priority.INTERACTIVE)
+        self._request(databases_scope(), Priority.INTERACTIVE, reason)
+        self._request(warehouses_scope(), Priority.INTERACTIVE, reason)
+        self._request(roles_scope(), Priority.INTERACTIVE, reason)
 
     @property
     def countdown(self) -> Countdown:
@@ -314,8 +316,14 @@ class MainScreen(Screen):
             listings = [
                 objects_scope(object_type, database, schema.name) for schema in schemas
             ]
-            if self.repo.unfetched_scopes(listings):
-                self._request(prime_scope(object_type, database), Priority.BACKGROUND)
+            unfetched = self.repo.unfetched_scopes(listings)
+            if unfetched:
+                self._request(
+                    prime_scope(object_type, database),
+                    Priority.BACKGROUND,
+                    Reason.DATABASE_ADDED,
+                    f"{len(unfetched)} of {len(listings)} schemas never fetched",
+                )
 
     def _idle_watched(self) -> list[Scope]:
         """The scopes on screen that nothing is fetching yet.
@@ -342,8 +350,20 @@ class MainScreen(Screen):
         # together, so requesting each as itself would be a round trip per
         # schema and category. Several of them naming the same prime queue it
         # once: FetchService.request deduplicates.
-        for scope in self.repo.stale_scopes(ttl, self._idle_watched()):
-            self._request(_requestable(scope), Priority.BACKGROUND)
+        watched = self._idle_watched()
+        stale = self.repo.stale_scopes(ttl, watched)
+        journal.note(
+            f"sweep: {len(stale)} stale of {len(watched)} watched, "
+            f"cache age {journal.span(ttl)}"
+        )
+        for scope in stale:
+            self._request(
+                _requestable(scope),
+                Priority.BACKGROUND,
+                Reason.SWEEP,
+                journal.staleness(self.repo.entry(scope), ttl),
+                asked=scope,
+            )
 
     @property
     def tree(self) -> ObjectTree:
@@ -358,6 +378,7 @@ class MainScreen(Screen):
         hit = await self.app.push_screen_wait(SearchDialog(self.repo, self.databases))
         if hit is None:
             return
+        journal.user(f"search jumped to {journal.subject(hit)}")
         if isinstance(hit, SchemaRef):
             # A schema has no detail view to open (see SchemaRef) -- reveal
             # and expand it in the tree, the same place _select leaves you
@@ -466,7 +487,7 @@ class MainScreen(Screen):
             if scope not in after and scope.type is not ScopeType.OBJECTS
         }
         if left:
-            self.fetch.cancel_where(left.__contains__)
+            self.fetch.cancel_where(left.__contains__, "the cursor moved on")
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         """The tree or a detail view found something missing or stale."""
@@ -475,11 +496,33 @@ class MainScreen(Screen):
         if event.from_update and self.repo.entry(event.scope).state is CacheState.ERROR:
             return
         priority = Priority.INTERACTIVE if event.interactive else Priority.VISIBLE
-        self._request(_requestable(event.scope), priority)
+        self._request(
+            _requestable(event.scope),
+            priority,
+            event.reason,
+            event.detail,
+            asked=event.scope,
+        )
 
-    def _request(self, scope: Scope, priority: Priority) -> None:
-        if self.fetch is not None:
-            self.fetch.request(scope, priority)
+    def _request(
+        self,
+        scope: Scope,
+        priority: Priority,
+        reason: Reason,
+        detail: str = "",
+        *,
+        asked: Scope | None = None,
+    ) -> None:
+        """Hand a request to the fetch service, if there is one.
+
+        `asked` is the scope the caller wanted, when `scope` is the prime
+        that stands in for it: the journal names both.
+        """
+        if self.fetch is None:
+            return
+        if asked is not None and asked != scope:
+            detail = f"{detail} (for {asked})" if detail else f"for {asked}"
+        self.fetch.request(scope, priority, reason=reason, detail=detail)
 
     # ----------------------------------------------------------------- repo
 
@@ -505,11 +548,18 @@ class MainScreen(Screen):
         if databases == self.databases:
             return
         removed = set(self.databases) - set(databases)
+        added = [database for database in databases if database not in self.databases]
+        if added:
+            journal.user(f"databases added: {', '.join(added)}")
+        if removed:
+            journal.user(f"databases removed: {', '.join(sorted(removed))}")
         self.databases = databases
         if self.fetch is not None and removed:
             # Whatever was still queued for a removed database is work
             # nobody is looking at any more.
-            self.fetch.cancel_where(lambda scope: scope.database in removed)
+            self.fetch.cancel_where(
+                lambda scope: scope.database in removed, "the database was removed"
+            )
         self.tree.set_databases(databases)
         self.detail.clear()
         # A schema list still fresh in the cache is not fetched again, so no
@@ -524,7 +574,9 @@ class MainScreen(Screen):
         if not names:
             # Nothing to choose from yet; ask, and let the user try again once
             # the answer lands rather than opening an empty dialog.
-            self._request(databases_scope(), Priority.INTERACTIVE)
+            self._request(
+                databases_scope(), Priority.INTERACTIVE, Reason.PICKER, "nothing cached"
+            )
             self.notify("Loading databases...", timeout=3)
             return
         chosen = await self.app.push_screen_wait(
@@ -570,7 +622,12 @@ class MainScreen(Screen):
             return
         rows = self.repo.warehouses(warehouses_scope())
         if not rows:
-            self._request(warehouses_scope(), Priority.INTERACTIVE)
+            self._request(
+                warehouses_scope(),
+                Priority.INTERACTIVE,
+                Reason.PICKER,
+                "nothing cached",
+            )
             self.notify("Loading warehouses...", timeout=3)
             return
         current = self.pool.params.warehouse
@@ -584,6 +641,7 @@ class MainScreen(Screen):
             )
         )
         if chosen is not None and chosen != current:
+            journal.user(f"warehouse {current or 'none'} -> {chosen}")
             self._switch_warehouse(chosen)
 
     @staticmethod
@@ -606,7 +664,9 @@ class MainScreen(Screen):
             return
         names = [row.name for row in self.repo.roles(roles_scope())]
         if not names:
-            self._request(roles_scope(), Priority.INTERACTIVE)
+            self._request(
+                roles_scope(), Priority.INTERACTIVE, Reason.PICKER, "nothing cached"
+            )
             self.notify("Loading roles...", timeout=3)
             return
         current = self.pool.params.role
@@ -619,6 +679,7 @@ class MainScreen(Screen):
             )
         )
         if chosen is not None and chosen != current:
+            journal.user(f"role {current or 'none'} -> {chosen}")
             self._switch_role(chosen)
 
     @work(thread=True)
@@ -651,7 +712,7 @@ class MainScreen(Screen):
         minutes.
         """
         for scope in self.repo.failed_scopes(self._idle_watched()):
-            self._request(scope, Priority.VISIBLE)
+            self._request(scope, Priority.VISIBLE, Reason.WAREHOUSE_SWITCH, "failed")
 
     @work(thread=True)
     def _switch_role(self, role: str) -> None:
@@ -697,7 +758,7 @@ class MainScreen(Screen):
         # open, same reasoning as on_mount: a brand-new role's cache file has
         # nothing in it yet, and even a previously-visited one may have gone
         # stale while this role was not the active one.
-        self.prefetch_session_lists()
+        self.prefetch_session_lists(Reason.ROLE_SWITCH)
 
     def _role_switch_failed(self) -> None:
         assert self.pool is not None
@@ -714,8 +775,15 @@ class MainScreen(Screen):
         refresh is a window pass like any other (see
         `repository.plan_window`); `full_refresh` is the way to a full one.
         """
+        journal.user("pressed F5")
+        ttl = config.get(CACHE_TTL)
         for scope in self.detail.scopes():
-            self._request(scope, Priority.INTERACTIVE)
+            self._request(
+                scope,
+                Priority.INTERACTIVE,
+                Reason.F5,
+                journal.staleness(self.repo.entry(scope), ttl),
+            )
         node = self.tree.cursor_node
         if (
             node is not None
@@ -730,7 +798,12 @@ class MainScreen(Screen):
         if scope is None:
             scope = databases_scope() if not self.databases else None
         if scope is not None:
-            self._request(scope, Priority.INTERACTIVE)
+            self._request(
+                scope,
+                Priority.INTERACTIVE,
+                Reason.F5,
+                journal.staleness(self.repo.entry(scope), ttl),
+            )
 
     def full_refresh(self) -> None:
         """Refetch the detail pane's log scopes in full, ignoring what they
@@ -742,11 +815,12 @@ class MainScreen(Screen):
         a full one, then they are asked for now. Deliberately bound to no key
         yet; the UI that offers it is still to come.
         """
+        journal.user("asked for a full refresh")
         for scope in self.detail.scopes():
             if log_policy(scope) is None:
                 continue
             self.repo.forget_coverage(scope)
-            self._request(scope, Priority.INTERACTIVE)
+            self._request(scope, Priority.INTERACTIVE, Reason.FULL_REFRESH)
 
     def action_export_table(self) -> None:
         """Save the table on screen as a CSV in the Downloads folder.

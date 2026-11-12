@@ -226,3 +226,41 @@ def test_a_file_that_cannot_be_written_is_given_up_quietly(
     assert _lines(caplog) == ["user  one", "user  two"]
     warnings = [r for r in caplog.records if "cannot be written" in r.getMessage()]
     assert len(warnings) == 1
+
+
+# ----------------------------------------------------------- completeness
+
+
+def _unreasoned_requests() -> list[str]:
+    """Every call in src/ that asks for a scope without naming why.
+
+    `request` is FetchService's, `_request` MainScreen's (reason third, or
+    by name), `ScopeNeeded` the widgets' message.
+    """
+    import ast
+
+    source = Path(journal.__file__).parent
+    found = []
+    for path in sorted(source.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, "id", None)
+            )
+            if name not in ("request", "_request", "ScopeNeeded"):
+                continue
+            named = any(keyword.arg == "reason" for keyword in node.keywords)
+            positional = name == "_request" and len(node.args) >= 3
+            if not (named or positional):
+                found.append(f"{path.relative_to(source)}:{node.lineno} {name}")
+    return found
+
+
+def test_every_request_in_the_code_names_its_trigger() -> None:
+    """Reason.UNKNOWN in a journal means a call site was missed."""
+    assert _unreasoned_requests() == []

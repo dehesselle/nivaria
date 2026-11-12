@@ -83,17 +83,26 @@ Durations, from [measurements.md](measurements.md):
 
 ## Triggers
 
-| Trigger | What gets sent | Priority |
-| --- | --- | --- |
-| Cursor settles | The "selected" rows above that are never fetched or stale | interactive |
-| Node expanded or database added | The matching rows above that are never fetched or stale, at once | interactive, unless a row says otherwise |
-| Tab opened, or a fetch lands and repaints | The rows that view now needs, at once | interactive |
-| Cursor moves on | Nothing. Queued work only the previous view was waiting on is dropped, except listings. A statement already running finishes. | n/a |
-| Sweep (countdown at zero) | Every stale scope in the tree, collapsed nodes included, plus the detail view's once the cursor has settled. A stale listing goes as its prime. Never opens a connection. | background |
-| `F5` | Everything the screen shows now, whatever its age: the detail view's scopes and the tree node's listing, for an object its parent category's, for a schema its database's. A listing goes per schema (`SHOW <type> IN SCHEMA`), not as a prime. Log scopes stay window passes. | interactive |
-| `full_refresh` (no key yet) | The detail view's log scopes, as full passes | interactive |
-| Warehouse switch | `USE WAREHOUSE` on each connection, then whatever failed on screen | visible |
-| Role switch | `USE ROLE` on each connection, then the Startup rows against that role's cache file. Clears the added databases. | interactive |
-| Statement fails with "does not exist" | The listing one level up, per schema rather than as a prime | same as the failed job |
-| Statement fails otherwise | Nothing at once. Retried one cache age later, or when the cursor comes back. | background, or interactive on return |
-| Prime reaches the chunk threshold (10 000 rows) | `SHOW <type> IN SCHEMA`, one per schema | same as the prime |
+The Journal column is the word the journal uses for the trigger (see
+[MANUAL.md](MANUAL.md#the-journal)). Its `queue` and `send` lines name it, so a
+journal can be read against this table and the one above.
+
+| Trigger | Journal | What gets sent | Priority |
+| --- | --- | --- | --- |
+| Connect | `startup` | The Startup rows above | interactive |
+| Reconnect (`, a c`) | `reconnect` | The Startup rows above, against the new identity's cache file | interactive |
+| Cursor settles | `cursor settled` | The "selected" rows above that are never fetched or stale | interactive |
+| Node expanded | `expanded` | The matching rows above that are never fetched or stale, at once | interactive; a schema's categories visible |
+| Database added | `database added` | The matching rows above that are never fetched or stale, at once | interactive, unless a row says otherwise |
+| Tab opened | `tab opened` | The rows that view now needs, at once | interactive |
+| A fetch lands and repaints | `repaint` | The rows that view now needs, at once | interactive |
+| Cursor moves on | `drop`, verbose only | Nothing. Queued work only the previous view was waiting on is dropped, except listings. A statement already running finishes. | n/a |
+| Sweep (countdown at zero) | `sweep` | Every stale scope in the tree, collapsed nodes included, plus the detail view's once the cursor has settled. A stale listing goes as its prime. Never opens a connection. | background |
+| `F5` | `f5` | Everything the screen shows now, whatever its age: the detail view's scopes and the tree node's listing, for an object its parent category's, for a schema its database's. A listing goes per schema (`SHOW <type> IN SCHEMA`), not as a prime. Log scopes stay window passes. | interactive |
+| `full_refresh` (no key yet) | `full refresh` | The detail view's log scopes, as full passes | interactive |
+| A picker opened with nothing cached | `picker` | Its list: `SHOW DATABASES`, `SHOW WAREHOUSES` or `SHOW ROLES` | interactive |
+| Warehouse switch | `warehouse switch` | `USE WAREHOUSE` on each connection, then whatever failed on screen | visible |
+| Role switch | `role switch` | `USE ROLE` on each connection, then the Startup rows against that role's cache file. Clears the added databases. | interactive |
+| Statement fails with "does not exist" | `missing object` | The listing one level up, per schema rather than as a prime | same as the failed job |
+| Statement fails otherwise | `fail` | Nothing at once. Retried one cache age later, or when the cursor comes back. | background, or interactive on return |
+| Prime reaches the chunk threshold (10 000 rows) | `prime fan-out` | `SHOW <type> IN SCHEMA`, one per schema | same as the prime |

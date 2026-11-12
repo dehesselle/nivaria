@@ -55,16 +55,19 @@ class RecordingFetch:
         self.cancelled: list[str] = []
         self.predicates: list = []
         self.busy: set[str] = set()
+        #: (scope key, reason) of every request, for the journal's tests.
+        self.reasons: list[tuple[str, str]] = []
 
-    def request(self, scope, priority) -> bool:
+    def request(self, scope, priority, *, reason, detail="") -> bool:
         self.requests.append((scope.key, int(priority)))
+        self.reasons.append((scope.key, str(reason)))
         # Queued work stays busy until a test lands it, as a real queue's
         # does: the countdown leaves busy scopes out, and a request that
         # never counted as busy would read as overdue on every tick.
         self.busy.add(scope.key)
         return True
 
-    def cancel_where(self, predicate) -> list:
+    def cancel_where(self, predicate, why="cancelled") -> list:
         self.cancelled.append("called")
         self.predicates.append(predicate)
         return []
@@ -1662,3 +1665,103 @@ async def test_the_object_chord_without_the_account_names_asks_for_the_setting(
         )
     assert opened == []
     assert notices and "Settings" in notices[0]
+
+
+# ------------------------------------------------------------------ journal
+
+
+def journal_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "nivaria.journal"]
+
+
+async def test_the_startup_lists_are_asked_for_as_startup(repo) -> None:
+    fetch = RecordingFetch()
+    async with Harness(repo, fetch).run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+    assert {
+        ("databases", "startup"),
+        ("warehouses", "startup"),
+        ("roles", "startup"),
+    } <= set(fetch.reasons)
+
+
+async def test_an_added_database_is_primed_as_database_added(repo, caplog) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.set_databases(["MYDB"])
+        await settle(pilot)
+    assert ("tables@MYDB", "database added") in fetch.reasons
+    assert "user  databases added: MYDB" in journal_lines(caplog)
+
+
+async def test_an_expanded_node_asks_as_expanded_and_is_journalled(
+    repo, caplog
+) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        tree = screen.query_one(ObjectTree)
+        tree.root.children[0].expand()
+        await pilot.pause()
+        tree.root.children[0].children[0].expand()
+        await settle(pilot)
+    assert ("tables@MYDB", "expanded") in fetch.reasons
+    assert "user  expanded schema MYDB.AAA" in journal_lines(caplog)
+
+
+async def test_f5_asks_for_everything_on_screen_as_f5(repo, caplog) -> None:
+    put_databases(repo, "MYDB")
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        tree = screen.query_one(ObjectTree)
+        tree.focus()
+        tree.move_cursor(tree.root.children[0])
+        await settle(pilot)
+        fetch.reasons.clear()
+        screen.action_refresh()
+        await pilot.pause()
+    assert sorted(fetch.reasons) == [("grants:MYDB", "f5"), ("schemas:MYDB", "f5")]
+    assert "user  pressed F5" in journal_lines(caplog)
+
+
+async def test_a_sweep_says_how_much_was_stale_and_asks_as_sweep(repo, caplog) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    config.set(CACHE_TTL, 60)
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await pilot.pause()
+        await drill_to_tables(app, pilot, screen)
+        await settle(pilot)
+        with repo._db.connect() as connection:
+            connection.execute(
+                "UPDATE cache_entry SET fetched_at = fetched_at - 999 WHERE scope = ?",
+                (objects_scope(ObjectType.TABLE, "MYDB", "AAA").key,),
+            )
+        fetch.reasons.clear()
+        fetch.busy.clear()
+        screen._sweep()
+        await pilot.pause()
+    assert ("tables@MYDB", "sweep") in fetch.reasons
+    assert any(
+        line.startswith("note  sweep: ") and line.endswith("cache age 1m")
+        for line in journal_lines(caplog)
+    )

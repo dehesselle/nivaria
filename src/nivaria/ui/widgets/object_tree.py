@@ -38,8 +38,10 @@ from textual.geometry import Region
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
+from nivaria import journal
 from nivaria.cache.repository import Repository
 from nivaria.format import format_count
+from nivaria.journal import Reason
 from nivaria.models import (
     ObjectRef,
     ObjectType,
@@ -295,14 +297,17 @@ class ObjectTree(Resizable, Tree[NodeData]):
         data = node.data
         if data is None:
             return
+        journal.user(f"expanded {_subject(data)}")
         if data.scope is not None:
-            self._ensure(data.scope, interactive=True)
+            self._ensure(data.scope, interactive=True, reason=Reason.EXPANDED)
         # A schema's categories each have their own scope, and all of them are
         # about to be on screen, so their counts need to be right too.
         if data.type is NodeType.SCHEMA:
             for child in node.children:
                 if child.data is not None and child.data.scope is not None:
-                    self._ensure(child.data.scope, interactive=False)
+                    self._ensure(
+                        child.data.scope, interactive=False, reason=Reason.EXPANDED
+                    )
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[NodeData]) -> None:
         if self.rebuilding:
@@ -336,7 +341,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
 
     # ------------------------------------------------------------ freshness
 
-    def _ensure(self, scope: Scope, *, interactive: bool) -> None:
+    def _ensure(self, scope: Scope, *, interactive: bool, reason: Reason) -> None:
         """Ask for `scope` if it is missing or stale.
 
         The TTL is read at the point of use rather than snapshotted at
@@ -344,8 +349,19 @@ class ObjectTree(Resizable, Tree[NodeData]):
         without a restart. The decision itself is `models.is_stale`, the same
         one the detail views make.
         """
-        if is_stale(self.repo.entry(scope).age(), config.get(CACHE_TTL)):
-            self.post_message(ScopeNeeded(scope, interactive=interactive))
+        entry = self.repo.entry(scope)
+        ttl = config.get(CACHE_TTL)
+        if is_stale(entry.age(), ttl):
+            self.post_message(
+                ScopeNeeded(
+                    scope,
+                    interactive=interactive,
+                    reason=reason,
+                    detail=journal.staleness(entry, ttl),
+                )
+            )
+        else:
+            journal.skipped(scope, reason, journal.staleness(entry, ttl))
 
     def visible_scopes(self) -> list[Scope]:
         """Scopes currently materialised, for the TTL sweep to consider.
@@ -513,7 +529,7 @@ class ObjectTree(Resizable, Tree[NodeData]):
             # root, unlike a collapsed schema's categories -- so its schema
             # list is requested right away rather than waiting for an expand.
             assert data.scope is not None
-            self._ensure(data.scope, interactive=True)
+            self._ensure(data.scope, interactive=True, reason=Reason.DATABASE_ADDED)
 
     def _forget(self, node: TreeNode[NodeData]) -> None:
         """Drop a subtree from the scope index before it is removed."""
@@ -633,3 +649,17 @@ class ObjectTree(Resizable, Tree[NodeData]):
                 return True
             node = node.parent
         return False
+
+
+def _subject(data: NodeData) -> str:
+    """What the journal calls a node."""
+    if data.ref is not None:
+        return journal.subject(data.ref)
+    match data.type:
+        case NodeType.DATABASE:
+            return journal.subject(data.key)
+        case NodeType.SCHEMA if data.database is not None:
+            return journal.subject(SchemaRef(database=data.database, name=data.key))
+        case NodeType.CATEGORY if data.scope is not None:
+            return journal.subject(data.scope)
+    return f"{data.type} {data.key}"

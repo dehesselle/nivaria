@@ -46,6 +46,7 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from nivaria.cache.repository import Repository
+from nivaria.journal import Reason
 from nivaria.models import SchemaRef, Scope, grants_scope, tag_references_scope
 from nivaria.ui.views.base import _ScopedView
 from nivaria.ui.views.grants import compose_grants, paint_grants
@@ -128,7 +129,7 @@ class _GrantsTagsView(_ScopedView):
         self, event: TabbedContent.TabActivated
     ) -> None:
         if event.pane.id == "tab-tags":
-            self.ensure(self.tags_scope())
+            self.ensure(self.tags_scope(), Reason.TAB_OPENED)
             self._update_tags()
 
 

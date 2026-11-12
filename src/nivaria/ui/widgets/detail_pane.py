@@ -19,11 +19,18 @@ answer reflects the cache when the cursor stopped.
 
 from __future__ import annotations
 
+from weakref import WeakSet
+
+from rich.text import Text
+from tcoda.widgets import TabbedContent
 from textual.containers import Vertical
+from textual.content import Content
 from textual.timer import Timer
 from textual.widgets import Static
 
+from nivaria import journal
 from nivaria.cache.repository import Repository
+from nivaria.journal import Reason
 from nivaria.models import ObjectRef, SchemaRef, Scope
 from nivaria.settings import CURSOR_SETTLE_MS, config
 from nivaria.ui.views.base import _ScopedView, category_view_for, view_for
@@ -41,10 +48,28 @@ class DetailPane(Vertical):
         #: schema or a database.
         self._shown: ObjectRef | Scope | SchemaRef | str | None = None
         self._settle_timer: Timer | None = None
+        #: Tab bars that have activated their first tab. Weak, because views
+        #: come and go with the cursor.
+        self._tabs_seen: WeakSet[TabbedContent] = WeakSet()
 
     @property
     def view(self) -> _ScopedView | None:
         return self._view
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        # Here rather than in each view, so every view's tabs are journalled
+        # the same way. Not stopped: the views' own handlers have seen it.
+        # The first activation of each tab bar is its mount, not the user.
+        if event.tabbed_content not in self._tabs_seen:
+            self._tabs_seen.add(event.tabbed_content)
+            return
+        if self._shown is None:
+            return
+        label = event.tab.label
+        name = label.plain if isinstance(label, Content | Text) else str(label)
+        journal.user(f"tab {name} on {journal.subject(self._shown)}")
 
     @property
     def ref(self) -> ObjectRef | None:
@@ -155,6 +180,8 @@ class DetailPane(Vertical):
         view.settled = delay <= 0
         if not view.settled:
             self._settle_timer = self.set_timer(delay / 1000, self._cursor_rested)
+        elif self._shown is not None:
+            journal.user(f"cursor rested on {journal.subject(self._shown)}")
 
     def _cursor_rested(self) -> None:
         """Ask what the view on screen needs, now that the cursor has stopped.
@@ -169,8 +196,10 @@ class DetailPane(Vertical):
         if view is None:
             return
         view.settled = True
+        if self._shown is not None:
+            journal.user(f"cursor rested on {journal.subject(self._shown)}")
         if view.is_mounted:
-            view.call_later(view.ensure_all)
+            view.call_later(view.ensure_all, Reason.CURSOR_SETTLED)
 
     def _show_placeholder(self, message: str) -> None:
         self._view = None

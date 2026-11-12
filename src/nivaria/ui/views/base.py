@@ -34,7 +34,9 @@ from textual.widget import Widget
 from textual.widgets import TextArea
 from textual.widgets.data_table import CellDoesNotExist
 
+from nivaria import journal
 from nivaria.cache.repository import Repository
+from nivaria.journal import Reason
 from nivaria.models import (
     CacheState,
     ObjectRef,
@@ -89,9 +91,14 @@ class _ScopedView(Widget):
             finally:
                 self._announcing = None
 
-    def repaint(self) -> None:
-        """Ask for whatever is missing or stale, and paint what is cached."""
-        self.ensure_all()
+    def repaint(self, reason: Reason = Reason.CURSOR_SETTLED) -> None:
+        """Ask for whatever is missing or stale, and paint what is cached.
+
+        `reason` is what the journal says asked, unless this repaint answers
+        a cache update. The default is a settled cursor: a view asks nothing
+        before that (`ensure`).
+        """
+        self.ensure_all(reason)
         self.update_content()
 
     def scopes(self) -> list[Scope]:
@@ -185,7 +192,7 @@ class _ScopedView(Widget):
 
     # ------------------------------------------------------------ freshness
 
-    def ensure(self, scope: Scope) -> None:
+    def ensure(self, scope: Scope, reason: Reason = Reason.CURSOR_SETTLED) -> None:
         """Ask for `scope` if it is missing or stale.
 
         Never for the scope whose own update is being painted, nor, from any
@@ -199,29 +206,41 @@ class _ScopedView(Widget):
         Nor while the cursor is still moving: `DetailPane` calls this for
         every scope once it has rested, so the answer reflects the cache then
         rather than when the cursor passed.
+
+        A repaint answering a cache update journals its requests as `repaint`
+        whatever `reason` says, and a fresh scope there not at all: every
+        landing page would add a line per scope on screen.
         """
         if not self.settled or scope == self._announcing:
             return
         entry = self.repo.entry(scope)
-        if self._announcing is not None and entry.state is CacheState.ERROR:
-            return
-        if is_stale(entry.age(), config.get(CACHE_TTL)):
+        from_update = self._announcing is not None
+        if from_update:
+            if entry.state is CacheState.ERROR:
+                return
+            reason = Reason.REPAINT
+        ttl = config.get(CACHE_TTL)
+        if is_stale(entry.age(), ttl):
             self.post_message(
                 ScopeNeeded(
                     scope,
                     interactive=True,
-                    from_update=self._announcing is not None,
+                    from_update=from_update,
+                    reason=reason,
+                    detail=journal.staleness(entry, ttl),
                 )
             )
+        elif not from_update:
+            journal.skipped(scope, reason, journal.staleness(entry, ttl))
 
-    def ensure_all(self) -> None:
+    def ensure_all(self, reason: Reason = Reason.CURSOR_SETTLED) -> None:
         """Ask for whatever this view reads that is missing or stale.
 
         `scopes()` holds the conditions a view asks under (tab shown, target
         table resolved), so no second list of them can drift.
         """
         for scope in self.scopes():
-            self.ensure(scope)
+            self.ensure(scope, reason)
 
 
 class ObjectView(_ScopedView):

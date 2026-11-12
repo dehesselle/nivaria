@@ -30,6 +30,7 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from nivaria.cache.repository import Repository
+from nivaria.journal import Reason
 from nivaria.models import (
     CacheState,
     ObjectRef,
@@ -370,10 +371,10 @@ class ColumnsView(ObjectView):
         self, event: TabbedContent.TabActivated
     ) -> None:
         if event.pane.id == "tab-grants":
-            self.ensure(self.grants_scope())
+            self.ensure(self.grants_scope(), Reason.TAB_OPENED)
             self._update_grants()
         elif event.pane.id == "tab-data":
-            self.ensure(self.data_scope())
+            self.ensure(self.data_scope(), Reason.TAB_OPENED)
             self._update_data()
 
 

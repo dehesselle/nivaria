@@ -118,6 +118,9 @@ that explains it in full.
     rested**, so moving through a list runs no query for the rows it passes.
     The sweep follows the same rule, because it asks the same question. See
     "Asking once the cursor has rested".
+18. **Every fetch request names the trigger that caused it**, and the job
+    carries it to every page, so the journal can say why each statement went
+    out. A test fails on a call site that names none. See "The journal".
 
 ---
 
@@ -2040,6 +2043,26 @@ guesswork with several workers. So `FetchService.request` takes a `Reason` and
 `FetchJob` carries it to every page, and the queue, send and done lines of one
 pass share it. The scope key ties them together: at most one job per scope is
 queued or running.
+
+**Every request names its trigger**, in the words of the Journal column of
+data-retrieval.md's Triggers table. `ScopeNeeded` carries it from the tree and
+the views to `MainScreen`, together with `journal.staleness`: why the scope
+was due, read off the same `Entry` the decision was made on. A view asks as
+`cursor settled` once the cursor rests, as `tab opened` from a tab handler, and
+as `repaint` from any repaint that answers a cache update, whatever its caller
+said. `MainScreen` names the rest (startup, sweep, `F5`, the pickers,
+switches), and adds the asked-for scope when it upgrades it to a prime.
+`reason` defaults to `unknown` rather than being required, because nothing
+type-checks the code and a missing argument would raise only on the path no
+test covers. Instead `tests/test_journal.py` reads every call to `request`,
+`_request` and `ScopeNeeded` in `src/` and fails on one that names no reason.
+
+**User lines are few on purpose.** The pane journals "cursor rested on ..."
+when the settle delay ends, the moment fetching may start, so arrowing through
+a list adds nothing. It journals a tab change once for every view, in
+`DetailPane`, skipping each tab bar's first activation, which is its mount. A
+fresh scope is a `skip` line only when the cursor rests or a tab opens, never
+from a repaint: each landing page would add one per scope on screen.
 
 **The fetch service writes the statement lines, not the gateway.** Only the
 service knows the reason, the page, and whether a log scope's pass is a window

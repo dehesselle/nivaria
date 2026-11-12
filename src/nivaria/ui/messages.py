@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from textual.message import Message
 
+from nivaria.journal import Reason
 from nivaria.models import ObjectRef, SchemaRef, Scope
 
 
@@ -35,14 +36,25 @@ class ScopeNeeded(Message):
     `from_update` marks one asked from a repaint answering a cache update, which
     never asks for a scope that failed. It may have failed by the time this
     message is handled, so `MainScreen.on_scope_needed` looks again.
+
+    `reason` and `detail` go to the journal: the trigger, and why the scope
+    was due.
     """
 
     def __init__(
-        self, scope: Scope, *, interactive: bool, from_update: bool = False
+        self,
+        scope: Scope,
+        *,
+        interactive: bool,
+        from_update: bool = False,
+        reason: Reason = Reason.UNKNOWN,
+        detail: str = "",
     ) -> None:
         self.scope = scope
         self.interactive = interactive
         self.from_update = from_update
+        self.reason = reason
+        self.detail = detail
         super().__init__()
 
 

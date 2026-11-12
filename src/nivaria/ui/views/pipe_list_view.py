@@ -45,6 +45,7 @@ from nivaria.format import (
     format_date,
     format_timestamp_minutes,
 )
+from nivaria.journal import Reason
 from nivaria.models import (
     CacheState,
     ObjectType,
@@ -248,7 +249,7 @@ class PipeListView(CategoryView):
         self, event: TabbedContent.TabActivated
     ) -> None:
         if event.pane.id == "tab-status":
-            self.repaint()
+            self.repaint(Reason.TAB_OPENED)
 
 
 def _pipe_status(status: str | None) -> dict[str, Any]:

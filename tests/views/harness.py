@@ -46,6 +46,8 @@ class Harness(App[None]):
         super().__init__()
         self._repo = repo
         self.needed: list[str] = []
+        #: (scope key, reason, detail) of every ScopeNeeded, for the journal.
+        self.asked: list[tuple[str, str, str]] = []
         self.opened: list[ObjectRef] = []
 
     def compose(self) -> ComposeResult:
@@ -53,6 +55,7 @@ class Harness(App[None]):
 
     def on_scope_needed(self, event: ScopeNeeded) -> None:
         self.needed.append(event.scope.key)
+        self.asked.append((event.scope.key, str(event.reason), event.detail))
 
     def on_object_opened(self, event: ObjectOpened) -> None:
         self.opened.append(event.ref)
