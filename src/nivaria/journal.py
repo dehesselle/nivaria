@@ -636,9 +636,14 @@ def done(scope: Scope, rows: int, seconds: float, extra: str = "") -> None:
 
 @_guarded
 def failed(scope: Scope, message: str) -> None:
-    """A statement or its write that failed."""
-    first = next((line for line in message.splitlines() if line.strip()), message)
-    _emit(logging.WARNING, "fail", text("{}  {}", scope, scrubbed(first)))
+    """A statement or its write that failed.
+
+    All of the message, on one line. Its first line alone is often only
+    Snowflake's code and "SQL compilation error:", and what went wrong
+    follows on the next.
+    """
+    joined = " ".join(line.strip() for line in message.splitlines() if line.strip())
+    _emit(logging.WARNING, "fail", text("{}  {}", scope, scrubbed(joined or message)))
 
 
 def _detail(detail: str | Text) -> str | Text:

@@ -169,6 +169,22 @@ def test_the_level_holds_whatever_the_root_logger_is_set_to(
     assert _lines(caplog) == ["user  pressed F5"]
 
 
+def test_a_failure_says_all_of_snowflakes_message_on_one_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    journal.failed(
+        columns_scope("DB", "S", "T"),
+        "002003 (42S02): SQL compilation error:\n"
+        "Table 'DB.S.T' does not exist or not authorized.\n",
+    )
+    assert _lines(caplog) == [
+        (
+            "fail  columns:DB.S.T  002003 (42S02): SQL compilation error: "
+            "Table 'DB.S.T' does not exist or not authorized."
+        )
+    ]
+
+
 def test_a_failing_line_never_raises(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
