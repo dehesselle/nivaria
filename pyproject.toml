@@ -44,6 +44,7 @@ asyncio_default_fixture_loop_scope = "function"
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-xdist>=3.8.0",
     "textual-dev>=1.8.0",
     "wonderwords>=3.0.1",
 ]

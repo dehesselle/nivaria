@@ -43,12 +43,21 @@ and `nivaria/snowflake` then shadows the Snowflake driver.
 ## Testing
 
 ```sh
-.venv/Scripts/python -m pytest
+.venv/Scripts/python -m pytest -n auto
 ```
 
 Run pytest through `python -m`: the tests import `tests.fakes`, which needs the
 repository root on `sys.path`.
 
+`-n auto` spreads the suite over one pytest-xdist worker per core, which takes
+a full run from minutes to seconds. It is not in `addopts` because starting the
+workers costs a few seconds, more than a single file takes on its own; leave it
+off when running one file or test. CI runs with `-n auto` too.
+
+- **Tests run in parallel and share nothing.** Every file a test writes lives
+  under its own `tmp_path`, which the autouse `isolated_paths` fixture in
+  `tests/conftest.py` sets up for all stores. Keep new state there or in the
+  process, never in a fixed path.
 - **No test may reach the network or import the Snowflake driver.** A fake
   gateway and a fake connection pool (`tests/fakes.py`) stand in, so the
   cache, scheduler and entire UI run offline.

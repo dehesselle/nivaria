@@ -68,7 +68,7 @@ jobs:
 
       # python -m puts the repository root on sys.path for tests.fakes
       - name: Run tests
-        run: uv run --locked python -m pytest
+        run: uv run --locked python -m pytest -n auto
 
   #-----------------------------------------------------------------------------
 
