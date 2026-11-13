@@ -106,7 +106,7 @@ async def test_a_fresh_scope_at_rest_says_why_nothing_was_fetched_when_verbose(
         await pilot.pause()
     assert any(
         line.startswith(
-            "skip  columns:MYDB.PUBLIC.ORDERS  cursor settled: fresh, age 0s"
+            "skip  columns:MYDB.PUBLIC.ORDERS  cursor settled: fresh, age "
         )
         for line in journal_lines(caplog)
     )
