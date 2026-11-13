@@ -471,14 +471,97 @@ async def test_only_materialised_scopes_are_offered_to_the_sweep(repo) -> None:
     app = Harness(repo)
     async with app.run_test(size=(80, 30)) as pilot:
         tree = await open_tree(app, pilot)
-        assert [s.key for s in tree.visible_scopes()] == ["schemas:MYDB"]
+        assert [s.key for s in tree.materialised_scopes()] == ["schemas:MYDB"]
         database_node(tree).expand()
         await pilot.pause()
         database_node(tree).children[0].expand()
         await pilot.pause()
-        scopes = {s.key for s in tree.visible_scopes()}
+        scopes = {s.key for s in tree.materialised_scopes()}
     assert "tables:MYDB.AAA" in scopes
     assert "tables:MYDB.BBB" not in scopes
+
+
+def drawn(tree: ObjectTree) -> set[str]:
+    return {scope.key for scope in tree.drawn_scopes()}
+
+
+async def test_a_collapsed_databases_schema_list_is_not_drawn(repo) -> None:
+    """Only its count is, in the label, and that does not count."""
+    put_schemas(repo, "MYDB", "AAA")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        assert drawn(tree) == set()
+
+        database_node(tree).expand()
+        await pilot.pause()
+        assert drawn(tree) == {"schemas:MYDB"}
+
+
+async def test_an_expanded_list_still_on_its_way_is_drawn(repo) -> None:
+    """No child rows yet, but they are about to appear right there."""
+    put_schemas(repo, "MYDB", "AAA")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        database_node(tree).expand()
+        await pilot.pause()
+        schema = database_node(tree).children[0]
+        schema.expand()
+        await pilot.pause()
+        assert drawn(tree) == {"schemas:MYDB"}
+
+        schema.children[0].expand()
+        await pilot.pause()
+        assert drawn(tree) == {"schemas:MYDB", "tables:MYDB.AAA"}
+
+
+async def test_a_collapsed_schemas_lists_are_not_drawn(repo) -> None:
+    """Collapsing keeps them materialised, for the sweep, but not on screen."""
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 30)) as pilot:
+        tree = await open_tree(app, pilot)
+        database_node(tree).expand()
+        await pilot.pause()
+        schema = database_node(tree).children[0]
+        schema.expand()
+        await pilot.pause()
+        schema.children[0].expand()
+        await pilot.pause()
+        schema.collapse()
+        await pilot.pause()
+        assert drawn(tree) == {"schemas:MYDB"}
+        assert "tables:MYDB.AAA" in {s.key for s in tree.materialised_scopes()}
+
+
+async def test_only_lists_with_rows_in_the_viewport_are_drawn(repo) -> None:
+    """Scrolled away is not on screen; a list whose own node scrolled away
+    but whose rows are still in view is."""
+    put_schemas(repo, "MYDB", "AAA", "BBB")
+    put_tables(repo, "MYDB", "AAA", *(f"T{index:02}" for index in range(40)))
+    put_tables(repo, "MYDB", "BBB", "X", "Y", "Z")
+    app = Harness(repo)
+    async with app.run_test(size=(80, 12)) as pilot:
+        tree = await open_tree(app, pilot)
+        database_node(tree).expand()
+        await pilot.pause()
+        for schema in database_node(tree).children:
+            schema.expand()
+            await pilot.pause()
+            schema.children[0].expand()
+            await pilot.pause()
+        assert drawn(tree) == {"schemas:MYDB", "tables:MYDB.AAA"}
+
+        # Lines 10 on are all AAA's tables, its schema row being line 1.
+        tree.scroll_to(y=10, animate=False)
+        await pilot.pause()
+        assert drawn(tree) == {"tables:MYDB.AAA"}
+
+        tree.scroll_end(animate=False)
+        await pilot.pause()
+        assert drawn(tree) == {"schemas:MYDB", "tables:MYDB.BBB"}
 
 
 # --------------------------------------------------------------- selection
@@ -606,7 +689,7 @@ async def test_switching_database_clears_the_tree(repo) -> None:
         database_node(tree).expand()
         await pilot.pause()
         assert keys(database_node(tree)) == ["ZZZ"]
-        assert [s.key for s in tree.visible_scopes()] == ["schemas:OTHER"]
+        assert [s.key for s in tree.materialised_scopes()] == ["schemas:OTHER"]
 
 
 async def test_an_object_name_with_markup_is_not_interpreted(repo) -> None:

@@ -1336,6 +1336,16 @@ screen for nearly two TTLs.
 Zero means requested, not fresh. Until a refresh lands, its data is up to one
 fetch's duration past its TTL, which is what the countdown's spinner shows.
 
+The **spinner** reads a narrower set than the watched set: only what is drawn.
+It means "wait for me if you want to be sure about what you see", so activity
+that cannot change a visible row must not start it. A tree scope counts when
+one of the rows it fills is in the viewport, or when its own node is drawn
+expanded, since a list still on its way has no rows yet
+(`ObjectTree.drawn_scopes`). The detail pane counts with every scope its view
+reads. So a collapsed node's scope never counts, though its count is in the
+label, and neither does anything scrolled away; the sweep still refreshes both.
+A prime counts through the drawn lists it fills (`models.filling_prime`).
+
 **Busy** scopes, queued or mid-fetch, either themselves or through the prime
 that fills them (`models.filling_prime`), are left out of both the countdown
 and the sweep. A busy scope's old `fetched_at` reads as overdue until its pass
@@ -1836,11 +1846,10 @@ say) is on top. Closing and reopening the dialog picks up whatever changed in
 between.
 
 That includes a dialog opened while a selected database is still being primed
-(see "Database priming"): its corpus stays partial until it is reopened. So the
-footer spinner stays on for those primes (`MainScreen._priming`), though they
-fill no watched scope, and a settled spinner means search is complete. The one
-exception is a prime over the chunk threshold: the spinner ends with the prime,
-not with the per-schema jobs it fans out to.
+(see "Database priming"): its corpus stays partial until it is reopened, and
+nothing says so. The footer spinner covers only what is drawn (see "The
+staleness sweep"), and a first prime fills nothing drawn until a schema is
+expanded.
 
 ### Matching and ranking
 

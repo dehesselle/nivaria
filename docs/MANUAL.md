@@ -176,9 +176,9 @@ it in the tree; opening a schema expands it there and shows its Grants and
 Tags.
 
 Search covers what is cached. The objects of a selected database are fetched
-in the background the first time, without browsing it; the footer spinner runs
-until that is done. A search opened before then shows what has arrived so far,
-and reopening it shows the rest. Column names are not searched.
+in the background the first time, without browsing it. A search opened before
+that is done shows what has arrived so far, with nothing to say so, and
+reopening it shows the rest. Column names are not searched.
 
 ## Detail views
 
@@ -387,7 +387,9 @@ shows all of them in full, plus whether the account identifier uses PrivateLink.
 - **Countdown**: seconds until the first thing on screen is due a refresh;
   nothing on screen goes stale before it reaches zero. It jumps as what is on
   screen changes, turns into a spinner while something on screen is being
-  refetched, and is blank when the cache age setting is `0`.
+  refetched, and is blank when the cache age setting is `0`. The spinner only
+  covers rows you can see, in the tree or the detail pane: once it is gone,
+  what you see is current. A count in a collapsed node's label does not count.
 - **Pool gauge**: `(in use / total)` connections.
 
 ## Settings

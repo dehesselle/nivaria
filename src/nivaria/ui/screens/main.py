@@ -203,22 +203,6 @@ class MainScreen(Screen):
 
     # -------------------------------------------------------------- status
 
-    def focused_scope(self) -> Scope:
-        """The scope backing whatever the cursor is on.
-
-        Walks up from the cursor, because an object leaf owns no scope of its
-        own -- the interesting age is that of the list it came from.
-        """
-        node = self.tree.cursor_node
-        while node is not None:
-            if node.data is not None and node.data.scope is not None:
-                return node.data.scope
-            node = node.parent
-        # Several databases can be selected, so none is preferred here. Only
-        # affects the brief pre-navigation window before the cursor lands
-        # anywhere.
-        return databases_scope()
-
     def _show_session(self) -> None:
         """Put the session's role, account and warehouse on the pane borders.
 
@@ -254,21 +238,11 @@ class MainScreen(Screen):
             gauge.pool_size = self.pool.size
             self._show_session()
 
-        # focused_scope() is kept in the mix so the spinner still reflects
-        # activity before anything is materialised in the tree or detail pane
-        # yet (e.g. the initial database-list fetch at startup); the other
-        # two are what let it also catch a busy detail-pane-only scope (e.g.
-        # a pipe's own load history) that the tree cursor's own scope knows
-        # nothing about.
-        watched = [
-            self.focused_scope(),
-            *self.tree.visible_scopes(),
-            *self.detail.scopes(),
-        ]
-        # The countdown runs its own spinner off this.
-        countdown.refreshing = self._priming() or any(
-            self._busy(scope) for scope in watched
-        )
+        # The countdown runs its own spinner off this: only what can change
+        # rows on screen, so a settled spinner means what you see is current.
+        # Narrower than what the sweep watches below.
+        drawn = [*self.tree.drawn_scopes(), *self.detail.scopes()]
+        countdown.refreshing = any(self._busy(scope) for scope in drawn)
 
         # Read at the point of use, so changing it in settings takes effect
         # without a restart.
@@ -296,21 +270,6 @@ class MainScreen(Screen):
         prime = filling_prime(scope)
         return self.fetch.is_busy(scope) or (
             prime is not None and self.fetch.is_busy(prime)
-        )
-
-    def _priming(self) -> bool:
-        """Whether a selected database's object lists are being fetched.
-
-        A prime for schemas nobody expanded fills no watched scope, so the
-        spinner would settle early, and a search opened then keeps a partial
-        corpus until it is reopened.
-        """
-        if self.fetch is None:
-            return False
-        return any(
-            self.fetch.is_busy(prime_scope(object_type, database))
-            for database in self.databases
-            for object_type in TREE_TYPES
         )
 
     def _prime_unfetched(self, database: str) -> None:
@@ -347,7 +306,10 @@ class MainScreen(Screen):
         """
         return [
             scope
-            for scope in [*self.tree.visible_scopes(), *self.detail.watched_scopes()]
+            for scope in [
+                *self.tree.materialised_scopes(),
+                *self.detail.watched_scopes(),
+            ]
             if not self._busy(scope)
         ]
 

@@ -327,80 +327,6 @@ async def test_the_gauge_follows_the_pool(repo) -> None:
 # ------------------------------------------------------------- the countdown
 
 
-async def test_the_countdown_describes_the_focused_scope(repo) -> None:
-    """Not a global timer: it has to change as you move around."""
-    put_schemas(repo, "MYDB", "AAA")
-    load(
-        repo,
-        objects_scope(ObjectType.TABLE, "MYDB", "AAA"),
-        [
-            {
-                "database_name": "MYDB",
-                "schema_name": "AAA",
-                "name": "ORDERS",
-                "kind": "TABLE",
-                "comment": "",
-            }
-        ],
-    )
-    app = Harness(repo, RecordingFetch())
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        screen.set_databases(["MYDB"])
-        await pilot.pause()
-        tree = screen.query_one(ObjectTree)
-        node = tree.root.children[0]
-        node.expand()
-        await pilot.pause()
-        tree.move_cursor(node)
-        await pilot.pause()
-        assert screen.focused_scope() == schemas_scope("MYDB")
-
-        schema = node.children[0]
-        schema.expand()
-        await pilot.pause()
-        tree.move_cursor(schema.children[0])
-        await pilot.pause()
-        assert screen.focused_scope() == objects_scope(ObjectType.TABLE, "MYDB", "AAA")
-
-
-async def test_an_object_leaf_reports_the_list_it_came_from(repo) -> None:
-    """A leaf owns no scope; the interesting age is that of its category."""
-    put_schemas(repo, "MYDB", "AAA")
-    load(
-        repo,
-        objects_scope(ObjectType.TABLE, "MYDB", "AAA"),
-        [
-            {
-                "database_name": "MYDB",
-                "schema_name": "AAA",
-                "name": "ORDERS",
-                "kind": "TABLE",
-                "comment": "",
-            }
-        ],
-    )
-    app = Harness(repo, RecordingFetch())
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        screen.set_databases(["MYDB"])
-        await pilot.pause()
-        tree = screen.query_one(ObjectTree)
-        tree.root.children[0].expand()
-        await pilot.pause()
-        schema = tree.root.children[0].children[0]
-        schema.expand()
-        await pilot.pause()
-        tables = schema.children[0]
-        tables.expand()
-        await pilot.pause()
-        tree.move_cursor(tables.children[0])
-        await pilot.pause()
-        assert screen.focused_scope() == objects_scope(ObjectType.TABLE, "MYDB", "AAA")
-
-
 async def countdown_after_tick(app, pilot) -> int:
     app.screen._tick()
     await pilot.pause()
@@ -636,21 +562,78 @@ async def test_a_ttl_of_zero_disables_the_countdown(repo) -> None:
         config.set(CACHE_TTL, CACHE_TTL.default)
 
 
-async def test_the_spinner_shows_while_the_focused_scope_is_busy(repo) -> None:
+# ---------------------------------------------------------------- spinner
+
+
+async def test_the_spinner_ignores_a_prime_that_fills_nothing_drawn(repo) -> None:
+    """The startup prime only feeds search and a collapsed database's label."""
+    put_schemas(repo, "MYDB", "AAA")
     fetch = RecordingFetch()
-    fetch.busy.add("databases")
     app = Harness(repo, fetch)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        app.screen._tick()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await settle(pilot)
+        assert "tables@MYDB" in fetch.busy
+        screen._tick()
+        assert not screen.countdown.refreshing
+
+
+async def test_the_spinner_shows_a_prime_filling_a_drawn_list(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    put_tables(repo, "MYDB", "AAA", "ORDERS")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        assert app.screen.query_one(Countdown).refreshing is True
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await settle(pilot)
+        database = screen.tree.root.children[0]
+        database.expand()
+        await pilot.pause()
+        schema = database.children[0]
+        schema.expand()
+        await pilot.pause()
+        fetch.busy = {"tables@MYDB"}
+        screen._tick()
+        assert not screen.countdown.refreshing
+
+        schema.children[0].expand()
+        await pilot.pause()
+        fetch.busy = {"tables@MYDB"}
+        screen._tick()
+        assert screen.countdown.refreshing
+
+
+async def test_the_spinner_shows_a_busy_detail_pane_scope(repo) -> None:
+    put_schemas(repo, "MYDB", "AAA")
+    fetch = RecordingFetch()
+    app = Harness(repo, fetch)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.set_databases(["MYDB"])
+        await settle(pilot)
+        tree = screen.tree
+        tree.move_cursor(tree.root.children[0])
+        await settle(pilot)
+        shown = screen.detail.scopes()
+        assert shown
+        fetch.busy = set()
+        screen._tick()
+        assert not screen.countdown.refreshing
+
+        fetch.busy = {shown[0].key}
+        screen._tick()
+        assert screen.countdown.refreshing
 
 
 # ------------------------------------------------------------------ sweep
 
 
-async def test_the_sweep_refreshes_only_stale_visible_scopes(repo) -> None:
+async def test_the_sweep_refreshes_only_stale_materialised_scopes(repo) -> None:
     put_schemas(repo, "MYDB", "AAA")
     config.set(CACHE_TTL, 60)
     try:

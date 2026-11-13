@@ -364,12 +364,38 @@ class ObjectTree(Resizable, Tree[NodeData]):
         else:
             journal.skipped(scope, reason, journal.staleness(entry, ttl))
 
-    def visible_scopes(self) -> list[Scope]:
+    def materialised_scopes(self) -> list[Scope]:
         """Scopes currently materialised, for the TTL sweep to consider.
 
-        Refreshing anything else would be work nobody is waiting on.
+        Collapsed and scrolled-away nodes included. Refreshing anything else
+        would be work nobody is waiting on.
         """
         return list(self._scoped)
+
+    def drawn_scopes(self) -> list[Scope]:
+        """Scopes whose rows can be on screen right now, for the spinner.
+
+        A scope fills its node's children, so it counts when one of those
+        children is drawn, or when its node is drawn expanded -- a list still
+        on its way, or empty, has no child rows yet. A collapsed node's scope
+        only feeds the count in its label, which does not count.
+
+        Walks the viewport the way Textual's own `Tree._refresh_node` does.
+        Not `TreeNode.line`: a collapsed subtree keeps its stale line numbers.
+        """
+        top = self.scroll_offset.y
+        drawn: dict[Scope, None] = {}
+        for line in range(top, top + self.size.height):
+            node = self.get_node_at_line(line)
+            if node is None:
+                break
+            data = node.data
+            if node.is_expanded and data is not None and data.scope is not None:
+                drawn[data.scope] = None
+            parent = node.parent.data if node.parent is not None else None
+            if parent is not None and parent.scope is not None:
+                drawn[parent.scope] = None
+        return list(drawn)
 
     # --------------------------------------------------------------- labels
 

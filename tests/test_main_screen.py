@@ -340,25 +340,6 @@ async def test_a_schema_list_that_landed_behind_a_dialog_is_primed_when_it_close
     assert STARTUP_PRIMES <= set(fetch.scopes)
 
 
-async def test_the_spinner_stays_on_while_a_startup_prime_runs(repo) -> None:
-    """Nothing watched depends on it, yet it decides what a search would find."""
-    put_schemas(repo, "MYDB", "AAA")
-    fetch = RecordingFetch()
-    app = Harness(repo, fetch)
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        screen.set_databases(["MYDB"])
-        await settle(pilot)
-        fetch.busy = {"tables@MYDB"}
-        screen._tick()
-        assert screen.countdown.refreshing
-
-        fetch.busy = set()
-        screen._tick()
-        assert not screen.countdown.refreshing
-
-
 async def test_an_expand_overtakes_a_queued_startup_prime(repo) -> None:
     """The prime is at background priority; expanding asks for it at a higher
     one, which FetchService.request lets supersede what is queued."""
