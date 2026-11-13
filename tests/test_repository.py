@@ -54,8 +54,8 @@ def table_rows(*names: str) -> list[dict]:
     ]
 
 
-def load(repo: Repository, scope, rows) -> None:
-    generation = repo.begin_pass(scope)
+def load(repo: Repository, scope, rows, at: float | None = None) -> None:
+    generation = repo.begin_pass(scope, at)
     repo.write_page(scope, generation, rows)
     repo.finish_pass(scope, generation)
 
@@ -420,9 +420,11 @@ def test_every_log_scope_ages_on_the_ordinary_cache_age(repo) -> None:
 
 
 def test_next_due_is_the_scope_closest_to_going_stale(repo) -> None:
-    load(repo, databases_scope(), db_rows("ACME"))
-    time.sleep(0.02)
-    load(repo, schemas_scope("MYDB"), [])
+    """The fetches lie far apart: each next_due reads the clock itself, so
+    a gap shorter than the time between the two calls could swap them."""
+    now = time.time()
+    load(repo, databases_scope(), db_rows("ACME"), at=now - 100)
+    load(repo, schemas_scope("MYDB"), [], at=now - 10)
     due = repo.next_due(900, [schemas_scope("MYDB"), databases_scope()])
     assert due < repo.next_due(900, [schemas_scope("MYDB")])
 
