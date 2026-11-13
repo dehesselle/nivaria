@@ -112,11 +112,12 @@ other.
 | `, a i` | Info: the session's account, role and warehouse in full, and whether it uses PrivateLink |
 | `, w w` | Open Workspaces in Snowsight, to write SQL |
 | `, w o` | Open the object under the cursor in Snowsight |
-| `, e` | Export the table on screen as a CSV (see "Exporting a table") |
+| `, e c` | Export the table on screen as a CSV file (see "Exporting a table") |
+| `, e j` | Copy the table on screen to the clipboard as Jira wiki markup |
 | `, s` | Settings |
 | `, ?` | About |
 
-`a` is the **Account** group and `w` the **Web** group.
+`a` is the **Account** group, `e` the **Export** group and `w` the **Web** group.
 
 Pause after any key and the Chord panel lists what can come next, and waits for
 you. While it is up, `backspace` steps back and `escape` closes it. Clicking an
@@ -252,12 +253,12 @@ in full, the exact row count or size in bytes.
 
 ## Exporting a table
 
-`, e` saves the table the Detail pane shows as a CSV in your Downloads folder, and
+`, e c` saves the table the Detail pane shows as a CSV in your Downloads folder, and
 a message says where. It works wherever the focus is. There is nothing to export on
 a SQL tab or from an empty table, and nivaria says so instead of writing a file.
 
-**The Data tab is not exported.** Its rows can be personal data, and nivaria does
-not write them to disk.
+**The Data tab is not exported.** Its rows can be personal data, and nivaria
+neither writes them to disk nor copies them.
 
 The file holds the rows nivaria has at that moment, in the order shown, and sends
 nothing to Snowflake. A cell shortened on screen is written with its raw value: a
@@ -285,6 +286,29 @@ The file is UTF-8 with a byte order mark, so that Excel reads it correctly, and 
 
 Values are written as they are. A spreadsheet evaluates a cell starting with `=`,
 and object names, comments and file names can start with one.
+
+### Jira wiki markup
+
+`, e j` puts the same table on the clipboard as a Jira wiki markup table, ready to
+paste into a Jira issue or comment. It holds the same rows and raw values as the
+CSV, and refuses the Data tab and an empty table the same way.
+
+A line above the table says what it is, the way the CSV's filename does: `tables
+in MYDB.PUBLIC`, `pipe history for MYDB.PUBLIC.LOAD_ORDERS`. Where the CSV's name
+would start with `partial_`, an italic line follows it:
+
+```text
+_Partial: may not hold every row Snowflake has._
+```
+
+Characters Jira reads as markup, such as `|`, `*`, `_`, `-` or `[`, are escaped,
+so a cell shows its value as it is. A value spanning several lines keeps its line
+breaks inside its cell.
+
+The copy goes through the terminal (OSC 52), which Windows Terminal and most
+other terminals support, but macOS Terminal does not. The terminal never reports
+back, so "Copied" means nivaria handed it over; if nothing arrives on the
+clipboard, the terminal did not take it.
 
 ## The journal
 

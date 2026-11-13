@@ -75,6 +75,9 @@ class _ScopedView(Widget):
     #: anything. `DetailPane` manages it; a view outside one is always settled.
     settled: bool = True
 
+    #: What joins an export's title to its target: `pipe history for ...`.
+    EXPORT_PREPOSITION: ClassVar[str] = "for"
+
     def __init__(self, repo: Repository) -> None:
         super().__init__()
         self.repo = repo
@@ -149,10 +152,19 @@ class _ScopedView(Widget):
     def export_subject(self) -> str:
         """What an export of the shown table is about, e.g.
         `pipe_history_DB.SCHEMA.MY_PIPE`."""
+        return "_".join(part for part in self._export_parts() if part)
+
+    def export_title(self) -> str:
+        """The same in words, e.g. `pipe history for DB.SCHEMA.MY_PIPE`."""
+        noun, tab, identity = self._export_parts()
+        what = " ".join(part for part in (noun, tab) if part)
+        return f"{what} {self.EXPORT_PREPOSITION} {identity}"
+
+    def _export_parts(self) -> tuple[str, str | None, str]:
         noun, identity = self.export_identity()
         tabs = self.query(TabbedContent)
         tab = tabs.first().active.removeprefix("tab-") if tabs else None
-        return "_".join(part for part in (noun, tab, identity) if part)
+        return noun, tab, identity
 
     def table_scopes(self) -> list[Scope]:
         """The scopes filling the shown table. Empty says its rows are never
@@ -307,6 +319,7 @@ class CategoryView(_ScopedView):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType]
+    EXPORT_PREPOSITION = "in"
 
     def __init__(self, repo: Repository, scope: Scope) -> None:
         super().__init__(repo)

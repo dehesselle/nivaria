@@ -2,10 +2,12 @@
 #
 # SPDX-License-Identifier: 0BSD
 
-"""What a CSV export is called and how its columns are separated.
+"""What a CSV export is called and how its columns are separated, and how a
+table reads as Jira wiki markup.
 
-Writing the file is `App.deliver_text`'s job, and choosing the table is the
-screen's. See docs/DESIGN.md "Exporting a table".
+Writing the file is `App.deliver_text`'s job, putting markup on the clipboard is
+`App.copy_to_clipboard`'s, and choosing the table is the screen's. See
+docs/DESIGN.md "Exporting a table".
 """
 
 from __future__ import annotations
@@ -30,6 +32,13 @@ _UNSAFE = re.compile(r"[^\w.-]")
 
 _LITERAL_DELIMITERS = {"comma": ",", "semicolon": ";"}
 
+#: What opens Jira markup or ends a cell, each escaped with a backslash.
+_JIRA_SPECIAL = frozenset("|{}[]*_+-^~?!#")
+
+#: Above a table that may not hold every row: the clipboard has no filename to
+#: carry a `partial_` prefix. In italics, which Jira writes as `_..._`.
+JIRA_PARTIAL_NOTE = "_Partial: may not hold every row Snowflake has._"
+
 
 def export_filename(subject: str, *, complete: bool, now: datetime) -> str:
     """The name of an export of `subject`.
@@ -41,6 +50,47 @@ def export_filename(subject: str, *, complete: bool, now: datetime) -> str:
     """
     prefix = "" if complete else "partial_"
     return f"{prefix}{_UNSAFE.sub('_', subject)}_{now:%Y%m%d-%H%M%S}.csv"
+
+
+def jira_table(rows: list[list[str]], *, title: str, complete: bool) -> str:
+    """`rows`, the header first, as a Jira wiki markup table under `title`.
+
+    The title says what was exported, as a filename would. It is followed by
+    `JIRA_PARTIAL_NOTE` unless the rows are known to be the whole result, for
+    the reason `export_filename` gives.
+    """
+    header, *body = rows
+    lines = [_jira_text(title)]
+    if not complete:
+        lines.append(JIRA_PARTIAL_NOTE)
+    lines.append("")
+    lines.append("||" + "||".join(map(_jira_cell, header)) + "||")
+    lines += ["|" + "|".join(map(_jira_cell, row)) + "|" for row in body]
+    return "\n".join(lines)
+
+
+def _jira_text(text: str) -> str:
+    """`text` as it reads literally in Jira, even inside a table cell.
+
+    A backslash becomes an entity: in front of another character it would
+    escape it, and doubled it is a line break.
+    """
+    text = "".join(_jira_char(char) for char in text)
+    return "\\\\ ".join(text.splitlines())
+
+
+def _jira_cell(text: str) -> str:
+    """`_jira_text`, but never empty: an empty cell would join its separators
+    into a header's `||`."""
+    text = _jira_text(text)
+    return text if text.strip() else " "
+
+
+def _jira_char(char: str) -> str:
+    # One character at a time, so that the entity's `#` is not escaped too.
+    if char == "\\":
+        return "&#92;"
+    return f"\\{char}" if char in _JIRA_SPECIAL else char
 
 
 def csv_delimiter() -> str:

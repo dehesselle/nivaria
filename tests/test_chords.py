@@ -85,7 +85,7 @@ async def test_the_panel_offers_the_documented_commands_at_the_top(repo) -> None
         assert entries(app) == [
             ("?", "About"),
             ("a", "+Account"),
-            ("e", "Export"),
+            ("e", "+Export"),
             ("s", "Settings"),
             ("w", "+Web"),
         ]
@@ -101,6 +101,19 @@ async def test_the_panel_offers_the_documented_commands_under_web(repo) -> None:
         assert entries(app) == [
             ("o", "Object under cursor"),
             ("w", "Workspaces"),
+        ]
+
+
+async def test_the_panel_offers_the_documented_commands_under_export(repo) -> None:
+    app = Harness(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.query_one(ChordViewer).delay = 0
+        await pilot.press("comma", "e")
+        await settle(pilot)
+        assert entries(app) == [
+            ("c", "CSV file"),
+            ("j", "Jira wiki markup"),
         ]
 
 

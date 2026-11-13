@@ -11,6 +11,7 @@ scope, and it is handed to the one widget that shows it rather than broadcast.
 
 from __future__ import annotations
 
+import csv
 import io
 from collections.abc import Callable, Sequence
 from datetime import datetime
@@ -19,7 +20,7 @@ from math import ceil
 from typing import ClassVar
 
 from tcoda.dialogs import AboutDialog, SettingsDialog
-from tcoda.widgets import ChordViewer, Countdown, Footer, LogViewer
+from tcoda.widgets import ChordViewer, Countdown, DataTable, Footer, LogViewer
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -28,7 +29,12 @@ from textual.screen import Screen
 
 from nivaria import journal
 from nivaria.cache.repository import Repository
-from nivaria.export import EXPORT_DELIVERY, csv_delimiter, export_filename
+from nivaria.export import (
+    EXPORT_DELIVERY,
+    csv_delimiter,
+    export_filename,
+    jira_table,
+)
 from nivaria.journal import Reason
 from nivaria.models import (
     CacheState,
@@ -81,6 +87,7 @@ from nivaria.ui.views import (  # noqa: F401 -- registers views
     view_list_view,
     view_view,
 )
+from nivaria.ui.views.base import _ScopedView
 from nivaria.ui.views.table_view import DATA_TABLE
 from nivaria.ui.widgets.detail_pane import DetailPane
 from nivaria.ui.widgets.object_tree import TREE_TYPES, NodeType, ObjectTree
@@ -130,7 +137,8 @@ class MainScreen(Screen):
         Binding("comma a i", "show_info", "Info", show=False),
         Binding("comma w w", "open_workspaces", "Workspaces", show=False),
         Binding("comma w o", "open_in_snowsight", "Object under cursor", show=False),
-        Binding("comma e", "export_table", "Export", show=False),
+        Binding("comma e c", "export_csv", "CSV file", show=False),
+        Binding("comma e j", "export_jira", "Jira wiki markup", show=False),
         Binding("comma s", "settings", "Settings", show=False),
         Binding("comma ?", "about", "About", show=False),
         Binding("slash", "search", "Search"),
@@ -139,7 +147,11 @@ class MainScreen(Screen):
 
     # "Web", not "Snowsight": a label starts with its key's letter, and `comma s`
     # is already Settings.
-    CHORD_GROUPS: ClassVar[dict[str, str]] = {"comma a": "Account", "comma w": "Web"}
+    CHORD_GROUPS: ClassVar[dict[str, str]] = {
+        "comma a": "Account",
+        "comma e": "Export",
+        "comma w": "Web",
+    }
 
     def __init__(
         self,
@@ -840,26 +852,34 @@ class MainScreen(Screen):
             self.repo.forget_coverage(scope)
             self._request(scope, Priority.INTERACTIVE, Reason.FULL_REFRESH)
 
-    def action_export_table(self) -> None:
+    def _table_to_export(self) -> tuple[_ScopedView, DataTable] | None:
+        """The view and the table on screen, or None after saying why there is
+        nothing to export."""
+        view = self.detail.view
+        table = view.shown_table() if view is not None else None
+        if table is not None and table.id == DATA_TABLE:
+            # docs/DESIGN.md "Table data never reaches the disk", and a paste
+            # into Jira sends them further still.
+            self.notify(
+                "The Data tab's rows are not exported: they can be personal data.",
+                severity="warning",
+                timeout=5,
+            )
+            return None
+        if view is None or table is None or not table.row_count:
+            self.notify("No rows here to export.", severity="warning", timeout=3)
+            return None
+        return view, table
+
+    def action_export_csv(self) -> None:
         """Save the table on screen as a CSV in the Downloads folder.
 
         `NivariaApp` reports how it went, since Textual delivers on a thread
         and tells only the app.
         """
-        view = self.detail.view
-        table = view.shown_table() if view is not None else None
-        if table is not None and table.id == DATA_TABLE:
-            # docs/DESIGN.md "Table data never reaches the disk": these rows can
-            # be personal data.
-            self.notify(
-                "The Data tab's rows are not exported: table data stays off the disk.",
-                severity="warning",
-                timeout=5,
-            )
+        if (found := self._table_to_export()) is None:
             return
-        if table is None or not table.row_count:
-            self.notify("No rows here to export.", severity="warning", timeout=3)
-            return
+        view, table = found
         self.app.deliver_text(
             io.StringIO(table.to_csv(delimiter=csv_delimiter(), tooltips=True)),
             save_filename=export_filename(
@@ -870,6 +890,29 @@ class MainScreen(Screen):
             # Excel only detects UTF-8 with a BOM.
             encoding="utf-8-sig",
             name=EXPORT_DELIVERY,
+        )
+
+    def action_export_jira(self) -> None:
+        """Put the table on screen on the clipboard as Jira wiki markup.
+
+        The rows are the CSV export's, read back, so that both hold the same
+        raw values. The terminal never says whether it took the copy, so
+        "Copied" is as far as this can know.
+        """
+        if (found := self._table_to_export()) is None:
+            return
+        view, table = found
+        rows = list(csv.reader(io.StringIO(table.to_csv(tooltips=True))))
+        self.app.copy_to_clipboard(
+            jira_table(
+                rows, title=view.export_title(), complete=view.holds_full_result()
+            )
+        )
+        count = len(rows) - 1
+        self.notify(
+            f"Copied {count} {'row' if count == 1 else 'rows'} as Jira wiki markup",
+            title="Export",
+            timeout=5,
         )
 
     def _snowsight_base(self) -> str | None:

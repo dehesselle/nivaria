@@ -1678,10 +1678,11 @@ is the exception, because one view can hold two: it is styled by the class
 
 ### Exporting a table
 
-`, e` hands the table on screen to tcoda's `DataTable.to_csv` and the result to
+`, e c` hands the table on screen to tcoda's `DataTable.to_csv` and the result to
 `App.deliver_text`, which saves to the Downloads folder. Every table is tcoda's for
-this reason. Only one table is on screen at a time, so the view finds it
-(`_ScopedView.shown_table`) rather than the focus deciding, and the chord works from
+this reason. `, e j` puts the same table on the clipboard as Jira wiki markup (see
+below). Only one table is on screen at a time, so the view finds it
+(`_ScopedView.shown_table`) rather than the focus deciding, and the chords work from
 the tree too. An export runs no statement; like everything else on screen, it reads
 what is cached.
 
@@ -1701,7 +1702,9 @@ what is cached.
   `HoverTooltipTable` lookup, so they cannot disagree.
 - **The Data tab is refused**, by the screen rather than by leaving its grid out of
   tcoda's `DataTable`, so that the user is told why. Principle 8 is about rows that
-  can be personal data, and a keystroke does not change what they are. Its cells are
+  can be personal data, and a keystroke does not change what they are. The Jira
+  copy refuses it too: the clipboard is not the disk, but a paste into Jira sends
+  the rows further still. Its cells are
   also cut for display and hold no raw value to fall back on.
 - **A timestamp in every name.** `deliver_text` opens the path with mode `w`, so a
   repeated name would silently replace an earlier export. It also records what the
@@ -1716,6 +1719,26 @@ what is cached.
 
 Formulas are not escaped. That would change the data, and would have to tell a
 negative number from an expression, so the manual warns instead.
+
+The Jira markup (`export.jira_table`) follows the same rules, with these
+differences:
+
+- **Its rows are the CSV's, read back** with `csv.reader`, so both outputs hold
+  the same raw values and the same row and column order. tcoda has no row-level
+  export, and this keeps it out of a tcoda release.
+- **A title line and an italic note stand in for the filename**, as the clipboard
+  has none. The title (`_ScopedView.export_title`) is built from the same parts as
+  the filename, joined with "for" on an object's view and "in" on a list:
+  `pipe history for DB.SCHEMA.PIPE`, `tables in DB.SCHEMA`. The note stands in for
+  `partial_`: the warning has to travel into Jira with the rows.
+- **Every cell is escaped** so that it shows its value literally. The characters
+  that open markup or end a cell get a backslash; a backslash itself becomes
+  `&#92;`, because it would escape the next character and doubled it is a line
+  break. Line breaks become Jira's `\\`, and an empty cell a space, since `||`
+  would be a header separator.
+- **The toast is on the screen.** `App.copy_to_clipboard` is synchronous and
+  writes an OSC 52 sequence, which no terminal acknowledges, so there is no later
+  outcome to wait for, and "Copied" is all nivaria can know.
 
 ### Column headers mirror Snowflake
 

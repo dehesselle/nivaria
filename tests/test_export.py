@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: 0BSD
 
-"""The `, e` chord: which table it saves, under what name, holding what.
+"""The `, e` chords: which table they export, under what name, holding what.
 
-`DataTable.to_csv` and `App.deliver_text` are tcoda's and Textual's. What is
-nivaria's is choosing the table, naming the file honestly, keeping the raw value
-behind every shortened cell, and saying how it went.
+`DataTable.to_csv`, `App.deliver_text` and `App.copy_to_clipboard` are tcoda's
+and Textual's. What is nivaria's is choosing the table, naming the file
+honestly, keeping the raw value behind every shortened cell, writing it as Jira
+markup, and saying how it went.
 """
 
 from __future__ import annotations
@@ -35,7 +36,12 @@ import nivaria.export as export_module
 import nivaria.ui.app as app_module
 from nivaria.cache.db import Database
 from nivaria.cache.repository import Repository
-from nivaria.export import EXPORT_DELIVERY, csv_delimiter, export_filename
+from nivaria.export import (
+    EXPORT_DELIVERY,
+    csv_delimiter,
+    export_filename,
+    jira_table,
+)
 from nivaria.format import format_timestamp_full
 from nivaria.models import (
     ObjectRef,
@@ -124,7 +130,7 @@ def downloads(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 async def press_export(app: ExportApp, pilot) -> None:
-    await pilot.press("comma", "e")
+    await pilot.press("comma", "e", "c")
     await asyncio.wait_for(app.delivered.wait(), timeout=5)
 
 
@@ -396,6 +402,46 @@ async def test_each_table_exports_under_a_name_saying_what_it_is(
     assert len(rows) > 1
 
 
+#: What a Jira copy's first line says about each case's table, before escaping.
+_TITLES = {
+    "tables": "tables in MYDB.PUBLIC",
+    "views": "views in MYDB.PUBLIC",
+    "stages": "stages in MYDB.PUBLIC",
+    "tasks": "tasks in MYDB.PUBLIC",
+    "pipes status": "pipes status in MYDB.PUBLIC",
+    "pipes activity": "pipes activity in MYDB.PUBLIC",
+    "table columns": "table columns for MYDB.PUBLIC.ORDERS",
+    "view columns": "view columns for MYDB.PUBLIC.REPORT",
+    "table grants": "table grants for MYDB.PUBLIC.ORDERS",
+    "schema grants": "schema grants for MYDB.PUBLIC",
+    "schema tags": "schema tags for MYDB.PUBLIC",
+    "database grants": "database grants for MYDB",
+    "database tags": "database tags for MYDB",
+    "pipe history": "pipe history for MYDB.PUBLIC.LOAD_ORDERS",
+    "task history": "task history for MYDB.PUBLIC.NIGHTLY",
+}
+
+
+def test_every_case_has_a_title() -> None:
+    assert _TITLES.keys() == _CASES.keys()
+
+
+@pytest.mark.parametrize(("case_id", "title"), _TITLES.items(), ids=_TITLES.keys())
+async def test_each_jira_copy_says_what_it_is(repo, case_id: str, title: str) -> None:
+    case = _CASES[case_id]
+    case.seed(repo)
+    app = ExportApp(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        case.show(app.pane)
+        await settle(pilot)
+        if case.tab is not None:
+            await show_tab(app, pilot, case.tab)
+        await pilot.press("comma", "e", "j")
+        await settle(pilot)
+        assert app.clipboard.splitlines()[0] == export_module._jira_text(title)
+
+
 async def test_the_table_on_screen_exports_with_the_focus_on_the_tree(
     repo, downloads
 ) -> None:
@@ -479,6 +525,35 @@ async def test_a_list_with_a_capped_source_stays_partial(repo, downloads) -> Non
     assert await _export_tables(repo, downloads) == "partial_tables_MYDB.PUBLIC"
 
 
+async def _copy_tables(repo: Repository) -> str:
+    put_table(repo, "ORDERS")
+    app = ExportApp(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.pane.show_category(_TABLES)
+        await settle(pilot)
+        await pilot.press("comma", "e", "j")
+        await settle(pilot)
+        return app.clipboard
+
+
+async def test_a_complete_jira_copy_is_a_title_and_the_table(repo) -> None:
+    put_table_stats(repo, "ORDERS")
+    title, blank, header, *_ = (await _copy_tables(repo)).splitlines()
+    assert title == "tables in MYDB.PUBLIC"
+    assert blank == ""
+    assert header.startswith("||Name||Rows||")
+
+
+async def test_a_partial_jira_copy_says_so_in_italics_under_the_title(repo) -> None:
+    load(repo, table_stats_scope("MYDB", "PUBLIC"), [], truncated=True)
+    title, note, blank, header, *_ = (await _copy_tables(repo)).splitlines()
+    assert title == "tables in MYDB.PUBLIC"
+    assert note == "_Partial: may not hold every row Snowflake has._"
+    assert blank == ""
+    assert header.startswith("||Name||")
+
+
 async def test_tags_failing_says_nothing_about_a_tables_grants(repo, downloads) -> None:
     """Without a warehouse the tags query fails; SHOW GRANTS needs none."""
     put_object_grant(repo, "ORDERS")
@@ -541,6 +616,26 @@ async def test_a_list_exports_exact_rows_and_size_and_full_timestamps(
     assert column(rows, "Size") == ["5000000"]
     for header in ("Created", "Last DDL", "Last Altered"):
         assert column(rows, header) == [format_timestamp_full(raw)]
+
+
+async def test_a_jira_copy_holds_the_csvs_raw_values(repo) -> None:
+    raw = "2026-03-01 08:15:30"
+    put_table(repo, "ORDERS", rows=1234567, bytes=5000000, created_on=raw)
+    put_table_stats(repo, "ORDERS", LAST_DDL=raw, LAST_ALTERED=raw)
+    app = ExportApp(repo)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.pane.show_category(_TABLES)
+        await settle(pilot)
+        await pilot.press("comma", "e", "j")
+        await settle(pilot)
+        table = app.pane.view.shown_table()
+        csv_rows = list(csv.reader(io.StringIO(table.to_csv(tooltips=True))))
+        assert app.clipboard == jira_table(
+            csv_rows, title="tables in MYDB.PUBLIC", complete=True
+        )
+        assert "|1234567|5000000|" in app.clipboard
+        assert ("information", "Copied 1 row as Jira wiki markup") in toasts(app)
 
 
 async def test_a_value_the_source_does_not_have_exports_blank(repo, downloads) -> None:
@@ -692,13 +787,16 @@ def toasts(app: App[None]) -> list[tuple[str, str]]:
 
 
 async def _refuses(app: ExportApp, pilot, downloads: Path, message: str) -> None:
-    await pilot.press("comma", "e")
-    await settle(pilot)
+    """Both chords: no file, nothing copied, and each says why."""
+    for chord in ("c", "j"):
+        await pilot.press("comma", "e", chord)
+        await settle(pilot)
     assert list(downloads.iterdir()) == []
-    assert ("warning", message) in toasts(app)
+    assert app.clipboard == ""
+    assert toasts(app).count(("warning", message)) == 2
 
 
-_DATA_REFUSAL = "The Data tab's rows are not exported: table data stays off the disk."
+_DATA_REFUSAL = "The Data tab's rows are not exported: they can be personal data."
 _NO_ROWS = "No rows here to export."
 
 
@@ -900,3 +998,51 @@ def test_looking_up_the_locale_leaves_the_process_as_it_was() -> None:
     before = locale.setlocale(locale.LC_NUMERIC)
     export_module._locale_list_separator()
     assert locale.setlocale(locale.LC_NUMERIC) == before
+
+
+# ------------------------------------------------------------- Jira markup
+
+
+def _jira(rows: list[list[str]], *, title: str = "t", complete: bool = True) -> str:
+    return jira_table(rows, title=title, complete=complete)
+
+
+def test_the_header_row_uses_double_bars_and_the_rest_single() -> None:
+    assert _jira([["A", "B"], ["1", "2"], ["3", "4"]]) == (
+        "t\n\n||A||B||\n|1|2|\n|3|4|"
+    )
+
+
+def test_a_partial_table_has_an_italic_note_under_its_title() -> None:
+    assert _jira([["A"], ["1"]], complete=False) == (
+        "t\n_Partial: may not hold every row Snowflake has._\n\n||A||\n|1|"
+    )
+
+
+def test_the_title_is_escaped_like_a_cell() -> None:
+    assert _jira([["A"], ["1"]], title="pipe history for DB.S.MY_PIPE").startswith(
+        "pipe history for DB.S.MY\\_PIPE\n"
+    )
+
+
+def test_a_bar_cannot_end_a_cell() -> None:
+    assert _jira([["A"], ["x|y"]]).endswith(r"|x\|y|")
+
+
+@pytest.mark.parametrize("char", list("{}[]*_+-^~?!#"))
+def test_markup_characters_are_escaped(char: str) -> None:
+    assert _jira([["A"], [f"a{char}b"]]).endswith(rf"|a\{char}b|")
+
+
+def test_a_backslash_neither_escapes_nor_breaks_a_line() -> None:
+    assert _jira([["A"], [r"C:\|x"]]).endswith(r"|C:&#92;\|x|")
+
+
+@pytest.mark.parametrize("value", ["one\ntwo", "one\r\ntwo", "one\rtwo"])
+def test_a_multi_line_value_stays_in_its_cell(value: str) -> None:
+    assert _jira([["A"], [value]]).endswith(r"|one\\ two|")
+
+
+@pytest.mark.parametrize("value", ["", "  "])
+def test_an_empty_cell_does_not_become_a_header_separator(value: str) -> None:
+    assert _jira([["", "A"], [value, "1"]]).endswith("|| ||A||\n| |1|")
